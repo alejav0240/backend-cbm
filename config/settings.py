@@ -31,7 +31,17 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
+    "unfold",  # before django.contrib.admin
+    "unfold.contrib.filters",  # optional, if special filters are needed
+    "unfold.contrib.forms",  # optional, if special form elements are needed
+    "unfold.contrib.inlines",  # optional, if special inlines are needed
+    "unfold.contrib.import_export",  # optional, if django-import-export package is used
+    "unfold.contrib.guardian",  # optional, if django-guardian package is used
+    "unfold.contrib.simple_history",  # optional, if django-simple-history package is used
+    "unfold.contrib.location_field",  # optional, if django-location-field package is used
+    "unfold.contrib.constance",  # optional, if django-constance package is used
+
+    "django.contrib.admin",  # required
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -44,6 +54,12 @@ INSTALLED_APPS = [
 
     # propias
     'users',
+    'institutions',
+    'clinical',
+    'therapeutic_sessions',
+    'evaluations',
+    'finance',
+    'marketing'
 ]
 
 MIDDLEWARE = [
@@ -125,6 +141,9 @@ JWT_EXPIRATION_DELTA = datetime.timedelta(minutes=5)
 JWT_REFRESH_EXPIRATION_DELTA = datetime.timedelta(days=7)
 
 AUTH_USER_MODEL = "users.User"
+
+# settings.py
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/

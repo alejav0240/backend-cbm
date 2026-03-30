@@ -1,0 +1,386 @@
+Project musicoterapia {
+  database_type: "PostgreSQL"
+}
+
+//////////////////////////////////////////////////////
+// USERS
+//////////////////////////////////////////////////////
+
+Table users {
+  id integer [pk]
+  username varchar
+  password varchar
+  email varchar
+  first_name varchar
+  last_name varchar
+  ci varchar
+  phone varchar
+  role varchar
+  is_active boolean
+  created_at datetime
+  updated_at datetime
+}
+
+//////////////////////////////////////////////////////
+// PATIENTS
+//////////////////////////////////////////////////////
+
+Table patients {
+  id integer [pk]
+  tutor_id integer [ref: > users.id]
+
+  first_name varchar
+  last_name varchar
+  identification varchar
+  birth_date date
+  image_url varchar
+
+  diagnosis text
+  treatment_type varchar
+  session_frequency integer
+
+  physical_state text
+  emotional_state text
+  cognitive_state text
+  social_state text
+
+  general_objectives text
+  notes text
+
+  status varchar
+
+  created_at datetime
+}
+
+//////////////////////////////////////////////////////
+// INTERVENTION PLAN
+//////////////////////////////////////////////////////
+
+Table intervention_plans {
+  id integer [pk]
+  patient_id integer [ref: > patients.id]
+
+  main_objective text
+  start_date date
+  end_date date
+  progress_percent integer
+}
+
+Table plan_steps {
+  id integer [pk]
+  plan_id integer [ref: > intervention_plans.id]
+
+  moment varchar
+  focus text
+  musical_resources text
+  mlt_method varchar
+  duration_minutes integer
+}
+
+//////////////////////////////////////////////////////
+// SESSIONS
+//////////////////////////////////////////////////////
+
+Table sessions {
+  id integer [pk]
+
+  patient_id integer [ref: > patients.id]
+  therapist_id integer [ref: > users.id]
+
+  session_date datetime
+  duration_minutes integer
+
+  session_type varchar
+  cycle_number integer
+
+  notes text
+
+  video_url varchar
+  audio_url varchar
+
+  payment_status varchar
+
+  created_at datetime
+}
+
+//////////////////////////////////////////////////////
+// RESOURCES
+//////////////////////////////////////////////////////
+
+Table digital_resources {
+  id integer [pk]
+
+  title varchar
+  type varchar
+  category varchar
+  url varchar
+}
+
+Table session_resources {
+  id integer [pk]
+
+  session_id integer [ref: > sessions.id]
+  resource_id integer [ref: > digital_resources.id]
+}
+
+//////////////////////////////////////////////////////
+// INVENTORY
+//////////////////////////////////////////////////////
+
+Table inventory_items {
+  id integer [pk]
+
+  name varchar
+  type varchar
+  condition varchar
+  status varchar
+}
+
+Table session_inventory {
+  id integer [pk]
+
+  session_id integer [ref: > sessions.id]
+  item_id integer [ref: > inventory_items.id]
+}
+
+//////////////////////////////////////////////////////
+// SCALES
+//////////////////////////////////////////////////////
+
+Table scales {
+  id integer [pk]
+
+  name varchar
+  description text
+  scale_type varchar
+}
+
+Table subscales {
+  id integer [pk]
+  scale_id integer [ref: > scales.id]
+  name varchar
+}
+
+Table scale_items {
+  id integer [pk]
+  subscale_id integer [ref: > subscales.id]
+  question text
+  max_score integer
+}
+
+Table scale_values {
+  id integer [pk]
+  scale_id integer [ref: > scales.id]
+  label varchar
+  value integer
+}
+
+//////////////////////////////////////////////////////
+// EVALUATIONS
+//////////////////////////////////////////////////////
+
+Table evaluations {
+  id integer [pk]
+
+  session_id integer [ref: > sessions.id]
+  scale_id integer [ref: > scales.id]
+
+  total_score float
+  created_at datetime
+}
+
+Table evaluation_responses {
+  id integer [pk]
+
+  evaluation_id integer [ref: > evaluations.id]
+  item_id integer [ref: > scale_items.id]
+
+  value integer
+}
+
+//////////////////////////////////////////////////////
+// FORMS
+//////////////////////////////////////////////////////
+
+Table forms {
+  id integer [pk]
+  name varchar
+  description text
+}
+
+Table form_questions {
+  id integer [pk]
+
+  form_id integer [ref: > forms.id]
+  question text
+  question_type varchar
+}
+
+Table form_assignments {
+  id integer [pk]
+
+  form_id integer [ref: > forms.id]
+  user_id integer [ref: > users.id]
+  patient_id integer [ref: > patients.id]
+}
+
+Table form_responses {
+  id integer [pk]
+
+  assignment_id integer [ref: > form_assignments.id]
+  question_id integer [ref: > form_questions.id]
+
+  response text
+}
+
+//////////////////////////////////////////////////////
+// PAYMENTS
+//////////////////////////////////////////////////////
+
+Table payments {
+  id integer [pk]
+
+  patient_id integer [ref: > patients.id]
+  session_id integer [ref: > sessions.id]
+
+  amount decimal
+  payment_method varchar
+  payment_status varchar
+
+  payment_date datetime
+}
+
+Table discounts {
+  id integer [pk]
+
+  name varchar
+  type varchar
+  value decimal
+}
+
+Table payment_discounts {
+  id integer [pk]
+
+  payment_id integer [ref: > payments.id]
+  discount_id integer [ref: > discounts.id]
+}
+
+Table expenses {
+  id integer [pk]
+
+  category varchar
+  description text
+  amount decimal
+  expense_date datetime
+}
+
+//////////////////////////////////////////////////////
+// AI ANALYSIS
+//////////////////////////////////////////////////////
+
+Table ai_analysis {
+  id integer [pk]
+
+  session_id integer [ref: > sessions.id]
+
+  stereotypy_score float
+  aggression_score float
+  passivity_score float
+
+  vocal_exploration float
+  social_interaction float
+  eye_contact float
+  body_movement float
+  rhythmic_exploration float
+}
+
+//////////////////////////////////////////////////////
+// MARKETING
+//////////////////////////////////////////////////////
+
+Table marketing_campaigns {
+  id integer [pk]
+
+  platform varchar
+  budget decimal
+  conversions integer
+}
+
+Table leads {
+  id integer [pk]
+
+  name varchar
+  phone varchar
+  email varchar
+
+  source varchar
+  status varchar
+}
+
+//////////////////////////////////////////////////////
+// COURSES
+//////////////////////////////////////////////////////
+
+Table courses {
+  id integer [pk]
+
+  name varchar
+  price decimal
+  description text
+}
+
+Table course_enrollments {
+  id integer [pk]
+
+  course_id integer [ref: > courses.id]
+  user_id integer [ref: > users.id]
+
+  payment_status varchar
+}
+
+//////////////////////////////////////////////////////
+// INSTITUTIONS
+//////////////////////////////////////////////////////
+
+Table institutions {
+  id integer [pk]
+
+  name varchar
+  contact_email varchar
+  phone varchar
+}
+
+Table institution_groups {
+  id integer [pk]
+
+  institution_id integer [ref: > institutions.id]
+  name varchar
+}
+
+//////////////////////////////////////////////////////
+// REPORTS
+//////////////////////////////////////////////////////
+
+Table therapy_reports {
+  id integer [pk]
+
+  patient_id integer [ref: > patients.id]
+  generated_by integer [ref: > users.id]
+
+  report_url varchar
+  created_at datetime
+}
+
+//////////////////////////////////////////////////////
+// NOTIFICATIONS
+//////////////////////////////////////////////////////
+
+Table notifications {
+  id integer [pk]
+
+  user_id integer [ref: > users.id]
+
+  message text
+  is_read boolean
+  created_at datetime
+}
