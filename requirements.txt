@@ -24,6 +24,7 @@ django-storages>=1.14
 # Utils
 django-filter>=24.2
 django-extensions>=3.2
+pillow>=12.1.0
 
 # Production
 # gunicorn>=21.2

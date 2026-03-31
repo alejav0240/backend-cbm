@@ -61,11 +61,15 @@ class Payment(models.Model):
 
     @property
     def total_amount(self):
-        return self.price_per_session * self.sessions_count
+        if self.price_per_session and self.sessions_count:
+            return self.price_per_session * self.sessions_count
+        return 0
 
     @property
     def debt(self):
-        return self.total_amount - self.amount_paid
+        if self.amount_paid is not None:
+            return self.total_amount - self.amount_paid
+        return self.total_amount
 
     def __str__(self):
         return f"Pago {self.patient} — {self.payment_date.date()} ({self.get_payment_status_display()})"
