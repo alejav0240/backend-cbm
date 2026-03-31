@@ -57,9 +57,9 @@ INSTALLED_APPS = [
     'institutions',
     'clinical',
     'therapeutic_sessions',
-    'evaluations',
     'finance',
-    'marketing'
+    'marketing',
+    'evaluations',
 ]
 
 MIDDLEWARE = [

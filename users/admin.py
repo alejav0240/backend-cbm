@@ -1,9 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
+from django.urls import reverse
+from django.utils.html import format_html
 
 from unfold.admin import ModelAdmin, TabularInline
-from unfold.admin import ModelAdmin
 from unfold.forms import UserChangeForm, UserCreationForm
 from unfold.decorators import display
 
@@ -18,7 +19,7 @@ class NotificationInline(TabularInline):
     show_change_link = False
 
 @admin.register(User)
-class UserAdmin(ModelAdmin):
+class UserAdmin(BaseUserAdmin,ModelAdmin):
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
@@ -26,6 +27,20 @@ class UserAdmin(ModelAdmin):
 
     form = UserChangeForm
     add_form = UserCreationForm
+
+    add_fieldsets = (
+        (None, {
+            "classes": ("wide",),
+            "fields": (
+                "username",
+                "password",
+                "first_name",
+                "last_name",
+                "ci",
+                "celular",
+                "email",),
+        }),
+    )
 
     list_display = (
         "username",
@@ -43,6 +58,8 @@ class UserAdmin(ModelAdmin):
     search_fields = ("username", "email", "first_name", "last_name", "ci")
     ordering = ("last_name", "first_name")
     inlines = (NotificationInline,)
+
+    #actions_row = ("change_password_row",)
 
     fieldsets = (
         (
@@ -94,7 +111,15 @@ class UserAdmin(ModelAdmin):
             instance.username,
         ]
 
-
+    """    def change_password_row(self, obj):
+            # Genera el link a la página de cambio de password nativa de Django
+            url = reverse("admin:auth_user_password_change", args=[obj.pk])
+            return {
+                "label": "Cambiar Contraseña",
+                "icon": "password",  # Icono de Unfold/Tailwind
+                "path": url,
+            }
+    """
     @display(description="Nombre completo")
     def full_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
