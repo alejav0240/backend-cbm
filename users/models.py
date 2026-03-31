@@ -7,8 +7,8 @@ class User(AbstractUser):
     celular = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, default="active")
     visibility = models.CharField(max_length=20, default="public")
-    foto = models.CharField(max_length=100, blank=True)
-    cv = models.CharField(max_length=100, blank=True)
+    foto = models.ImageField(upload_to="users/fotos/", blank=True, null=True)
+    cv = models.FileField(upload_to="users/cv/", blank=True, null=True)
 
     class Meta:
         db_table = "users"

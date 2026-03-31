@@ -125,7 +125,6 @@ class ScaleEvaluationAdmin(ModelAdmin):
                     ("patient", "scale"),
                     ("evaluator", "evaluated_at"),
                     "session",
-                    "notes",
                 )
             },
         ),
@@ -153,9 +152,13 @@ class FormQuestionInline(StackedInline):
 class FormResponseInline(TabularInline):
     model = FormResponse
     extra = 0
+    can_delete = False
+
     fields = ("question", "response", "responded_at")
     readonly_fields = ("question", "responded_at")
-    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Form)
@@ -218,6 +221,22 @@ class FormAssignmentAdmin(ModelAdmin):
             },
         ),
     )
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+
+        obj = form.instance
+
+        existing_questions = set(
+            obj.responses.values_list("question_id", flat=True)
+        )
+
+        for question in obj.form.questions.all():
+            if question.id not in existing_questions:
+                FormResponse.objects.create(
+                    assignment=obj,
+                    question=question
+                )
 
     @display(description="Respuestas")
     def display_completion(self, obj):

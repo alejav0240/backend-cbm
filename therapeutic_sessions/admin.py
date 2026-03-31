@@ -165,7 +165,7 @@ class SessionAdmin(ModelAdmin):
             {
                 "fields": (
                     "notes",
-                    ("video_url", "audio_url"),
+                    ("video_url"),
                 )
             },
         ),

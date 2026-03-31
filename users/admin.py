@@ -1,7 +1,8 @@
+# users/admin.py
+
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
-from django.urls import reverse
 from django.utils.html import format_html
 
 from unfold.admin import ModelAdmin, TabularInline
@@ -11,6 +12,9 @@ from unfold.decorators import display
 from .models import Notification, User
 
 
+# ==============================
+# INLINE: NOTIFICATIONS
+# ==============================
 class NotificationInline(TabularInline):
     model = Notification
     extra = 0
@@ -18,8 +22,12 @@ class NotificationInline(TabularInline):
     readonly_fields = ("created_at",)
     show_change_link = False
 
+
+# ==============================
+# USER ADMIN
+# ==============================
 @admin.register(User)
-class UserAdmin(BaseUserAdmin,ModelAdmin):
+class UserAdmin(ModelAdmin, BaseUserAdmin):
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
@@ -28,39 +36,52 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
 
+    # ==============================
+    # ADD USER
+    # ==============================
     add_fieldsets = (
         (None, {
             "classes": ("wide",),
             "fields": (
                 "username",
-                "password",
+                "password1",
+                "password2",
                 "first_name",
                 "last_name",
                 "ci",
                 "celular",
-                "email",),
+                "email",
+            ),
         }),
     )
 
+    # ==============================
+    # LIST VIEW
+    # ==============================
     list_display = (
         "username",
         "full_name",
         "ci",
         "celular",
-        "status",
+        "display_status",
         "is_staff",
         "is_active",
-        "email",
         "display_active",
-        "get_groups"
+        "email",
+        "get_groups",
+        "show_foto",
     )
+
     list_filter = ("status", "visibility", "groups", "is_staff")
     search_fields = ("username", "email", "first_name", "last_name", "ci")
     ordering = ("last_name", "first_name")
     inlines = (NotificationInline,)
 
-    #actions_row = ("change_password_row",)
+    filter_horizontal = ("groups", "user_permissions")
 
+    # ==============================
+    # FIELDSETS
+    # ==============================
     fieldsets = (
         (
             _("Datos personales"),
@@ -68,6 +89,8 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
                 "fields": (
                     ("first_name", "last_name"),
                     ("ci", "celular"),
+                    "foto",
+                    "cv",
                 )
             },
         ),
@@ -82,11 +105,11 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
             },
         ),
         (
-            'Roles y Permisos',
+            "Roles y Permisos",
             {
-                'fields': (
-                        'groups',
-                        'is_superuser'
+                "fields": (
+                    "groups",
+                    "is_superuser",
                 ),
             }
         ),
@@ -94,6 +117,8 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
             "Estado",
             {
                 "fields": (
+                    "status",
+                    "visibility",
                     "is_active",
                     "is_staff",
                 )
@@ -101,25 +126,16 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
         ),
     )
 
-    filter_horizontal = ("groups", "user_permissions")
+    # ==============================
+    # OPTIMIZACIÓN QUERY
+    # ==============================
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.prefetch_related("groups")
 
-    @display(description=_("Usuario"), header=True)
-    def display_header(self, instance):
-        """Muestra el nombre con un estilo de encabezado en la lista"""
-        return [
-            f"{instance.first_name} {instance.last_name}",
-            instance.username,
-        ]
-
-    """    def change_password_row(self, obj):
-            # Genera el link a la página de cambio de password nativa de Django
-            url = reverse("admin:auth_user_password_change", args=[obj.pk])
-            return {
-                "label": "Cambiar Contraseña",
-                "icon": "password",  # Icono de Unfold/Tailwind
-                "path": url,
-            }
-    """
+    # ==============================
+    # MÉTODOS CUSTOM
+    # ==============================
     @display(description="Nombre completo")
     def full_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
@@ -132,10 +148,37 @@ class UserAdmin(BaseUserAdmin,ModelAdmin):
     def display_active(self, obj):
         return obj.is_active
 
-    @display(description='Roles')
+    @display(
+        description="Estado",
+        label={
+            "active": "success",
+            "inactive": "danger",
+            "blocked": "warning",
+        },
+    )
+    def display_status(self, obj):
+        return obj.status
+
+    @display(description="Roles")
     def get_groups(self, obj):
         return ", ".join([g.name for g in obj.groups.all()]) if obj.groups.exists() else "Sin Rol"
 
+    @display(description="Foto")
+    def show_foto(self, obj):
+        if obj.foto:
+            try:
+                return format_html(
+                    '<img src="{}" width="40" height="40" style="border-radius:50%;" />',
+                    obj.foto.url,
+                )
+            except:
+                return "Sin imagen"
+        return "Sin foto"
+
+
+# ==============================
+# NOTIFICATION ADMIN
+# ==============================
 @admin.register(Notification)
 class NotificationAdmin(ModelAdmin):
     compressed_fields = True
@@ -145,6 +188,7 @@ class NotificationAdmin(ModelAdmin):
     list_filter = ("is_read",)
     search_fields = ("user__username", "user__email", "message")
     ordering = ("-created_at",)
+
     readonly_fields = ("created_at",)
     autocomplete_fields = ("user",)
 
@@ -155,6 +199,9 @@ class NotificationAdmin(ModelAdmin):
         ),
     )
 
+    # ==============================
+    # MÉTODOS
+    # ==============================
     @display(description="Mensaje")
     def message_preview(self, obj):
         return obj.message[:80] + "..." if len(obj.message) > 80 else obj.message
@@ -166,12 +213,17 @@ class NotificationAdmin(ModelAdmin):
     def display_read(self, obj):
         return "Leída" if obj.is_read else "No leída"
 
+    # ==============================
+    # ACTIONS
+    # ==============================
     actions = ("mark_as_read", "mark_as_unread")
 
     @admin.action(description="Marcar como leídas")
     def mark_as_read(self, request, queryset):
-        queryset.update(is_read=True)
+        updated = queryset.update(is_read=True)
+        self.message_user(request, f"{updated} notificaciones marcadas como leídas")
 
     @admin.action(description="Marcar como no leídas")
     def mark_as_unread(self, request, queryset):
-        queryset.update(is_read=False)
+        updated = queryset.update(is_read=False)
+        self.message_user(request, f"{updated} notificaciones marcadas como no leídas")
