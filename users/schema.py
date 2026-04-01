@@ -1,3 +1,4 @@
+# users/schema.py
 from .queries import Query as UsersQuery
 from .mutations import Mutation as UsersMutation
 

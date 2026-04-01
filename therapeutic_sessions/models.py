@@ -65,7 +65,18 @@ class Session(models.Model):
         PAID = "paid", "Pagada"
         EXEMPT = "exempt", "Exenta"
 
-    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="therapeutic_sessions")
+    class SessionStatus(models.TextChoices):
+        COMPLETADA = "completa", "Completa"
+        CONFIRMADA = "confirma", "Confirma"
+        REPROGRAMA = "reprograma", "Reprograma"
+        CANCELADA = "cancelada", "Cancelada"
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="therapeutic_sessions")
     therapist = models.ForeignKey(User, on_delete=models.PROTECT, related_name="therapeutic_sessions")
     group = models.ForeignKey(
         InstitutionGroup,
@@ -76,6 +87,7 @@ class Session(models.Model):
     )
     session_date = models.DateTimeField()
     session_type = models.CharField(max_length=20, choices=SessionType.choices)
+    session_status = models.CharField(max_length=20, choices=SessionStatus.choices, default=SessionStatus.COMPLETADA)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     cycle_number = models.PositiveIntegerField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
@@ -117,22 +129,3 @@ class SessionInventory(models.Model):
 
     def __str__(self):
         return f"{self.item} en {self.session}"
-
-
-'''class AiAnalysis(models.Model):
-    session = models.OneToOneField(Session, on_delete=models.CASCADE, related_name="ai_analysis")
-    stereotypy_score = models.FloatField(blank=True, null=True)
-    aggression_score = models.FloatField(blank=True, null=True)
-    passivity_score = models.FloatField(blank=True, null=True)
-    vocal_exploration = models.FloatField(blank=True, null=True)
-    social_interaction = models.FloatField(blank=True, null=True)
-    eye_contact = models.FloatField(blank=True, null=True)
-    body_movement = models.FloatField(blank=True, null=True)
-    rhythmic_exploration = models.FloatField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "ai_analysis"
-
-    def __str__(self):
-        return f"Análisis IA — {self.session}"'''

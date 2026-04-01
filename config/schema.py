@@ -1,14 +1,34 @@
 import graphene
-import graphql_jwt
-from users.schema import Query as UsersQuery
-from users.schema import Mutation as UsersMutation
+from users.schema import Query as UsersQuery, Mutation as UsersMutation
+from therapeutic_sessions.schema import Query as SessionQuery, Mutation as SessionMutation
+from institutions.schema import Query as InstitutionsQuery, Mutation as InstitutionsMutation
+from finance.schema import Query as FinanceQuery, Mutation as FinanceMutation
+from evaluations.schema import Query as EvaluationsQuery, Mutation as EvaluationsMutation
+from clinical.schema import Query as ClinicalQuery, Mutation as ClinicalMutation
+from marketing.schema import Query as MarketingQuery, Mutation as MarketingMutation
 
-class Query(UsersQuery, graphene.ObjectType):
+class Query(
+    UsersQuery,
+    SessionQuery,
+    MarketingQuery,
+    InstitutionsQuery,
+    FinanceQuery,
+    EvaluationsQuery,
+    ClinicalQuery,
+    graphene.ObjectType
+):
     pass
 
-class Mutation(UsersMutation, graphene.ObjectType):
-    token_auth = graphql_jwt.ObtainJSONWebToken.Field()
-    verify_token = graphql_jwt.Verify.Field()
-    refresh_token = graphql_jwt.Refresh.Field()
+class Mutation(
+    UsersMutation,
+    SessionMutation,
+    MarketingMutation,
+    InstitutionsMutation,
+    FinanceMutation,
+    EvaluationsMutation,
+    ClinicalMutation,
+    graphene.ObjectType
+):
+    pass
 
 schema = graphene.Schema(query=Query, mutation=Mutation)

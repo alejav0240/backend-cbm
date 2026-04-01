@@ -1,0 +1,75 @@
+import graphene
+
+from finance.models import Discount, Payment, Expense, Course, CourseEnrollment
+from finance.type import DiscountType, PaymentType, ExpenseType, CourseType, CourseEnrollmentType
+
+
+class Query(graphene.ObjectType):
+    discounts = graphene.List(DiscountType)
+    payments = graphene.List(
+        PaymentType,
+        patient_id=graphene.ID(),
+        payment_status=graphene.String(),
+    )
+    payment = graphene.Field(PaymentType, id=graphene.ID(required=True))
+
+    expenses = graphene.List(
+        ExpenseType,
+        status=graphene.String(),
+        category=graphene.String(),
+    )
+
+    courses = graphene.List(CourseType, state=graphene.String())
+    course = graphene.Field(CourseType, id=graphene.ID(required=True))
+
+    course_enrollments = graphene.List(
+        CourseEnrollmentType,
+        course_id=graphene.ID(),
+        user_id=graphene.ID(),
+    )
+
+
+def resolve_discounts(self, info):
+    return Discount.objects.all()
+
+
+def resolve_payments(self, info, patient_id=None, payment_status=None):
+    qs = Payment.objects.select_related("patient", "discount").all()
+    if patient_id:
+        qs = qs.filter(patient_id=patient_id)
+    if payment_status:
+        qs = qs.filter(payment_status=payment_status)
+    return qs
+
+
+def resolve_payment(self, info, id):
+    return Payment.objects.select_related("patient", "discount").get(pk=id)
+
+
+def resolve_expenses(self, info, status=None, category=None):
+    qs = Expense.objects.all()
+    if status:
+        qs = qs.filter(status=status)
+    if category:
+        qs = qs.filter(category__icontains=category)
+    return qs
+
+
+def resolve_courses(self, info, state=None):
+    qs = Course.objects.prefetch_related("enrollments").all()
+    if state:
+        qs = qs.filter(state=state)
+    return qs
+
+
+def resolve_course(self, info, id):
+    return Course.objects.prefetch_related("enrollments__payment").get(pk=id)
+
+
+def resolve_course_enrollments(self, info, course_id=None, user_id=None):
+    qs = CourseEnrollment.objects.select_related("course", "user").all()
+    if course_id:
+        qs = qs.filter(course_id=course_id)
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+    return qs
