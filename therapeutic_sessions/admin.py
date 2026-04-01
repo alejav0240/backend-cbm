@@ -156,7 +156,7 @@ class SessionAdmin(ModelAdmin):
                     ("patient", "therapist"),
                     ("session_date", "session_type"),
                     ("duration_minutes", "cycle_number"),
-                    "group",
+                    ("group","session_status")
                 )
             },
         ),
