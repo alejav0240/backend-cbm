@@ -1,0 +1,57 @@
+query VerPacientes($search: String = "", $status: String = "") {
+  patients(search: $search, status: $status) {
+    fullName
+    imageUrl
+    birthDate
+    status
+    tutor {
+      firstName
+      celular
+    }
+  }
+}
+
+query VerSesiones($patientId: ID = "", $paymentStatus: String = "", $sessionType: String = "", $therapistId: ID = "", $sessionStatus: String = "") {
+  sessions(
+    patientId: $patientId
+    therapistId: $therapistId
+    paymentStatus: $paymentStatus
+    sessionType: $sessionType
+    sessionStatus: $sessionStatus
+  ) {
+    patient {
+      fullName
+      id
+    }
+    group {
+      name
+      id
+    }
+    videoUrl
+    paymentStatus
+    paymentStatusDisplay
+    cycleNumber
+    sessionDate
+    sessionStatus
+  }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────────
+# ──────────────── TODO: Revisar Query de Ciclos ─────────────────────────────────────────
+query CiclosPaciente {
+  patientCycles(patientId: "3") {
+    cycleNumber
+    sessionCount
+    firstSessionDate
+    lastSessionDate
+    therapists {
+      firstName
+      lastName
+    }
+    paymentSummary {
+      paid
+      pending
+      exempt
+    }
+  }
+}

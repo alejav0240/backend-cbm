@@ -3,13 +3,21 @@ import graphene
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType
 
+class PaginatedPatients(graphene.ObjectType):
+    results = graphene.List(PatientType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
 
 class Query(graphene.ObjectType):
-    patients = graphene.List(
-        PatientType,
+    patients = graphene.Field(
+        PaginatedPatients,
         status=graphene.String(),
         search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
+
     patient = graphene.Field(PatientType, id=graphene.ID(required=True))
 
     clinical_notes = graphene.List(
@@ -29,19 +37,26 @@ class Query(graphene.ObjectType):
         patient_id=graphene.ID(required=True),
     )
 
-    def resolve_patients(self, info, status=None, search=None):
+    def resolve_patients(self, info, status=None, search=None, page=1, page_size=10):
         qs = Patient.objects.select_related("tutor").all()
         if status:
             qs = qs.filter(status=status)
         if search:
-            qs = qs.filter(
-                first_name__icontains=search
-            ) | qs.filter(
-                last_name__icontains=search
-            ) | qs.filter(
-                ci__icontains=search
-            )
-        return qs
+            qs = qs.filter(first_name__icontains=search) \
+                 | qs.filter(last_name__icontains=search) \
+                 | qs.filter(ci__icontains=search)
+
+        total_count = qs.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+        results = qs[offset:offset + page_size]
+
+        return PaginatedPatients(
+            results=results,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     def resolve_patient(self, info, id):
         return Patient.objects.select_related("tutor").get(pk=id)

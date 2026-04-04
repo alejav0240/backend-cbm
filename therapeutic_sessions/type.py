@@ -7,6 +7,7 @@ from therapeutic_sessions.models import (
     SessionResource,
     SessionInventory
 )
+from users.types import UserType
 
 
 # 1. Digital Resource
@@ -70,3 +71,26 @@ class SessionType(DjangoObjectType):
 
     def resolve_payment_status_display(self, info):
         return self.get_payment_status_display()
+
+# ─────────────────────────────────────────
+# CICLOS (tipo virtual — no es un modelo)
+# Un ciclo = grupo de sesiones con el mismo cycle_number para un paciente.
+# Se construye en el resolver agrupando sesiones, no tiene tabla propia.
+# ─────────────────────────────────────────
+
+class CyclePaymentSummaryType(graphene.ObjectType):
+    """Resumen de estados de pago de las sesiones del ciclo."""
+    paid = graphene.Int(description="Sesiones pagadas")
+    pending = graphene.Int(description="Sesiones pendientes de pago")
+    exempt = graphene.Int(description="Sesiones exentas de pago")
+
+
+class CycleType(graphene.ObjectType):
+    patient_id = graphene.ID()
+    patient_name = graphene.String()
+    cycle_number = graphene.Int()
+    session_count = graphene.Int(description="Total de sesiones en el ciclo")
+    first_session_date = graphene.DateTime(description="Fecha de la primera sesión del ciclo")
+    last_session_date = graphene.DateTime(description="Fecha de la última sesión del ciclo")
+    therapists = graphene.List(UserType, description="Terapeutas que atendieron en este ciclo")
+    payment_summary = graphene.Field(CyclePaymentSummaryType)
