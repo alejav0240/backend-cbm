@@ -8,6 +8,7 @@ class Patient(models.Model):
         ACTIVE = "active", "Activo"
         INACTIVE = "inactive", "Inactivo"
         DISCHARGED = "discharged", "Alta"
+        Pending = "pending", "Pendiente"
 
     tutor = models.ForeignKey(
         User,
@@ -25,6 +26,7 @@ class Patient(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    registration_complete = models.BooleanField(default=False)
 
     class Meta:
         db_table = "patients"

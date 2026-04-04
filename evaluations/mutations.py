@@ -1,9 +1,10 @@
 import graphene
 
+from clinical.models import Patient
 from evaluations.models import ScaleEvaluationSubscaleResponse, ScaleEvaluationValueResponse, FormResponse, \
     ScaleEvaluation
 from evaluations.type import ScaleEvaluationType, ScaleEvaluationSubscaleResponseType, ScaleEvaluationValueResponseType, \
-    FormResponseType
+    FormResponseType, FormAssignmentType
 
 
 class CreateScaleEvaluation(graphene.Mutation):
@@ -27,7 +28,6 @@ class CreateScaleEvaluation(graphene.Mutation):
         )
         return CreateScaleEvaluation(evaluation=evaluation)
 
-
 class AddSubscaleResponse(graphene.Mutation):
     class Arguments:
         evaluation_id = graphene.ID(required=True)
@@ -44,7 +44,6 @@ class AddSubscaleResponse(graphene.Mutation):
         )
         return AddSubscaleResponse(response=resp)
 
-
 class AddValueResponse(graphene.Mutation):
     class Arguments:
         evaluation_id = graphene.ID(required=True)
@@ -58,7 +57,6 @@ class AddValueResponse(graphene.Mutation):
             scale_value_id=scale_value_id,
         )
         return AddValueResponse(response=resp)
-
 
 class SubmitFormResponse(graphene.Mutation):
     class Arguments:
@@ -76,9 +74,76 @@ class SubmitFormResponse(graphene.Mutation):
         )
         return SubmitFormResponse(form_response=resp)
 
+class DeletePatient(graphene.Mutation):
+    class Arguments:
+        # Usamos ID porque desde el front viene el Global ID de Relay
+        id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    def mutate(self, info, id):
+        try:
+            # graphene.relay.Node.get_node_from_global_id convierte
+            # el Global ID (ej: "UGF0aWVudFR5cGU6MQ==") al objeto de Django
+            patient = graphene.relay.Node.get_node_from_global_id(info, id, only_type=None)
+
+            if not patient:
+                # Si no es un Global ID, intentamos buscarlo por ID normal (opcional)
+                patient = Patient.objects.get(pk=id)
+
+            patient.delete()
+            return DeletePatient(success=True, message="Paciente eliminado correctamente")
+
+        except Patient.DoesNotExist:
+            return DeletePatient(success=False, message="El paciente no existe")
+        except Exception as e:
+            return DeletePatient(success=False, message=str(e))
+
+class ResponseInput(graphene.InputObjectType):
+    question_id = graphene.ID(required=True)
+    response = graphene.String(required=True)
+
+class SubmitFullForm(graphene.Mutation):
+    class Arguments:
+        form_id = graphene.ID(required=True)
+        assigned_to_id = graphene.ID(required=True) # El terapeuta
+        assigned_by_id = graphene.ID(required=True) # Quien asigna (Admin)
+        patient_id = graphene.ID(required=True)
+        responses = graphene.List(ResponseInput, required=True)
+
+    # Definimos qué devuelve la mutación
+    assignment = graphene.Field(FormAssignmentType) # Asegúrate de tener este Type definido
+    success = graphene.Boolean()
+
+    def mutate(self, info, form_id, assigned_to_id, assigned_by_id, patient_id, responses):
+        from evaluations.models import FormAssignment, FormResponse
+        from django.db import transaction
+
+        # Usamos una transacción atómica: si falla una respuesta, no se crea nada.
+        with transaction.atomic():
+            # 1. Crear la cabecera (La asignación)
+            assignment = FormAssignment.objects.create(
+                form_id=form_id,
+                assigned_to_id=assigned_to_id,
+                assigned_by_id=assigned_by_id,
+                patient_id=patient_id
+            )
+
+            # 2. Crear todas las respuestas vinculadas a esta asignación
+            for resp_data in responses:
+                FormResponse.objects.create(
+                    assignment=assignment,
+                    question_id=resp_data.question_id,
+                    response=resp_data.response
+                )
+
+        return SubmitFullForm(assignment=assignment, success=True)
+
 
 class Mutation(graphene.ObjectType):
     create_scale_evaluation = CreateScaleEvaluation.Field()
     add_subscale_response = AddSubscaleResponse.Field()
     add_value_response = AddValueResponse.Field()
     submit_form_response = SubmitFormResponse.Field()
+    submit_full_form = SubmitFullForm.Field()

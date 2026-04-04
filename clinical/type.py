@@ -6,19 +6,25 @@ from clinical.models import Patient, PatientClinicalNote, InterventionPlan, Plan
 
 class PatientType(DjangoObjectType):
     full_name = graphene.String()
+    database_id = graphene.Int()
 
     class Meta:
         model = Patient
         fields = (
-            "id", "tutor",
+            "id", "tutor","database_id",
             "first_name", "last_name",
             "ci", "birth_date",
             "image_url", "notes", "status",
             "created_at", "updated_at",
             "clinical_notes", "intervention_plans",
             "therapy_reports", "therapeutic_sessions",
-            "scale_evaluations", "payments",
+            "scale_evaluations", "payments","registration_complete"
         )
+
+        interfaces = (graphene.relay.Node,)
+
+    def resolve_database_id(self, info):
+        return self.pk
 
     def resolve_full_name(self, info):
         return f"{self.first_name} {self.last_name}"
