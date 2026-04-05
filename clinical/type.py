@@ -18,7 +18,8 @@ class PatientType(DjangoObjectType):
             "created_at", "updated_at",
             "clinical_notes", "intervention_plans",
             "therapy_reports", "therapeutic_sessions",
-            "scale_evaluations", "payments","registration_complete"
+            "scale_evaluations", "payments",
+            "registration_complete","diagnosis","residence",
         )
 
         interfaces = (graphene.relay.Node,)
