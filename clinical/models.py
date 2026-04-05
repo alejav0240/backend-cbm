@@ -27,6 +27,8 @@ class Patient(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     registration_complete = models.BooleanField(default=False)
+    diagnosis = models.CharField(max_length=50, default='sin diagnostico')
+    residence = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
         db_table = "patients"
@@ -34,14 +36,21 @@ class Patient(models.Model):
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
-
-# todo: es nesesario ?
 class PatientClinicalNote(models.Model):
 
     class Category(models.TextChoices):
+        # Iniciales que ya tenías
         DIAGNOSIS = "diagnosis", "Diagnóstico"
         GENERAL_OBJECTIVE = "general_objective", "Objetivo general"
         OBSERVATION = "observation", "Observación"
+
+        # Los faltantes basados en tu mutación
+        PHYSICAL_AREA = "physical_area", "Área Física"
+        EMOTIONAL_AREA = "emotional_area", "Área Emocional"
+        COGNITIVE_AREA = "cognitive_area", "Área Cognitiva"
+        SOCIAL_AREA = "social_area", "Área Social"
+        METHODS = "methods", "Métodos"
+        ADDITIONAL_NOTES = "additional_notes", "Notas Adicionales"
 
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="clinical_notes")
     author = models.ForeignKey(User, on_delete=models.PROTECT, related_name="authored_notes")
@@ -52,6 +61,14 @@ class PatientClinicalNote(models.Model):
     class Meta:
         db_table = "patient_clinical_notes"
         ordering = ["-created_at"]
+        unique_together = ('patient', 'category')
+
+    def save(self, *args, **kwargs):
+        # Lógica de Mutator: Siempre en mayúsculas antes de ir a la DB
+        if self.category:
+            self.category = self.category.upper()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_category_display()} — {self.patient} ({self.created_at.date()})"

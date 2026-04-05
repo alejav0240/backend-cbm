@@ -1,0 +1,81 @@
+# - Nuevo Paciente
+mutation MyMutation {
+  createPatient(
+    firstName: "Alejandro"
+    lastName: "Vargas Mamani"
+    birthDate: "2015-05-12"
+    ci: "9283741LP"
+    imageUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alejandro"
+    diagnosis: "Retraso leve en el desarrollo del lenguaje"
+    notes: "Muestra gran interés por los instrumentos de percusión. Se recomienda sesiones de 45 minutos."
+    residence: "Zona Sur, Calle 15 de Calacoto"
+    tutorCelular: "70612345"
+    tutorCi: "4829103LP"
+    tutorEmail: "m.vargas@mail.com"
+    tutorName: "Mariana Vargas"
+  ) {
+    patient {
+      fullName
+    }
+  }
+}
+
+# - Editar Info Pacinetes
+mutation MyMutation($id: ID = "1") {
+  updateClinicalNotes(
+    authorId: "1"
+    patientId: $id
+    notes: [{category: "GENERAL_OBJECTIVE", content: "Fomentar la comunicación bidireccional..."}, {category: "PHYSICAL_AREA", content: "Fortalecer la motricidad fina..."}, {category: "EMOTIONAL_AREA", content: "Reducir los niveles de ansiedad..."}, {category: "COGNITIVE_AREA", content: "Mejorar los periodos de atención..."}, {category: "SOCIAL_AREA", content: "Desarrollar el contacto visual..."}, {category: "METHODS", content: "Modelo Nordoff-Robbins..."}, {category: "ADDITIONAL_NOTES", content: "Respuesta excepcional al piano..."}]
+  ) {
+    notesUpdated {
+      category
+      content
+    }
+  }
+  updatePatient(
+    id: $id
+    imageUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
+    residence: "Zona Sur, La Paz"
+    diagnosis: "Trastorno del Espectro Autista (TEA) - Grado 1"
+  ) {
+    patient {
+      fullName
+      diagnosis
+      residence
+    }
+  }
+}
+
+# - Responder formulario de inicio
+mutation MyMutation {
+  submitFullForm(
+    assignedById: "1"
+    assignedToId: "2"
+    formId: "1"
+    patientId: "2"
+    responses: [
+      { questionId: "1", response: "Padre prefiere Rock clásico, la madre escucha principalmente Jazz y música instrumental." },
+      { questionId: "2", response: "Se utilizó música de relajación y clásica durante el tercer trimestre. Reacción positiva a sonidos suaves." },
+      { questionId: "3", response: "Mucha exposición a canciones de cuna y sonidos de la naturaleza para calmar el llanto." },
+      { questionId: "4", response: "Le agradan los sonidos rítmicos y marcados; muestra rechazo a ruidos fuertes o repentinos como aspiradoras." },
+      { questionId: "5", response: "La madre tomó clases de piano en la adolescencia. El padre no tiene formación." },
+      { questionId: "6", response: "Un abuelo materno era violinista en una orquesta local." },
+      { questionId: "7", response: "Sí, un teclado electrónico, una guitarra acústica y varios instrumentos de percusión menores." },
+      { questionId: "8", response: "Baila y aplaude cuando escucha canciones con ritmo marcado; intenta imitar sonidos vocales." },
+      { questionId: "9", response: "Diagnóstico presuntivo de TEA grado 1. Presenta hipersensibilidad auditiva a frecuencias agudas." },
+      { questionId: "10", response: "No consume medicamentos actualmente." },
+      { questionId: "11", response: "Alergia estacional al polen y sensibilidad a ciertos colorantes alimentarios." },
+      { questionId: "12", response: "Dificultad moderada en la interacción social con pares y retraso leve en el lenguaje expresivo." },
+      { questionId: "13", response: "Asiste a fonoaudiología una vez por semana y terapia ocupacional." },
+      { questionId: "14", response: "Fuerte interés por los engranajes, ventiladores y objetos que giran." },
+      { questionId: "15", response: "Familia de origen boliviano, residentes en La Paz." },
+      { questionId: "16", response: "Tiene una hermana mayor de  5 años, con quien tiene buena relación." },
+      { questionId: "17", response: "Nacimiento por cesárea sin complicaciones mayores reportadas." },
+      { questionId: "18", response: "Durante el día permanece bajo el cuidado de su abuela materna mientras los padres trabajan." }
+    ]
+  ) {
+    success
+  }
+}
+
+# -----------------------------------------------------------------------------
