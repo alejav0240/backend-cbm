@@ -25,6 +25,7 @@ class ScaleValueType(DjangoObjectType):
 
 class ScaleEvaluationType(DjangoObjectType):
     in_session = graphene.Boolean()
+    total_score = graphene.Int()
 
     class Meta:
         model = ScaleEvaluation
@@ -33,6 +34,9 @@ class ScaleEvaluationType(DjangoObjectType):
             "evaluated_at",
             "subscale_responses", "value_responses",
         )
+
+    def resolve_total_score(self, info):
+        return self.total_score
 
     def resolve_in_session(self, info):
         return self.session_id is not None

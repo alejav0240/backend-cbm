@@ -2,7 +2,7 @@ import graphene
 from decimal import Decimal
 from graphql import GraphQLError
 from finance.models import CoursePayment, CourseEnrollment, Expense, Payment, Discount, Course
-from finance.type import CourseEnrollmentType, ExpenseType, PaymentType
+from finance.type import CourseEnrollmentType, ExpenseType, PaymentType, CourseType
 
 class CreatePayment(graphene.Mutation):
     class Arguments:
@@ -120,7 +120,156 @@ class EnrollInCourse(graphene.Mutation):
             )
         return EnrollInCourse(enrollment=enrollment)
 
+class UpdatePayment(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        amount_paid = graphene.Float()
+        payment_status = graphene.String()
+
+    payment = graphene.Field(PaymentType)
+
+    def mutate(self, info, id, amount_paid=None, payment_status=None):
+        try:
+            payment = Payment.objects.get(pk=id)
+            if amount_paid is not None:
+                payment.amount_paid = amount_paid
+            if payment_status is not None:
+                payment.payment_status = payment_status
+            
+            # Recalcular estado si se actualiza el monto
+            if amount_paid is not None:
+                final_total = payment.total_amount
+                # Aplicar descuento si existe
+                if payment.discount:
+                    if payment.discount.type == Discount.DiscountType.PERCENTAGE:
+                        final_total = payment.total_amount * (Decimal('1') - (payment.discount.value / Decimal('100')))
+                    else:
+                        final_total = payment.total_amount - payment.discount.value
+                
+                if payment.amount_paid >= final_total:
+                    payment.payment_status = Payment.PaymentStatus.COMPLETED
+                elif payment.amount_paid > 0:
+                    payment.payment_status = Payment.PaymentStatus.PARTIAL
+                else:
+                    payment.payment_status = Payment.PaymentStatus.PENDING
+
+            payment.save()
+            return UpdatePayment(payment=payment)
+        except Payment.DoesNotExist:
+            raise GraphQLError("Pago no encontrado")
+
+class DeletePayment(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            payment = Payment.objects.get(pk=id)
+            payment.delete()
+            return DeletePayment(success=True)
+        except Payment.DoesNotExist:
+            return DeletePayment(success=False)
+
+class UpdateExpenseStatus(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        status = graphene.String(required=True)
+
+    expense = graphene.Field(ExpenseType)
+
+    def mutate(self, info, id, status):
+        try:
+            expense = Expense.objects.get(pk=id)
+            expense.status = status
+            expense.save()
+            return UpdateExpenseStatus(expense=expense)
+        except Expense.DoesNotExist:
+            raise GraphQLError("Gasto no encontrado")
+
+class DeleteExpense(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            expense = Expense.objects.get(pk=id)
+            expense.delete()
+            return DeleteExpense(success=True)
+        except Expense.DoesNotExist:
+            return DeleteExpense(success=False)
+
+class CreateCourse(graphene.Mutation):
+    class Arguments:
+        name = graphene.String(required=True)
+        description = graphene.String()
+        price = graphene.Float(required=True)
+        state = graphene.String()
+
+    course = graphene.Field(CourseType)
+
+    def mutate(self, info, name, price, description=None, state="draft"):
+        course = Course.objects.create(
+            name=name,
+            description=description,
+            price=Decimal(str(price)),
+            state=state
+        )
+        return CreateCourse(course=course)
+
+class UpdateCourse(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        name = graphene.String()
+        description = graphene.String()
+        price = graphene.Float()
+        state = graphene.String()
+
+    course = graphene.Field(CourseType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            course = Course.objects.get(pk=real_id)
+            for key, value in kwargs.items():
+                if key == 'price':
+                    setattr(course, key, Decimal(str(value)))
+                else:
+                    setattr(course, key, value)
+            course.save()
+            return UpdateCourse(course=course)
+        except Course.DoesNotExist:
+            raise GraphQLError("Curso no encontrado")
+
+class DeleteCourse(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            course = Course.objects.get(pk=real_id)
+            course.delete()
+            return DeleteCourse(success=True)
+        except Course.DoesNotExist:
+            return DeleteCourse(success=False)
+
 class Mutation(graphene.ObjectType):
     create_payment = CreatePayment.Field()
+    update_payment = UpdatePayment.Field()
+    delete_payment = DeletePayment.Field()
     create_expense = CreateExpense.Field()
+    update_expense_status = UpdateExpenseStatus.Field()
+    delete_expense = DeleteExpense.Field()
     enroll_in_course = EnrollInCourse.Field()
+    create_course = CreateCourse.Field()
+    update_course = UpdateCourse.Field()
+    delete_course = DeleteCourse.Field()

@@ -4,8 +4,8 @@ from datetime import date
 import graphene
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
-from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep
-from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType
+from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport
+from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType, TherapyReportType
 from users.models import User
 from django.db.models import Max
 from django.db.models.functions import Coalesce
@@ -426,14 +426,121 @@ class DeletePatient(graphene.Mutation):
         except Exception as e:
             return DeletePatient(success=False, message=str(e))
 
+class UpdateInterventionPlan(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        main_objective = graphene.String()
+        start_date = graphene.Date()
+        end_date = graphene.Date()
+
+    plan = graphene.Field(InterventionPlanType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            plan = InterventionPlan.objects.get(pk=id)
+            for key, value in kwargs.items():
+                setattr(plan, key, value)
+            plan.save()
+            return UpdateInterventionPlan(plan=plan)
+        except InterventionPlan.DoesNotExist:
+            raise Exception("Plan no encontrado")
+
+class DeleteInterventionPlan(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            plan = InterventionPlan.objects.get(pk=id)
+            plan.delete()
+            return DeleteInterventionPlan(success=True)
+        except InterventionPlan.DoesNotExist:
+            return DeleteInterventionPlan(success=False)
+
+class UpdateStepPlan(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        moment = graphene.String()
+        duration_minutes = graphene.Int()
+        objective = graphene.String()
+        focus = graphene.String()
+        musical_resources = graphene.String()
+        musical_emphasis = graphene.String()
+        approach = graphene.String()
+        mlt_method = graphene.String()
+
+    step = graphene.Field(PlanStepType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            step = PlanStep.objects.get(pk=id)
+            for key, value in kwargs.items():
+                if key == 'moment' and value:
+                    step.moment = value.lower()
+                else:
+                    setattr(step, key, value)
+            step.save()
+            return UpdateStepPlan(step=step)
+        except PlanStep.DoesNotExist:
+            raise Exception("Paso no encontrado")
+
+class DeleteStepPlan(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            step = PlanStep.objects.get(pk=id)
+            step.delete()
+            return DeleteStepPlan(success=True)
+        except PlanStep.DoesNotExist:
+            return DeleteStepPlan(success=False)
+
+class CreateTherapyReport(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        generated_by_id = graphene.ID(required=True)
+        report_url = graphene.String(required=True)
+
+    report = graphene.Field(TherapyReportType)
+
+    def mutate(self, info, patient_id, generated_by_id, report_url):
+        report = TherapyReport.objects.create(
+            patient_id=patient_id,
+            generated_by_id=generated_by_id,
+            report_url=report_url
+        )
+        return CreateTherapyReport(report=report)
+
+class DeleteTherapyReport(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            report = TherapyReport.objects.get(pk=id)
+            report.delete()
+            return DeleteTherapyReport(success=True)
+        except TherapyReport.DoesNotExist:
+            return DeleteTherapyReport(success=False)
+
 class Mutation(graphene.ObjectType):
     create_patient = CreatePatient.Field()
     update_patient_status = UpdatePatientStatus.Field()
     add_clinical_note = AddClinicalNote.Field()
     create_intervention_plan = CreateInterventionPlan.Field()
+    update_intervention_plan = UpdateInterventionPlan.Field()
+    delete_intervention_plan = DeleteInterventionPlan.Field()
     update_plan_progress = UpdatePlanProgress.Field()
     update_patient = UpdatePatient.Field()
     update_clinical_notes = UpdateClinicalNotes.Field()
     create_step_plan = CreateStepPlan.Field()
+    update_step_plan = UpdateStepPlan.Field()
+    delete_step_plan = DeleteStepPlan.Field()
     update_step_progress = UpdateStepProgress.Field()
+    create_therapy_report = CreateTherapyReport.Field()
+    delete_therapy_report = DeleteTherapyReport.Field()
     delete_patient = DeletePatient.Field()

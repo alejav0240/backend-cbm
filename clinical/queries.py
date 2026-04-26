@@ -4,10 +4,34 @@ from graphql import GraphQLError
 from dateutil.relativedelta import relativedelta
 from django.db.models import Count
 from django.db.models.functions import TruncMonth
+import base64
 
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType
 
+def get_real_id(id_attr):
+    if not id_attr:
+        return None
+    
+    # Si ya es un entero o parece serlo, no decodificamos
+    if isinstance(id_attr, int) or (isinstance(id_attr, str) and id_attr.isdigit()):
+        return id_attr
+        
+    try:
+        # Intentar decodificación manual de Relay (Base64)
+        # Relay IDs suelen ser "Tipo:ID" codificados en Base64
+        decoded = base64.b64decode(str(id_attr)).decode('utf-8')
+        if ":" in decoded:
+            return decoded.split(":")[1]
+        return decoded
+    except Exception:
+        # Si falla el Base64, intentar el helper de Graphene por si acaso
+        try:
+            from graphql_relay import from_global_id
+            return from_global_id(id_attr)[1]
+        except Exception:
+            # Si todo falla, devolver el original
+            return id_attr
 
 class PaginatedPatients(graphene.ObjectType):
     results = graphene.List(PatientType)
@@ -34,13 +58,13 @@ class Query(graphene.ObjectType):
 
     intervention_plans = graphene.List(
         InterventionPlanType,
-        patient_id=graphene.ID(required=True),
+        patient_id=graphene.ID(required=False),
     )
     intervention_plan = graphene.Field(InterventionPlanType, id=graphene.ID(required=True))
 
     therapy_reports = graphene.List(
         TherapyReportType,
-        patient_id=graphene.ID(required=True),
+        patient_id=graphene.ID(required=False),
     )
 
     patient_growth = graphene.List(GrowthPointType)
@@ -54,8 +78,6 @@ class Query(graphene.ObjectType):
                  | qs.filter(last_name__icontains=search) \
                  | qs.filter(ci__icontains=search)
 
-        # Sort the queryset based on the sorted_by parameter
-        # Forzar orden descendente manualmente
         qs = qs.order_by('-created_at')
 
         total_count = qs.count()
@@ -71,57 +93,46 @@ class Query(graphene.ObjectType):
         )
 
     def resolve_patient(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_real_id(id)
         try:
             return Patient.objects.select_related("tutor").get(pk=real_id)
-        except Patient.DoesNotExist:
-            raise GraphQLError("Paciente no encontrado")
+        except (Patient.DoesNotExist, ValueError, TypeError):
+            raise GraphQLError(f"Paciente con ID {real_id} no encontrado")
 
     def resolve_clinical_notes(self, info, patient_id, category=None):
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            real_patient_id = patient_id
+        real_patient_id = get_real_id(patient_id)
         qs = PatientClinicalNote.objects.filter(patient_id=real_patient_id).select_related("author")
         if category:
             qs = qs.filter(category=category)
         return qs
 
-    def resolve_intervention_plans(self, info, patient_id):
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            real_patient_id = patient_id
-        return InterventionPlan.objects.filter(patient_id=real_patient_id).prefetch_related("steps")
+    def resolve_intervention_plans(self, info, patient_id=None):
+        qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
+        if patient_id:
+            real_patient_id = get_real_id(patient_id)
+            qs = qs.filter(patient_id=real_patient_id)
+        return qs
 
     def resolve_intervention_plan(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_real_id(id)
         try:
             return InterventionPlan.objects.prefetch_related("steps").get(pk=real_id)
-        except InterventionPlan.DoesNotExist:
-            raise GraphQLError("Plan de intervención no encontrado")
+        except (InterventionPlan.DoesNotExist, ValueError, TypeError):
+            raise GraphQLError(f"Plan con ID {real_id} no encontrado")
 
-    def resolve_therapy_reports(self, info, patient_id):
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            real_patient_id = patient_id
-        return TherapyReport.objects.filter(patient_id=real_patient_id).select_related("generated_by")
+    def resolve_therapy_reports(self, info, patient_id=None):
+        qs = TherapyReport.objects.select_related("patient", "generated_by").all()
+        if patient_id:
+            real_patient_id = get_real_id(patient_id)
+            qs = qs.filter(patient_id=real_patient_id)
+        return qs
 
     def resolve_patient_growth(self, info):
-        # Generamos los últimos 6 meses con valor 0 por defecto
         last_6_months = {}
         for i in range(5, -1, -1):
             month_dt = timezone.now() - relativedelta(months=i)
             last_6_months[month_dt.strftime('%b')] = 0
 
-        # Consultamos la DB
         data = (
             Patient.objects.filter(created_at__gte=timezone.now() - relativedelta(months=6))
             .annotate(month_date=TruncMonth('created_at'))
@@ -129,7 +140,6 @@ class Query(graphene.ObjectType):
             .annotate(total=Count('id'))
         )
 
-        # Llenamos los datos reales sobre los ceros
         for item in data:
             month_name = item['month_date'].strftime('%b')
             if month_name in last_6_months:

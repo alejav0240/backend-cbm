@@ -41,9 +41,20 @@ class ExpenseType(DjangoObjectType):
 
 
 class CourseType(DjangoObjectType):
+    students_count = graphene.Int()
+    total_income = graphene.Float()
+
     class Meta:
         model = Course
         fields = ("id", "name", "description", "price", "state", "enrollments")
+
+    def resolve_students_count(self, info):
+        return self.enrollments.count()
+
+    def resolve_total_income(self, info):
+        from django.db.models import Sum
+        result = self.enrollments.aggregate(total=Sum('payment__amount'))
+        return result['total'] or 0.0
 
 
 class CourseEnrollmentType(DjangoObjectType):

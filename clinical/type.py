@@ -38,6 +38,8 @@ class PatientClinicalNoteType(DjangoObjectType):
 
 
 class InterventionPlanType(DjangoObjectType):
+    status = graphene.String()
+
     class Meta:
         model = InterventionPlan
         fields = (
@@ -47,6 +49,11 @@ class InterventionPlanType(DjangoObjectType):
             "steps",
         )
 
+    def resolve_status(self, info):
+        if self.progress_percent == 100:
+            return "Finalizado"
+        return "En curso"
+
 
 class PlanStepType(DjangoObjectType):
     class Meta:
@@ -55,7 +62,7 @@ class PlanStepType(DjangoObjectType):
             "id", "plan", "moment", "duration_minutes",
             "objective", "focus", "musical_resources",
             "musical_emphasis", "approach", "mlt_method",
-            "order_index",
+            "order_index", "is_completed",
         )
 
 
