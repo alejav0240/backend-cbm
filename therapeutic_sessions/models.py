@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from users.models import User
 from clinical.models import Patient
@@ -22,7 +24,6 @@ class DigitalResource(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_type_display()})"
-
 
 class InventoryItem(models.Model):
 
@@ -52,7 +53,6 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.get_status_display()})"
-
 
 class Session(models.Model):
 
@@ -85,9 +85,11 @@ class Session(models.Model):
         blank=True,
         related_name="therapeutic_sessions",
     )
+
     session_date = models.DateTimeField()
     session_type = models.CharField(max_length=20, choices=SessionType.choices)
     session_status = models.CharField(max_length=20, choices=SessionStatus.choices, default=SessionStatus.COMPLETADA)
+    session_number = models.IntegerField(default=0)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     cycle_number = models.PositiveIntegerField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
@@ -106,7 +108,6 @@ class Session(models.Model):
     def __str__(self):
         return f"Sesión {self.patient} — {self.session_date.date()}"
 
-
 class SessionResource(models.Model):
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="session_resources")
     resource = models.ForeignKey(DigitalResource, on_delete=models.PROTECT, related_name="session_resources")
@@ -117,7 +118,6 @@ class SessionResource(models.Model):
 
     def __str__(self):
         return f"{self.resource} en {self.session}"
-
 
 class SessionInventory(models.Model):
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="session_inventory")

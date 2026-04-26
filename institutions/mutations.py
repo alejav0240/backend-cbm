@@ -25,7 +25,7 @@ class CreateInstitution(graphene.Mutation):
         institution = Institution.objects.create(
             name=name,
             contact_email=contact_email,
-            phone=phone,
+            contact_phone=phone,
         )
 
         return CreateInstitution(institution=institution)
@@ -42,20 +42,26 @@ class UpdateInstitution(graphene.Mutation):
         id = graphene.ID(required=True)
         name = graphene.String()
         contact_email = graphene.String()
-        phone = graphene.String()
+        phone = graphene.String() # Recibimos 'phone' desde el front
 
     def mutate(self, info, id, **kwargs):
-
         try:
-            institution = Institution.objects.get(pk=id)
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+            
+        try:
+            institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
             raise GraphQLError("Institución no encontrada")
+
+        if "phone" in kwargs:
+            institution.contact_phone = kwargs.pop("phone")
 
         for field, value in kwargs.items():
             setattr(institution, field, value)
 
         institution.save()
-
         return UpdateInstitution(institution=institution)
 
 
@@ -70,9 +76,13 @@ class DeleteInstitution(graphene.Mutation):
         id = graphene.ID(required=True)
 
     def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
 
         try:
-            institution = Institution.objects.get(pk=id)
+            institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
             raise GraphQLError("Institución no encontrada")
 
@@ -93,9 +103,13 @@ class CreateInstitutionGroup(graphene.Mutation):
         name = graphene.String(required=True)
 
     def mutate(self, info, institution_id, name):
+        try:
+            real_inst_id = int(graphene.relay.Node.from_global_id(institution_id)[1])
+        except:
+            real_inst_id = institution_id
 
         try:
-            institution = Institution.objects.get(pk=institution_id)
+            institution = Institution.objects.get(pk=real_inst_id)
         except Institution.DoesNotExist:
             raise GraphQLError("Institución no encontrada")
 
@@ -119,9 +133,13 @@ class UpdateInstitutionGroup(graphene.Mutation):
         name = graphene.String()
 
     def mutate(self, info, id, name=None):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
 
         try:
-            group = InstitutionGroup.objects.get(pk=id)
+            group = InstitutionGroup.objects.get(pk=real_id)
         except InstitutionGroup.DoesNotExist:
             raise GraphQLError("Grupo no encontrado")
 
@@ -144,9 +162,13 @@ class DeleteInstitutionGroup(graphene.Mutation):
         id = graphene.ID(required=True)
 
     def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
 
         try:
-            group = InstitutionGroup.objects.get(pk=id)
+            group = InstitutionGroup.objects.get(pk=real_id)
         except InstitutionGroup.DoesNotExist:
             raise GraphQLError("Grupo no encontrado")
 

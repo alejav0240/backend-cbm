@@ -1,8 +1,7 @@
 import graphene
-
+from graphql import GraphQLError
 from finance.models import Discount, Payment, Expense, Course, CourseEnrollment
 from finance.type import DiscountType, PaymentType, ExpenseType, CourseType, CourseEnrollmentType
-
 
 class Query(graphene.ObjectType):
     discounts = graphene.List(DiscountType)
@@ -25,51 +24,63 @@ class Query(graphene.ObjectType):
     course_enrollments = graphene.List(
         CourseEnrollmentType,
         course_id=graphene.ID(),
-        user_id=graphene.ID(),
     )
 
+    def resolve_discounts(self, info):
+        return Discount.objects.all()
 
-def resolve_discounts(self, info):
-    return Discount.objects.all()
+    def resolve_payments(self, info, patient_id=None, payment_status=None):
+        qs = Payment.objects.select_related("patient", "discount").all()
+        if patient_id:
+            try:
+                real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
+            except:
+                real_patient_id = patient_id
+            qs = qs.filter(patient_id=real_patient_id)
+        if payment_status:
+            qs = qs.filter(payment_status=payment_status)
+        return qs
 
+    def resolve_payment(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Payment.objects.select_related("patient", "discount").get(pk=real_id)
+        except Payment.DoesNotExist:
+            raise GraphQLError("Pago no encontrado")
 
-def resolve_payments(self, info, patient_id=None, payment_status=None):
-    qs = Payment.objects.select_related("patient", "discount").all()
-    if patient_id:
-        qs = qs.filter(patient_id=patient_id)
-    if payment_status:
-        qs = qs.filter(payment_status=payment_status)
-    return qs
+    def resolve_expenses(self, info, status=None, category=None):
+        qs = Expense.objects.all()
+        if status:
+            qs = qs.filter(status=status)
+        if category:
+            qs = qs.filter(category__icontains=category)
+        return qs
 
+    def resolve_courses(self, info, state=None):
+        qs = Course.objects.prefetch_related("enrollments").all()
+        if state:
+            qs = qs.filter(state=state)
+        return qs
 
-def resolve_payment(self, info, id):
-    return Payment.objects.select_related("patient", "discount").get(pk=id)
+    def resolve_course(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Course.objects.prefetch_related("enrollments__payment").get(pk=real_id)
+        except Course.DoesNotExist:
+            raise GraphQLError("Curso no encontrado")
 
-
-def resolve_expenses(self, info, status=None, category=None):
-    qs = Expense.objects.all()
-    if status:
-        qs = qs.filter(status=status)
-    if category:
-        qs = qs.filter(category__icontains=category)
-    return qs
-
-
-def resolve_courses(self, info, state=None):
-    qs = Course.objects.prefetch_related("enrollments").all()
-    if state:
-        qs = qs.filter(state=state)
-    return qs
-
-
-def resolve_course(self, info, id):
-    return Course.objects.prefetch_related("enrollments__payment").get(pk=id)
-
-
-def resolve_course_enrollments(self, info, course_id=None, user_id=None):
-    qs = CourseEnrollment.objects.select_related("course", "user").all()
-    if course_id:
-        qs = qs.filter(course_id=course_id)
-    if user_id:
-        qs = qs.filter(user_id=user_id)
-    return qs
+    def resolve_course_enrollments(self, info, course_id=None):
+        qs = CourseEnrollment.objects.select_related("course").all()
+        if course_id:
+            try:
+                real_course_id = int(graphene.relay.Node.from_global_id(course_id)[1])
+            except:
+                real_course_id = course_id
+            qs = qs.filter(course_id=real_course_id)
+        return qs

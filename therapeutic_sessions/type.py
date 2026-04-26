@@ -59,7 +59,8 @@ class SessionType(DjangoObjectType):
             "duration_minutes", "cycle_number",
             "notes", "video_url",
             "payment_status", "created_at", "updated_at",
-            "session_resources", "session_inventory","session_status",
+            "session_resources", "session_inventory",
+            "session_status","session_number",
         )
 
     # Campos calculados o representaciones amigables

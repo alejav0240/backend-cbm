@@ -2,7 +2,12 @@
 from graphene_django import DjangoObjectType
 from users.models import User, Notification
 
+import graphene
+
 class UserType(DjangoObjectType):
+    database_id = graphene.Int()
+    full_name = graphene.String()
+
     class Meta:
         model = User
         fields = (
@@ -11,6 +16,7 @@ class UserType(DjangoObjectType):
             "email",
             "first_name",
             "last_name",
+            "full_name",
             "ci",
             "celular",
             "status",
@@ -19,7 +25,11 @@ class UserType(DjangoObjectType):
             "cv",
             "is_active",
             "date_joined",
+            "is_staff",
         )
+
+    def resolve_database_id(self, info):
+        return self.pk
 
     def resolve_full_name(self, info):
         return f"{self.first_name} {self.last_name}".strip()

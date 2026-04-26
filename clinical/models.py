@@ -1,6 +1,6 @@
 from django.db import models
 from users.models import User
-
+from django.utils import timezone
 
 class Patient(models.Model):
 
@@ -21,7 +21,7 @@ class Patient(models.Model):
     last_name = models.CharField(max_length=100)
     ci = models.CharField(max_length=30, blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
-    image_url = models.URLField(blank=True, null=True)
+    image_url = models.TextField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -73,12 +73,11 @@ class PatientClinicalNote(models.Model):
     def __str__(self):
         return f"{self.get_category_display()} — {self.patient} ({self.created_at.date()})"
 
-
 class InterventionPlan(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="intervention_plans")
     created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="created_plans")
     main_objective = models.TextField()
-    start_date = models.DateField()
+    start_date = models.DateField(default=timezone.now)
     end_date = models.DateField(blank=True, null=True)
     progress_percent = models.PositiveSmallIntegerField(default=0)  # 0-100
     created_at = models.DateTimeField(auto_now_add=True)
@@ -89,7 +88,6 @@ class InterventionPlan(models.Model):
 
     def __str__(self):
         return f"Plan de {self.patient} — {self.start_date}"
-
 
 class PlanStep(models.Model):
 
@@ -108,6 +106,7 @@ class PlanStep(models.Model):
     approach = models.CharField(max_length=255, blank=True, null=True)
     mlt_method = models.CharField(max_length=100, blank=True, null=True)
     order_index = models.PositiveSmallIntegerField(default=0)
+    is_completed = models.BooleanField(default=False)
 
     class Meta:
         db_table = "plan_steps"

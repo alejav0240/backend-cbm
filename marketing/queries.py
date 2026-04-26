@@ -1,4 +1,5 @@
 import graphene
+from graphql import GraphQLError
 
 from marketing.models import MarketingCampaign, Lead
 from marketing.type import MarketingCampaignType, LeadType
@@ -28,15 +29,33 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_marketing_campaign(self, info, id):
-        return MarketingCampaign.objects.prefetch_related("leads").get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return MarketingCampaign.objects.prefetch_related("leads").get(pk=real_id)
+        except MarketingCampaign.DoesNotExist:
+            raise GraphQLError("Campaña no encontrada")
 
     def resolve_leads(self, info, campaign_id=None, status=None):
         qs = Lead.objects.select_related("campaign").all()
         if campaign_id:
-            qs = qs.filter(campaign_id=campaign_id)
+            try:
+                real_campaign_id = int(graphene.relay.Node.from_global_id(campaign_id)[1])
+            except:
+                real_campaign_id = campaign_id
+            qs = qs.filter(campaign_id=real_campaign_id)
         if status:
             qs = qs.filter(status=status)
         return qs
 
     def resolve_lead(self, info, id):
-        return Lead.objects.select_related("campaign").get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Lead.objects.select_related("campaign").get(pk=real_id)
+        except Lead.DoesNotExist:
+            raise GraphQLError("Lead no encontrado")
