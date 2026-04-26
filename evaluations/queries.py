@@ -1,4 +1,5 @@
 import graphene
+from graphql import GraphQLError
 
 from evaluations.models import Scale, ScaleEvaluation, Form, FormAssignment
 from evaluations.type import ScaleType, ScaleEvaluationType, FormType, FormAssignmentType
@@ -35,16 +36,31 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_scale(self, info, id):
-        return Scale.objects.prefetch_related("subscales", "values").get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Scale.objects.prefetch_related("subscales", "values").get(pk=real_id)
+        except Scale.DoesNotExist:
+            raise GraphQLError("Escala no encontrada")
 
     def resolve_scale_evaluations(self, info, patient_id=None, scale_id=None, in_session=None):
         qs = ScaleEvaluation.objects.select_related(
             "scale", "patient", "evaluator", "session"
         ).prefetch_related("subscale_responses", "value_responses")
         if patient_id:
-            qs = qs.filter(patient_id=patient_id)
+            try:
+                real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
+            except:
+                real_patient_id = patient_id
+            qs = qs.filter(patient_id=real_patient_id)
         if scale_id:
-            qs = qs.filter(scale_id=scale_id)
+            try:
+                real_scale_id = int(graphene.relay.Node.from_global_id(scale_id)[1])
+            except:
+                real_scale_id = scale_id
+            qs = qs.filter(scale_id=real_scale_id)
         if in_session is True:
             qs = qs.exclude(session=None)
         elif in_session is False:
@@ -52,10 +68,17 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_scale_evaluation(self, info, id):
-        return ScaleEvaluation.objects.prefetch_related(
-            "subscale_responses__subscale",
-            "value_responses__scale_value",
-        ).get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return ScaleEvaluation.objects.prefetch_related(
+                "subscale_responses__subscale",
+                "value_responses__scale_value",
+            ).get(pk=real_id)
+        except ScaleEvaluation.DoesNotExist:
+            raise GraphQLError("Evaluación de escala no encontrada")
 
     # ── Resolvers formularios ─────────────────────────────────
 
@@ -66,18 +89,40 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_form(self, info, id):
-        return Form.objects.prefetch_related("questions").get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Form.objects.prefetch_related("questions").get(pk=real_id)
+        except Form.DoesNotExist:
+            raise GraphQLError("Formulario no encontrado")
 
     def resolve_form_assignments(self, info, assigned_to_id=None, patient_id=None):
         qs = FormAssignment.objects.select_related(
             "form", "assigned_to", "assigned_by", "patient"
         ).prefetch_related("responses")
         if assigned_to_id:
-            qs = qs.filter(assigned_to_id=assigned_to_id)
+            try:
+                real_assigned_to_id = int(graphene.relay.Node.from_global_id(assigned_to_id)[1])
+            except:
+                real_assigned_to_id = assigned_to_id
+            qs = qs.filter(assigned_to_id=real_assigned_to_id)
         if patient_id:
-            qs = qs.filter(patient_id=patient_id)
+            try:
+                real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
+            except:
+                real_patient_id = patient_id
+            qs = qs.filter(patient_id=real_patient_id)
         return qs
 
     def resolve_form_assignment(self, info, id):
-        return FormAssignment.objects.prefetch_related("responses__question").get(pk=id)
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return FormAssignment.objects.prefetch_related("responses__question").get(pk=real_id)
+        except FormAssignment.DoesNotExist:
+            raise GraphQLError("Asignación de formulario no encontrada")
 

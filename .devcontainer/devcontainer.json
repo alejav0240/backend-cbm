@@ -1,0 +1,28 @@
+{
+  "name": "CBM Backend (Django)",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "backend",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "batisteo.vscode-django",
+        "graphql.vscode-graphql",
+        "njpwerner.autodocstring",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black"
+      }
+    }
+  },
+  "remoteUser": "root",
+  "forwardPorts": [8000, 5432],
+  "postCreateCommand": "pip install -r requirements.txt && python manage.py migrate"
+}

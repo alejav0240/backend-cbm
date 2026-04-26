@@ -64,7 +64,7 @@ class ScaleEvaluation(models.Model):
     evaluator = models.ForeignKey(User, on_delete=models.PROTECT, related_name="scale_evaluations")
     # Import diferido para evitar circular import con therapeutic_sessions
     session = models.ForeignKey(
-        "sessions.Session",
+        "therapeutic_sessions.Session",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

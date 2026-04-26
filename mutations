@@ -79,3 +79,88 @@ mutation MyMutation {
 }
 
 # -----------------------------------------------------------------------------
+        # - crear nueva Sesion por Paciente
+mutation CrearSesion {
+  createSession(
+    patientId: "1"
+    sessionDate: "2025-02-10"
+    sessionType: "individual"
+    therapistId: "1"
+    durationMinutes: 45
+    notes: "Primera sesión de encuadre. El paciente se muestra receptivo a los instrumentos de viento. Se observa buena respuesta al contacto visual inicial."
+  ) {
+    session {
+      id
+      sessionNumber
+      cycleNumber
+      sessionDate
+      durationMinutes
+      patient {
+        fullName
+      }
+    }
+  }
+}
+# - responder escala de subescalas
+mutation {
+  addScaleResponse(
+    patientId: "1"
+    evaluatorId: "1"
+    scaleId: "1" # Ej: Escala de Desarrollo Musical
+    sessionId: null
+    subscales: [
+      { subscaleId: "1", score: 15.5 },
+      { subscaleId: "2", score: 10.0 }
+    ]
+  ) {
+    success
+    message
+  }
+}
+# - responder escala de valor
+mutation {
+  addScaleResponse(
+    patientId: "1",
+    evaluatorId: "1",
+    scaleId: "2",
+    scaleValue: "2"
+  ) {
+    success
+    message
+  }
+}
+#  crear plan de intervencion
+mutation {
+  createInterventionPlan(
+    createdById: "1"
+    mainObjective: "eee"
+    patientId: "1"
+    startDate:"2025-02-10"
+  ) {
+    plan {
+      startDate
+      mainObjective
+      progressPercent
+    }
+  }
+}
+# crear paso en el plan de intervencion
+mutation {
+  createStepPlan(
+    planId: "2"
+    moment: "development"
+    durationMinutes: 20
+    objective: "Estimular la respuesta rítmica sincrónica"
+    focus: "Uso del tambor de pie para marcar el pulso"
+    musicalResources: "Tambor, Piano, Metrónomo visual"
+    musicalEmphasis: "Ritmo y Tempo"
+    approach: "Improvisación clínica"
+    mltMethod: "Audiation progresiva"
+  ) {
+    step {
+      id
+      orderIndex
+      objective
+    }
+  }
+}

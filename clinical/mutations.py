@@ -4,9 +4,11 @@ from datetime import date
 import graphene
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
-from clinical.models import Patient, PatientClinicalNote, InterventionPlan
-from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType
+from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep
+from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType
 from users.models import User
+from django.db.models import Max
+from django.db.models.functions import Coalesce
 
 
 def _generate_username(last_name: str, ci: str | None) -> str:
@@ -167,11 +169,23 @@ class UpdatePatientStatus(graphene.Mutation):
     patient = graphene.Field(PatientType)
 
     def mutate(self, info, id, status):
-        patient = Patient.objects.get(pk=id)
+        # Manejar ID de Relay o ID directo y convertir a int
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            try:
+                real_id = int(id)
+            except:
+                real_id = id
+
+        try:
+            patient = Patient.objects.get(pk=real_id)
+        except Patient.DoesNotExist:
+            raise Exception("Paciente no encontrado")
+
         patient.status = status
         patient.save(update_fields=["status", "updated_at"])
         return UpdatePatientStatus(patient=patient)
-
 
 class UpdatePatient(graphene.Mutation):
     class Arguments:
@@ -180,14 +194,24 @@ class UpdatePatient(graphene.Mutation):
         image_url = graphene.String()
         residence = graphene.String()
         diagnosis = graphene.String()
+        registration_complete = graphene.Boolean()
 
     patient = graphene.Field(PatientType)
 
     # 2. El parámetro DEBE llamarse 'id' para coincidir con Arguments
-    def mutate(self, info, id, image_url=None, residence=None, diagnosis=None):
+    def mutate(self, info, id, image_url=None, residence=None, diagnosis=None, registration_complete=None):
         try:
+            # Manejar ID de Relay o ID directo y convertir a int
+            try:
+                real_id = int(graphene.relay.Node.from_global_id(id)[1])
+            except:
+                try:
+                    real_id = int(id)
+                except:
+                    real_id = id
+                
             # 3. Usa ese 'id' para buscar al paciente
-            patient = Patient.objects.get(pk=id)
+            patient = Patient.objects.get(pk=real_id)
 
             if image_url is not None:
                 patient.image_url = image_url
@@ -195,6 +219,8 @@ class UpdatePatient(graphene.Mutation):
                 patient.residence = residence
             if diagnosis is not None:
                 patient.diagnosis = diagnosis
+            if registration_complete is not None:
+                patient.registration_complete = registration_complete
 
             patient.save()
             return UpdatePatient(patient=patient)
@@ -239,12 +265,24 @@ class UpdateClinicalNotes(graphene.Mutation):
     notes_updated = graphene.List(PatientClinicalNoteType)
 
     def mutate(self, info, patient_id, author_id, notes):
+        # Manejar ID de Relay o ID directo para el paciente
+        try:
+            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
+        except:
+            try:
+                real_patient_id = int(patient_id)
+            except:
+                real_patient_id = patient_id
+
         updated_instances = []
 
         for n in notes:
+            # Sincronizamos con el modelo usando .upper()
+            category_upper = n.category.upper()
+            
             note, created = PatientClinicalNote.objects.update_or_create(
-                patient_id=patient_id,
-                category=n.category.lower(),
+                patient_id=real_patient_id,
+                category=category_upper,
                 defaults={
                     'content': n.content,
                     'author_id': author_id  # Actualiza quién hizo la última edición
@@ -259,13 +297,13 @@ class CreateInterventionPlan(graphene.Mutation):
         patient_id = graphene.ID(required=True)
         created_by_id = graphene.ID(required=True)
         main_objective = graphene.String(required=True)
-        start_date = graphene.Date(required=True)
+        start_date = graphene.Date()
         end_date = graphene.Date()
 
     plan = graphene.Field(InterventionPlanType)
 
     def mutate(self, info, patient_id, created_by_id, main_objective,
-               start_date, end_date=None):
+               start_date=None, end_date=None):
         plan = InterventionPlan.objects.create(
             patient_id=patient_id,
             created_by_id=created_by_id,
@@ -275,6 +313,47 @@ class CreateInterventionPlan(graphene.Mutation):
         )
         return CreateInterventionPlan(plan=plan)
 
+class CreateStepPlan(graphene.Mutation):
+    class Arguments:
+        plan_id = graphene.ID(required=True)
+        moment = graphene.String(required=True)  # Corregido de 'momment'
+        duration_minutes = graphene.Int()        # En Graphene es .Int(), no .Integer()
+        objective = graphene.String(required=True)
+        focus = graphene.String()
+        musical_resources = graphene.String()
+        musical_emphasis = graphene.String()
+        approach = graphene.String()
+        mlt_method = graphene.String()
+        order_index = graphene.Int()
+
+    # El campo que devuelve la mutación
+    step = graphene.Field(PlanStepType) # Asumiendo que ya definiste tu DjangoObjectType
+
+    def mutate(self, info, plan_id, moment, objective, **kwargs):
+        # 1. Lógica automática para el índice de orden
+        order_index = kwargs.get('order_index')
+        if order_index is None:
+            last_order = PlanStep.objects.filter(plan_id=plan_id).aggregate(
+                max_order=Coalesce(Max('order_index'), 0)
+            )
+            order_index = last_order['max_order'] + 1
+
+        # 2. Creación del registro
+        step = PlanStep.objects.create(
+            plan_id=plan_id,
+            moment=moment.lower(), # Aseguramos que guarde 'initial', 'development' o 'closure'
+            objective=objective,
+            duration_minutes=kwargs.get('duration_minutes'),
+            focus=kwargs.get('focus'),
+            musical_resources=kwargs.get('musical_resources'),
+            musical_emphasis=kwargs.get('musical_emphasis'),
+            approach=kwargs.get('approach'),
+            mlt_method=kwargs.get('mlt_method'),
+            order_index=order_index
+        )
+
+        return CreateStepPlan(step=step)
+
 class UpdatePlanProgress(graphene.Mutation):
     class Arguments:
         id = graphene.ID(required=True)
@@ -283,10 +362,69 @@ class UpdatePlanProgress(graphene.Mutation):
     plan = graphene.Field(InterventionPlanType)
 
     def mutate(self, info, id, progress_percent):
-        plan = InterventionPlan.objects.get(pk=id)
+        try:
+            plan = InterventionPlan.objects.get(pk=id)
+        except InterventionPlan.DoesNotExist:
+            raise Exception("Plan de intervención no encontrado")
+        
         plan.progress_percent = max(0, min(100, progress_percent))
         plan.save(update_fields=["progress_percent", "updated_at"])
         return UpdatePlanProgress(plan=plan)
+
+
+class UpdateStepProgress(graphene.Mutation):
+    class Arguments:
+        step_id = graphene.ID(required=True)
+        is_completed = graphene.Boolean()
+        actual_duration = graphene.Int()
+
+    # Devolvemos el objeto actualizado
+    step = graphene.Field(PlanStepType)
+    success = graphene.Boolean()
+
+    def mutate(self, info, step_id, is_completed=None, actual_duration=None):
+        try:
+            # 1. Buscar el paso del plan
+            step = PlanStep.objects.get(pk=step_id)
+
+            # 2. Actualización parcial (solo si los valores vienen en la mutación)
+            if is_completed is not None:
+                step.is_completed = is_completed
+
+            if actual_duration is not None:
+                step.actual_duration = actual_duration
+
+            # 3. Guardar cambios
+            step.save()
+
+            return UpdateStepProgress(step=step, success=True)
+
+        except PlanStep.DoesNotExist:
+            raise Exception("El paso del plan no existe.")
+
+class DeletePatient(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    def mutate(self, info, id):
+        try:
+            # En este proyecto usamos IDs directos, pero manejamos la posibilidad de Relay IDs por si acaso
+            try:
+                real_id = graphene.relay.Node.from_global_id(id)[1]
+            except:
+                real_id = id
+
+            patient = Patient.objects.get(pk=real_id)
+            patient.delete()
+            return DeletePatient(success=True, message="Paciente eliminado correctamente")
+
+        except Patient.DoesNotExist:
+            return DeletePatient(success=False, message="El paciente no existe")
+        except Exception as e:
+            return DeletePatient(success=False, message=str(e))
 
 class Mutation(graphene.ObjectType):
     create_patient = CreatePatient.Field()
@@ -296,3 +434,6 @@ class Mutation(graphene.ObjectType):
     update_plan_progress = UpdatePlanProgress.Field()
     update_patient = UpdatePatient.Field()
     update_clinical_notes = UpdateClinicalNotes.Field()
+    create_step_plan = CreateStepPlan.Field()
+    update_step_progress = UpdateStepProgress.Field()
+    delete_patient = DeletePatient.Field()

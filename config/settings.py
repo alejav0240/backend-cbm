@@ -42,6 +42,7 @@ INSTALLED_APPS = [
 
     # externas
     'graphene_django',
+    'graphql_jwt.refresh_token',  # Requerido para JWT_LONG_RUNNING_REFRESH_TOKEN
     'corsheaders',
 
     # propias
@@ -127,23 +128,48 @@ GRAPHENE = {
 
 #CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo
 
-# Autoriza a tu front-end
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
 AUTHENTICATION_BACKENDS = [
     "graphql_jwt.backends.JSONWebTokenBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
+
+AUTH_USER_MODEL = "users.User"
 
 import datetime
 
 JWT_EXPIRATION_DELTA = datetime.timedelta(minutes=5)
 JWT_REFRESH_EXPIRATION_DELTA = datetime.timedelta(days=7)
 
-AUTH_USER_MODEL = "users.User"
+GRAPHQL_JWT = {
+    "JWT_VERIFY_EXPIRATION": True,
+    "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
+
+    # Cookies
+    "JWT_COOKIE_NAME": "access_token",
+    "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
+    "JWT_COOKIE_HTTPONLY": True,
+    "JWT_COOKIE_SECURE": False,
+    "JWT_COOKIE_SAMESITE": "Lax",
+}
+
+CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = False
+
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = "Lax"
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Autoriza a tu front-end
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 # settings.py
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -151,9 +177,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es-bo'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/La_Paz'
 
 USE_I18N = True
 

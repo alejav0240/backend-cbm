@@ -63,3 +63,7 @@ class TherapyReportType(DjangoObjectType):
     class Meta:
         model = TherapyReport
         fields = ("id", "patient", "generated_by", "report_url", "created_at")
+
+class GrowthPointType(graphene.ObjectType):
+    month = graphene.String()
+    total = graphene.Int()

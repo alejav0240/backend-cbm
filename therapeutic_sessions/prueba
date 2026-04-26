@@ -1,0 +1,1086 @@
+"""
+queries.py — Queries y Mutations GraphQL con graphene-django
+Estructura:
+  - Query: todas las lecturas del sistema
+  - Mutation: todas las escrituras agrupadas por dominio
+"""
+
+import graphene
+from graphene_django.filter import DjangoFilterConnectionField
+
+from clinical.models import (
+    InterventionPlan,
+    Patient,
+    PatientClinicalNote,
+    PlanStep,
+    TherapyReport,
+)
+from evaluations.models import (
+    Form,
+    FormAssignment,
+    FormQuestion,
+    FormResponse,
+    Scale,
+    ScaleEvaluation,
+    ScaleEvaluationSubscaleResponse,
+    ScaleEvaluationValueResponse,
+    ScaleValue,
+    Subscale,
+)
+from finance.models import (
+    Course,
+    CourseEnrollment,
+    CoursePayment,
+    Discount,
+    Expense,
+    Payment,
+)
+from institutions.models import Institution, InstitutionGroup
+from marketing.models import Lead, MarketingCampaign
+from sessions.models import (
+    AiAnalysis,
+    DigitalResource,
+    InventoryItem,
+    Session,
+    SessionInventory,
+    SessionResource,
+)
+from users.models import Notification, Role, User
+
+from .schema import (
+    CyclePaymentSummaryType,
+    CycleType,
+    AiAnalysisType,
+    CourseEnrollmentType,
+    CoursePaymentType,
+    CourseType,
+    DigitalResourceType,
+    DiscountType,
+    ExpenseType,
+    FormAssignmentType,
+    FormQuestionType,
+    FormResponseType,
+    FormType,
+    InstitutionGroupType,
+    InstitutionType,
+    InventoryItemType,
+    LeadType,
+    MarketingCampaignType,
+    NotificationType,
+    PatientClinicalNoteType,
+    PatientType,
+    InterventionPlanType,
+    PlanStepType,
+    TherapyReportType,
+    PaymentType,
+    RoleType,
+    ScaleEvaluationSubscaleResponseType,
+    ScaleEvaluationValueResponseType,
+    ScaleEvaluationType,
+    ScaleType,
+    ScaleValueType,
+    SessionInventoryType,
+    SessionResourceType,
+    SessionType,
+    SubscaleType,
+    UserType,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# HELPER — agrupación de ciclos
+# Un ciclo = conjunto de sesiones con el mismo (patient_id, cycle_number).
+# Se construye en Python sobre un queryset ya filtrado para evitar
+# múltiples queries: 1 query de sesiones → agrupación en memoria.
+# ═══════════════════════════════════════════════════════════════
+
+def _build_cycles(base_qs):
+    """
+    Recibe un queryset de Session con cycle_number__isnull=False.
+    Devuelve una lista de CycleType ordenada por patient y cycle_number.
+    """
+    from collections import defaultdict
+    from .schema import CyclePaymentSummaryType, CycleType
+
+    sessions = (
+        base_qs
+        .select_related("patient", "therapist")
+        .order_by("patient_id", "cycle_number", "session_date")
+    )
+
+    # Agrupa en memoria: clave = (patient_id, cycle_number)
+    groups = defaultdict(list)
+    for s in sessions:
+        groups[(s.patient_id, s.cycle_number)].append(s)
+
+    cycles = []
+    for (patient_id, cycle_number), sess_list in sorted(groups.items()):
+        first = sess_list[0]
+        last = sess_list[-1]
+
+        # Terapeutas únicos del ciclo (preserva orden de aparición)
+        seen_therapist_ids = set()
+        therapists = []
+        for s in sess_list:
+            if s.therapist_id not in seen_therapist_ids:
+                seen_therapist_ids.add(s.therapist_id)
+                therapists.append(s.therapist)
+
+        # Resumen de pagos
+        paid = sum(1 for s in sess_list if s.payment_status == "paid")
+        pending = sum(1 for s in sess_list if s.payment_status == "pending")
+        exempt = sum(1 for s in sess_list if s.payment_status == "exempt")
+
+        cycles.append(
+            CycleType(
+                patient_id=patient_id,
+                patient_name=f"{first.patient.first_name} {first.patient.last_name}",
+                cycle_number=cycle_number,
+                session_count=len(sess_list),
+                first_session_date=first.session_date,
+                last_session_date=last.session_date,
+                therapists=therapists,
+                payment_summary=CyclePaymentSummaryType(
+                    paid=paid,
+                    pending=pending,
+                    exempt=exempt,
+                ),
+            )
+        )
+    return cycles
+
+
+# ═══════════════════════════════════════════════════════════════
+# QUERY RAÍZ
+# ═══════════════════════════════════════════════════════════════
+
+class Query(graphene.ObjectType):
+
+    # ── Usuarios ──────────────────────────────────────────────
+    roles = graphene.List(RoleType)
+    role = graphene.Field(RoleType, id=graphene.ID(required=True))
+
+    users = graphene.List(
+        UserType,
+        is_active=graphene.Boolean(),
+        role_name=graphene.String(),
+    )
+    user = graphene.Field(UserType, id=graphene.ID(required=True))
+
+    notifications = graphene.List(
+        NotificationType,
+        user_id=graphene.ID(required=True),
+        is_read=graphene.Boolean(),
+    )
+
+    # ── Clínico ───────────────────────────────────────────────
+    patients = graphene.List(
+        PatientType,
+        status=graphene.String(),
+        search=graphene.String(),
+    )
+    patient = graphene.Field(PatientType, id=graphene.ID(required=True))
+
+    clinical_notes = graphene.List(
+        PatientClinicalNoteType,
+        patient_id=graphene.ID(required=True),
+        category=graphene.String(),
+    )
+
+    intervention_plans = graphene.List(
+        InterventionPlanType,
+        patient_id=graphene.ID(required=True),
+    )
+    intervention_plan = graphene.Field(InterventionPlanType, id=graphene.ID(required=True))
+
+    therapy_reports = graphene.List(
+        TherapyReportType,
+        patient_id=graphene.ID(required=True),
+    )
+
+    # Ciclos de un paciente específico
+    patient_cycles = graphene.List(
+        CycleType,
+        patient_id=graphene.ID(required=True),
+        description="Ciclos de sesiones de un paciente, agrupados por cycle_number.",
+    )
+
+    # Ciclos de todos los pacientes activos
+    all_patient_cycles = graphene.List(
+        CycleType,
+        description="Ciclos de todos los pacientes, ordenados por paciente y cycle_number.",
+    )
+
+    # ── Instituciones ─────────────────────────────────────────
+    institutions = graphene.List(InstitutionType)
+    institution = graphene.Field(InstitutionType, id=graphene.ID(required=True))
+    institution_groups = graphene.List(
+        InstitutionGroupType,
+        institution_id=graphene.ID(required=True),
+    )
+
+    # ── Sesiones ──────────────────────────────────────────────
+    sessions = graphene.List(
+        SessionType,
+        patient_id=graphene.ID(),
+        therapist_id=graphene.ID(),
+        session_type=graphene.String(),
+        payment_status=graphene.String(),
+    )
+    session = graphene.Field(SessionType, id=graphene.ID(required=True))
+
+    digital_resources = graphene.List(
+        DigitalResourceType,
+        type=graphene.String(),
+        search=graphene.String(),
+    )
+    digital_resource = graphene.Field(DigitalResourceType, id=graphene.ID(required=True))
+
+    inventory_items = graphene.List(
+        InventoryItemType,
+        status=graphene.String(),
+        type=graphene.String(),
+    )
+    inventory_item = graphene.Field(InventoryItemType, id=graphene.ID(required=True))
+
+    ai_analysis = graphene.Field(AiAnalysisType, session_id=graphene.ID(required=True))
+
+    # ── Evaluaciones — Escalas ────────────────────────────────
+    scales = graphene.List(ScaleType, scale_type=graphene.String())
+    scale = graphene.Field(ScaleType, id=graphene.ID(required=True))
+
+    scale_evaluations = graphene.List(
+        ScaleEvaluationType,
+        patient_id=graphene.ID(),
+        scale_id=graphene.ID(),
+        in_session=graphene.Boolean(),
+    )
+    scale_evaluation = graphene.Field(ScaleEvaluationType, id=graphene.ID(required=True))
+
+    # ── Evaluaciones — Formularios ────────────────────────────
+    forms = graphene.List(FormType, search=graphene.String())
+    form = graphene.Field(FormType, id=graphene.ID(required=True))
+
+    form_assignments = graphene.List(
+        FormAssignmentType,
+        assigned_to_id=graphene.ID(),
+        patient_id=graphene.ID(),
+    )
+    form_assignment = graphene.Field(FormAssignmentType, id=graphene.ID(required=True))
+
+    # ── Finanzas ──────────────────────────────────────────────
+    discounts = graphene.List(DiscountType)
+    payments = graphene.List(
+        PaymentType,
+        patient_id=graphene.ID(),
+        payment_status=graphene.String(),
+    )
+    payment = graphene.Field(PaymentType, id=graphene.ID(required=True))
+
+    expenses = graphene.List(
+        ExpenseType,
+        status=graphene.String(),
+        category=graphene.String(),
+    )
+
+    courses = graphene.List(CourseType, state=graphene.String())
+    course = graphene.Field(CourseType, id=graphene.ID(required=True))
+
+    course_enrollments = graphene.List(
+        CourseEnrollmentType,
+        course_id=graphene.ID(),
+        user_id=graphene.ID(),
+    )
+
+    # ── Marketing ─────────────────────────────────────────────
+    marketing_campaigns = graphene.List(
+        MarketingCampaignType,
+        status=graphene.String(),
+        platform=graphene.String(),
+    )
+    marketing_campaign = graphene.Field(MarketingCampaignType, id=graphene.ID(required=True))
+
+    leads = graphene.List(
+        LeadType,
+        campaign_id=graphene.ID(),
+        status=graphene.String(),
+    )
+    lead = graphene.Field(LeadType, id=graphene.ID(required=True))
+
+    # ── Resolvers usuarios ────────────────────────────────────
+
+    def resolve_roles(self, info):
+        return Role.objects.all()
+
+    def resolve_role(self, info, id):
+        return Role.objects.get(pk=id)
+
+    def resolve_users(self, info, is_active=None, role_name=None):
+        qs = User.objects.select_related("role").all()
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+        if role_name:
+            qs = qs.filter(role__name=role_name)
+        return qs
+
+    def resolve_user(self, info, id):
+        return User.objects.select_related("role").get(pk=id)
+
+    def resolve_notifications(self, info, user_id, is_read=None):
+        qs = Notification.objects.filter(user_id=user_id)
+        if is_read is not None:
+            qs = qs.filter(is_read=is_read)
+        return qs
+
+    # ── Resolvers clínico ─────────────────────────────────────
+
+    def resolve_patients(self, info, status=None, search=None):
+        qs = Patient.objects.select_related("tutor").all()
+        if status:
+            qs = qs.filter(status=status)
+        if search:
+            qs = qs.filter(
+                first_name__icontains=search
+            ) | qs.filter(
+                last_name__icontains=search
+            ) | qs.filter(
+                identification__icontains=search
+            )
+        return qs
+
+    def resolve_patient(self, info, id):
+        return Patient.objects.select_related("tutor").get(pk=id)
+
+    def resolve_clinical_notes(self, info, patient_id, category=None):
+        qs = PatientClinicalNote.objects.filter(patient_id=patient_id).select_related("author")
+        if category:
+            qs = qs.filter(category=category)
+        return qs
+
+    def resolve_intervention_plans(self, info, patient_id):
+        return InterventionPlan.objects.filter(patient_id=patient_id).prefetch_related("steps")
+
+    def resolve_intervention_plan(self, info, id):
+        return InterventionPlan.objects.prefetch_related("steps").get(pk=id)
+
+    def resolve_therapy_reports(self, info, patient_id):
+        return TherapyReport.objects.filter(patient_id=patient_id).select_related("generated_by")
+
+    def resolve_patient_cycles(self, info, patient_id):
+        return _build_cycles(Session.objects.filter(
+            patient_id=patient_id,
+            cycle_number__isnull=False,
+        ))
+
+    def resolve_all_patient_cycles(self, info):
+        return _build_cycles(Session.objects.filter(
+            cycle_number__isnull=False,
+        ))
+
+    # ── Resolvers instituciones ───────────────────────────────
+
+    def resolve_institutions(self, info):
+        return Institution.objects.prefetch_related("groups").all()
+
+    def resolve_institution(self, info, id):
+        return Institution.objects.prefetch_related("groups").get(pk=id)
+
+    def resolve_institution_groups(self, info, institution_id):
+        return InstitutionGroup.objects.filter(institution_id=institution_id)
+
+    # ── Resolvers sesiones ────────────────────────────────────
+
+    def resolve_sessions(self, info, patient_id=None, therapist_id=None,
+                          session_type=None, payment_status=None):
+        qs = Session.objects.select_related("patient", "therapist", "group").all()
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        if therapist_id:
+            qs = qs.filter(therapist_id=therapist_id)
+        if session_type:
+            qs = qs.filter(session_type=session_type)
+        if payment_status:
+            qs = qs.filter(payment_status=payment_status)
+        return qs
+
+    def resolve_session(self, info, id):
+        return Session.objects.select_related(
+            "patient", "therapist", "group"
+        ).prefetch_related(
+            "session_resources__resource",
+            "session_inventory__item",
+            "scale_evaluations",
+        ).get(pk=id)
+
+    def resolve_digital_resources(self, info, type=None, search=None):
+        qs = DigitalResource.objects.all()
+        if type:
+            qs = qs.filter(type=type)
+        if search:
+            qs = qs.filter(title__icontains=search)
+        return qs
+
+    def resolve_digital_resource(self, info, id):
+        return DigitalResource.objects.get(pk=id)
+
+    def resolve_inventory_items(self, info, status=None, type=None):
+        qs = InventoryItem.objects.all()
+        if status:
+            qs = qs.filter(status=status)
+        if type:
+            qs = qs.filter(type=type)
+        return qs
+
+    def resolve_inventory_item(self, info, id):
+        return InventoryItem.objects.get(pk=id)
+
+    def resolve_ai_analysis(self, info, session_id):
+        return AiAnalysis.objects.get(session_id=session_id)
+
+    # ── Resolvers escalas ─────────────────────────────────────
+
+    def resolve_scales(self, info, scale_type=None):
+        qs = Scale.objects.prefetch_related("subscales", "values").all()
+        if scale_type:
+            qs = qs.filter(scale_type=scale_type)
+        return qs
+
+    def resolve_scale(self, info, id):
+        return Scale.objects.prefetch_related("subscales", "values").get(pk=id)
+
+    def resolve_scale_evaluations(self, info, patient_id=None, scale_id=None, in_session=None):
+        qs = ScaleEvaluation.objects.select_related(
+            "scale", "patient", "evaluator", "session"
+        ).prefetch_related("subscale_responses", "value_responses")
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        if scale_id:
+            qs = qs.filter(scale_id=scale_id)
+        if in_session is True:
+            qs = qs.exclude(session=None)
+        elif in_session is False:
+            qs = qs.filter(session=None)
+        return qs
+
+    def resolve_scale_evaluation(self, info, id):
+        return ScaleEvaluation.objects.prefetch_related(
+            "subscale_responses__subscale",
+            "value_responses__scale_value",
+        ).get(pk=id)
+
+    # ── Resolvers formularios ─────────────────────────────────
+
+    def resolve_forms(self, info, search=None):
+        qs = Form.objects.prefetch_related("questions").all()
+        if search:
+            qs = qs.filter(name__icontains=search)
+        return qs
+
+    def resolve_form(self, info, id):
+        return Form.objects.prefetch_related("questions").get(pk=id)
+
+    def resolve_form_assignments(self, info, assigned_to_id=None, patient_id=None):
+        qs = FormAssignment.objects.select_related(
+            "form", "assigned_to", "assigned_by", "patient"
+        ).prefetch_related("responses")
+        if assigned_to_id:
+            qs = qs.filter(assigned_to_id=assigned_to_id)
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        return qs
+
+    def resolve_form_assignment(self, info, id):
+        return FormAssignment.objects.prefetch_related("responses__question").get(pk=id)
+
+    # ── Resolvers finanzas ────────────────────────────────────
+
+    def resolve_discounts(self, info):
+        return Discount.objects.all()
+
+    def resolve_payments(self, info, patient_id=None, payment_status=None):
+        qs = Payment.objects.select_related("patient", "discount").all()
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        if payment_status:
+            qs = qs.filter(payment_status=payment_status)
+        return qs
+
+    def resolve_payment(self, info, id):
+        return Payment.objects.select_related("patient", "discount").get(pk=id)
+
+    def resolve_expenses(self, info, status=None, category=None):
+        qs = Expense.objects.all()
+        if status:
+            qs = qs.filter(status=status)
+        if category:
+            qs = qs.filter(category__icontains=category)
+        return qs
+
+    def resolve_courses(self, info, state=None):
+        qs = Course.objects.prefetch_related("enrollments").all()
+        if state:
+            qs = qs.filter(state=state)
+        return qs
+
+    def resolve_course(self, info, id):
+        return Course.objects.prefetch_related("enrollments__payment").get(pk=id)
+
+    def resolve_course_enrollments(self, info, course_id=None, user_id=None):
+        qs = CourseEnrollment.objects.select_related("course", "user").all()
+        if course_id:
+            qs = qs.filter(course_id=course_id)
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        return qs
+
+    # ── Resolvers marketing ───────────────────────────────────
+
+    def resolve_marketing_campaigns(self, info, status=None, platform=None):
+        qs = MarketingCampaign.objects.prefetch_related("leads").all()
+        if status:
+            qs = qs.filter(status=status)
+        if platform:
+            qs = qs.filter(platform__icontains=platform)
+        return qs
+
+    def resolve_marketing_campaign(self, info, id):
+        return MarketingCampaign.objects.prefetch_related("leads").get(pk=id)
+
+    def resolve_leads(self, info, campaign_id=None, status=None):
+        qs = Lead.objects.select_related("campaign").all()
+        if campaign_id:
+            qs = qs.filter(campaign_id=campaign_id)
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+    def resolve_lead(self, info, id):
+        return Lead.objects.select_related("campaign").get(pk=id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — USUARIOS
+# ═══════════════════════════════════════════════════════════════
+
+class CreateUser(graphene.Mutation):
+    class Arguments:
+        username = graphene.String(required=True)
+        email = graphene.String(required=True)
+        password = graphene.String(required=True)
+        first_name = graphene.String(required=True)
+        last_name = graphene.String(required=True)
+        role_id = graphene.ID(required=True)
+        ci = graphene.String()
+        phone = graphene.String()
+
+    user = graphene.Field(UserType)
+
+    def mutate(self, info, username, email, password, first_name, last_name, role_id,
+               ci=None, phone=None):
+        from django.contrib.auth.hashers import make_password
+        user = User.objects.create(
+            username=username,
+            email=email,
+            password=make_password(password),
+            first_name=first_name,
+            last_name=last_name,
+            role_id=role_id,
+            ci=ci,
+            phone=phone,
+        )
+        return CreateUser(user=user)
+
+
+class UpdateUser(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        first_name = graphene.String()
+        last_name = graphene.String()
+        email = graphene.String()
+        phone = graphene.String()
+        ci = graphene.String()
+        is_active = graphene.Boolean()
+        role_id = graphene.ID()
+
+    user = graphene.Field(UserType)
+
+    def mutate(self, info, id, **kwargs):
+        user = User.objects.get(pk=id)
+        for field, value in kwargs.items():
+            setattr(user, field, value)
+        user.save()
+        return UpdateUser(user=user)
+
+
+class MarkNotificationRead(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    notification = graphene.Field(NotificationType)
+
+    def mutate(self, info, id):
+        notif = Notification.objects.get(pk=id)
+        notif.is_read = True
+        notif.save(update_fields=["is_read"])
+        return MarkNotificationRead(notification=notif)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — CLÍNICO
+# ═══════════════════════════════════════════════════════════════
+
+class CreatePatient(graphene.Mutation):
+    class Arguments:
+        first_name = graphene.String(required=True)
+        last_name = graphene.String(required=True)
+        identification = graphene.String()
+        birth_date = graphene.Date()
+        image_url = graphene.String()
+        notes = graphene.String()
+        tutor_id = graphene.ID()
+
+    patient = graphene.Field(PatientType)
+
+    def mutate(self, info, first_name, last_name, identification=None,
+               birth_date=None, image_url=None, notes=None, tutor_id=None):
+        patient = Patient.objects.create(
+            first_name=first_name,
+            last_name=last_name,
+            identification=identification,
+            birth_date=birth_date,
+            image_url=image_url,
+            notes=notes,
+            tutor_id=tutor_id,
+        )
+        return CreatePatient(patient=patient)
+
+
+class UpdatePatientStatus(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        status = graphene.String(required=True)
+
+    patient = graphene.Field(PatientType)
+
+    def mutate(self, info, id, status):
+        patient = Patient.objects.get(pk=id)
+        patient.status = status
+        patient.save(update_fields=["status", "updated_at"])
+        return UpdatePatientStatus(patient=patient)
+
+
+class AddClinicalNote(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        author_id = graphene.ID(required=True)
+        category = graphene.String(required=True)
+        content = graphene.String(required=True)
+
+    note = graphene.Field(PatientClinicalNoteType)
+
+    def mutate(self, info, patient_id, author_id, category, content):
+        note = PatientClinicalNote.objects.create(
+            patient_id=patient_id,
+            author_id=author_id,
+            category=category,
+            content=content,
+        )
+        return AddClinicalNote(note=note)
+
+
+class CreateInterventionPlan(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        created_by_id = graphene.ID(required=True)
+        main_objective = graphene.String(required=True)
+        start_date = graphene.Date(required=True)
+        end_date = graphene.Date()
+
+    plan = graphene.Field(InterventionPlanType)
+
+    def mutate(self, info, patient_id, created_by_id, main_objective,
+               start_date, end_date=None):
+        plan = InterventionPlan.objects.create(
+            patient_id=patient_id,
+            created_by_id=created_by_id,
+            main_objective=main_objective,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return CreateInterventionPlan(plan=plan)
+
+
+class UpdatePlanProgress(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        progress_percent = graphene.Int(required=True)
+
+    plan = graphene.Field(InterventionPlanType)
+
+    def mutate(self, info, id, progress_percent):
+        plan = InterventionPlan.objects.get(pk=id)
+        plan.progress_percent = max(0, min(100, progress_percent))
+        plan.save(update_fields=["progress_percent", "updated_at"])
+        return UpdatePlanProgress(plan=plan)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — SESIONES
+# ═══════════════════════════════════════════════════════════════
+
+class CreateSession(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        therapist_id = graphene.ID(required=True)
+        session_date = graphene.DateTime(required=True)
+        session_type = graphene.String(required=True)
+        duration_minutes = graphene.Int()
+        cycle_number = graphene.Int()
+        notes = graphene.String()
+        group_id = graphene.ID()
+        video_url = graphene.String()
+        audio_url = graphene.String()
+
+    session = graphene.Field(SessionType)
+
+    def mutate(self, info, patient_id, therapist_id, session_date, session_type,
+               duration_minutes=None, cycle_number=None, notes=None,
+               group_id=None, video_url=None, audio_url=None):
+        session = Session.objects.create(
+            patient_id=patient_id,
+            therapist_id=therapist_id,
+            session_date=session_date,
+            session_type=session_type,
+            duration_minutes=duration_minutes,
+            cycle_number=cycle_number,
+            notes=notes,
+            group_id=group_id,
+            video_url=video_url,
+            audio_url=audio_url,
+        )
+        return CreateSession(session=session)
+
+
+class UpdateSessionPaymentStatus(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        payment_status = graphene.String(required=True)
+
+    session = graphene.Field(SessionType)
+
+    def mutate(self, info, id, payment_status):
+        session = Session.objects.get(pk=id)
+        session.payment_status = payment_status
+        session.save(update_fields=["payment_status", "updated_at"])
+        return UpdateSessionPaymentStatus(session=session)
+
+
+class AddSessionResource(graphene.Mutation):
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        resource_id = graphene.ID(required=True)
+
+    session_resource = graphene.Field(SessionResourceType)
+
+    def mutate(self, info, session_id, resource_id):
+        sr, _ = SessionResource.objects.get_or_create(
+            session_id=session_id, resource_id=resource_id
+        )
+        return AddSessionResource(session_resource=sr)
+
+
+class AddSessionInventoryItem(graphene.Mutation):
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        item_id = graphene.ID(required=True)
+
+    session_inventory = graphene.Field(SessionInventoryType)
+
+    def mutate(self, info, session_id, item_id):
+        si, _ = SessionInventory.objects.get_or_create(
+            session_id=session_id, item_id=item_id
+        )
+        return AddSessionInventoryItem(session_inventory=si)
+
+
+class SaveAiAnalysis(graphene.Mutation):
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        stereotypy_score = graphene.Float()
+        aggression_score = graphene.Float()
+        passivity_score = graphene.Float()
+        vocal_exploration = graphene.Float()
+        social_interaction = graphene.Float()
+        eye_contact = graphene.Float()
+        body_movement = graphene.Float()
+        rhythmic_exploration = graphene.Float()
+
+    ai_analysis = graphene.Field(AiAnalysisType)
+
+    def mutate(self, info, session_id, **scores):
+        analysis, _ = AiAnalysis.objects.update_or_create(
+            session_id=session_id,
+            defaults=scores,
+        )
+        return SaveAiAnalysis(ai_analysis=analysis)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — EVALUACIONES
+# ═══════════════════════════════════════════════════════════════
+
+class CreateScaleEvaluation(graphene.Mutation):
+    class Arguments:
+        scale_id = graphene.ID(required=True)
+        patient_id = graphene.ID(required=True)
+        evaluator_id = graphene.ID(required=True)
+        session_id = graphene.ID()
+        notes = graphene.String()
+
+    evaluation = graphene.Field(ScaleEvaluationType)
+
+    def mutate(self, info, scale_id, patient_id, evaluator_id,
+               session_id=None, notes=None):
+        evaluation = ScaleEvaluation.objects.create(
+            scale_id=scale_id,
+            patient_id=patient_id,
+            evaluator_id=evaluator_id,
+            session_id=session_id,
+            notes=notes,
+        )
+        return CreateScaleEvaluation(evaluation=evaluation)
+
+
+class AddSubscaleResponse(graphene.Mutation):
+    class Arguments:
+        evaluation_id = graphene.ID(required=True)
+        subscale_id = graphene.ID(required=True)
+        score = graphene.Int(required=True)
+
+    response = graphene.Field(ScaleEvaluationSubscaleResponseType)
+
+    def mutate(self, info, evaluation_id, subscale_id, score):
+        resp, _ = ScaleEvaluationSubscaleResponse.objects.update_or_create(
+            evaluation_id=evaluation_id,
+            subscale_id=subscale_id,
+            defaults={"score": score},
+        )
+        return AddSubscaleResponse(response=resp)
+
+
+class AddValueResponse(graphene.Mutation):
+    class Arguments:
+        evaluation_id = graphene.ID(required=True)
+        scale_value_id = graphene.ID(required=True)
+
+    response = graphene.Field(ScaleEvaluationValueResponseType)
+
+    def mutate(self, info, evaluation_id, scale_value_id):
+        resp, _ = ScaleEvaluationValueResponse.objects.get_or_create(
+            evaluation_id=evaluation_id,
+            scale_value_id=scale_value_id,
+        )
+        return AddValueResponse(response=resp)
+
+
+class SubmitFormResponse(graphene.Mutation):
+    class Arguments:
+        assignment_id = graphene.ID(required=True)
+        question_id = graphene.ID(required=True)
+        response = graphene.String(required=True)
+
+    form_response = graphene.Field(FormResponseType)
+
+    def mutate(self, info, assignment_id, question_id, response):
+        resp, _ = FormResponse.objects.update_or_create(
+            assignment_id=assignment_id,
+            question_id=question_id,
+            defaults={"response": response},
+        )
+        return SubmitFormResponse(form_response=resp)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — FINANZAS
+# ═══════════════════════════════════════════════════════════════
+
+class CreatePayment(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        sessions_count = graphene.Int(required=True)
+        price_per_session = graphene.Float(required=True)
+        amount_paid = graphene.Float(required=True)
+        payment_method = graphene.String(required=True)
+        discount_id = graphene.ID()
+
+    payment = graphene.Field(PaymentType)
+
+    def mutate(self, info, patient_id, sessions_count, price_per_session,
+               amount_paid, payment_method, discount_id=None):
+        from decimal import Decimal
+        total = Decimal(str(price_per_session)) * sessions_count
+        paid = Decimal(str(amount_paid))
+
+        if paid >= total:
+            status = "completed"
+        elif paid > 0:
+            status = "partial"
+        else:
+            status = "pending"
+
+        payment = Payment.objects.create(
+            patient_id=patient_id,
+            sessions_count=sessions_count,
+            price_per_session=price_per_session,
+            amount_paid=amount_paid,
+            payment_method=payment_method,
+            discount_id=discount_id,
+            payment_status=status,
+        )
+        return CreatePayment(payment=payment)
+
+
+class CreateExpense(graphene.Mutation):
+    class Arguments:
+        description = graphene.String(required=True)
+        category = graphene.String(required=True)
+        amount = graphene.Float(required=True)
+        expense_date = graphene.DateTime(required=True)
+
+    expense = graphene.Field(ExpenseType)
+
+    def mutate(self, info, description, category, amount, expense_date):
+        expense = Expense.objects.create(
+            description=description,
+            category=category,
+            amount=amount,
+            expense_date=expense_date,
+        )
+        return CreateExpense(expense=expense)
+
+
+class EnrollInCourse(graphene.Mutation):
+    class Arguments:
+        course_id = graphene.ID(required=True)
+        user_id = graphene.ID(required=True)
+        full_name = graphene.String(required=True)
+        carnet = graphene.String()
+        payment_method = graphene.String(required=True)
+        amount = graphene.Float(required=True)
+
+    enrollment = graphene.Field(CourseEnrollmentType)
+
+    def mutate(self, info, course_id, user_id, full_name, payment_method,
+               amount, carnet=None):
+        enrollment, created = CourseEnrollment.objects.get_or_create(
+            course_id=course_id,
+            user_id=user_id,
+            defaults={"full_name": full_name, "carnet": carnet},
+        )
+        if created:
+            CoursePayment.objects.create(
+                enrollment=enrollment,
+                payment_method=payment_method,
+                amount=amount,
+            )
+        return EnrollInCourse(enrollment=enrollment)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATIONS — MARKETING
+# ═══════════════════════════════════════════════════════════════
+
+class CreateLead(graphene.Mutation):
+    class Arguments:
+        name = graphene.String(required=True)
+        phone = graphene.String()
+        email = graphene.String()
+        campaign_id = graphene.ID()
+
+    lead = graphene.Field(LeadType)
+
+    def mutate(self, info, name, phone=None, email=None, campaign_id=None):
+        lead = Lead.objects.create(
+            name=name,
+            phone=phone,
+            email=email,
+            campaign_id=campaign_id,
+        )
+        return CreateLead(lead=lead)
+
+
+class UpdateLeadStatus(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        status = graphene.String(required=True)
+
+    lead = graphene.Field(LeadType)
+
+    def mutate(self, info, id, status):
+        lead = Lead.objects.get(pk=id)
+        lead.status = status
+        lead.save(update_fields=["status", "updated_at"])
+        return UpdateLeadStatus(lead=lead)
+
+
+class UpdateCampaignSpent(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        spent = graphene.Float(required=True)
+
+    campaign = graphene.Field(MarketingCampaignType)
+
+    def mutate(self, info, id, spent):
+        campaign = MarketingCampaign.objects.get(pk=id)
+        campaign.spent = spent
+        campaign.save(update_fields=["spent", "updated_at"])
+        return UpdateCampaignSpent(campaign=campaign)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MUTATION RAÍZ
+# ═══════════════════════════════════════════════════════════════
+
+class Mutation(graphene.ObjectType):
+
+    # Usuarios
+    create_user = CreateUser.Field()
+    update_user = UpdateUser.Field()
+    mark_notification_read = MarkNotificationRead.Field()
+
+    # Clínico
+    create_patient = CreatePatient.Field()
+    update_patient_status = UpdatePatientStatus.Field()
+    add_clinical_note = AddClinicalNote.Field()
+    create_intervention_plan = CreateInterventionPlan.Field()
+    update_plan_progress = UpdatePlanProgress.Field()
+
+    # Sesiones
+    create_session = CreateSession.Field()
+    update_session_payment_status = UpdateSessionPaymentStatus.Field()
+    add_session_resource = AddSessionResource.Field()
+    add_session_inventory_item = AddSessionInventoryItem.Field()
+    save_ai_analysis = SaveAiAnalysis.Field()
+
+    # Evaluaciones
+    create_scale_evaluation = CreateScaleEvaluation.Field()
+    add_subscale_response = AddSubscaleResponse.Field()
+    add_value_response = AddValueResponse.Field()
+    submit_form_response = SubmitFormResponse.Field()
+
+    # Finanzas
+    create_payment = CreatePayment.Field()
+    create_expense = CreateExpense.Field()
+    enroll_in_course = EnrollInCourse.Field()
+
+    # Marketing
+    create_lead = CreateLead.Field()
+    update_lead_status = UpdateLeadStatus.Field()
+    update_campaign_spent = UpdateCampaignSpent.Field()
+
+
+# ═══════════════════════════════════════════════════════════════
+# SCHEMA FINAL — registrar en urls.py como GraphQLView
+# ═══════════════════════════════════════════════════════════════
+
+schema = graphene.Schema(query=Query, mutation=Mutation)

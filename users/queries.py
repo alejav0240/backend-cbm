@@ -36,12 +36,18 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             raise GraphQLError("No autenticado.")
-        if not user.is_staff and str(user.pk) != str(id):
+            
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+
+        if not user.is_staff and str(user.pk) != str(real_id):
             raise GraphQLError("No autorizado.")
         try:
-            return User.objects.get(pk=id)
+            return User.objects.get(pk=real_id)
         except User.DoesNotExist:
-            raise GraphQLError(f"Usuario {id} no encontrado.")
+            raise GraphQLError(f"Usuario {real_id} no encontrado.")
 
     # ── notificaciones (solo las propias) ────────────────────────────────────
     def resolve_notifications(root, info, is_read=None):
