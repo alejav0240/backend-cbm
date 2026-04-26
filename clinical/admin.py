@@ -56,6 +56,7 @@ class PatientAdmin(ModelAdmin):
     list_filter_submit = True
 
     list_display = (
+        "id",
         "full_name",
         "ci",
         "birth_date",

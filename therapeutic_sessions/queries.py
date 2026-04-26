@@ -19,6 +19,7 @@ def _build_cycles(base_qs):
     """
     from collections import defaultdict
     from .type import CyclePaymentSummaryType, CycleType
+    import base64
 
     sessions = (
         base_qs
@@ -52,13 +53,29 @@ def _build_cycles(base_qs):
         paid = sum(1 for s in sess_list if s.payment_status == "paid")
         pending = sum(1 for s in sess_list if s.payment_status == "pending")
         exempt = sum(1 for s in sess_list if s.payment_status == "exempt")
+        
+        # Conteo de completitud
+        completed = sum(1 for s in sess_list if s.session_status.lower() == "completa")
+        
+        # Estado del ciclo
+        status = "Finalizado" if completed == len(sess_list) else "Activo"
+
+        # Generar un ID único virtual para Apollo (Base64 de P:ID-C:NUM)
+        virtual_id_raw = f"Patient:{patient_id}-Cycle:{cycle_number}"
+        virtual_id = base64.b64encode(virtual_id_raw.encode()).decode()
 
         cycles.append(
             CycleType(
-                patient_id=patient_id,
+                id=virtual_id,
+                patient_id=graphene.relay.Node.to_global_id("PatientType", patient_id),
+                patient_db_id=patient_id,
+                patient=first.patient,
                 patient_name=f"{first.patient.first_name} {first.patient.last_name}",
                 cycle_number=cycle_number,
                 session_count=len(sess_list),
+                completed_count=completed,
+                status=status,
+                sessions=sess_list,
                 first_session_date=first.session_date,
                 last_session_date=last.session_date,
                 therapists=therapists,

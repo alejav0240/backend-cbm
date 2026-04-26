@@ -8,6 +8,7 @@ from therapeutic_sessions.models import (
     SessionInventory
 )
 from users.types import UserType
+from clinical.type import PatientType
 
 
 # 1. Digital Resource
@@ -62,6 +63,13 @@ class SessionType(DjangoObjectType):
             "session_resources", "session_inventory",
             "session_status","session_number",
         )
+        interfaces = (graphene.relay.Node,)
+
+    # Campo para obtener el ID real de la DB si se necesita en el front
+    database_id = graphene.Int()
+
+    def resolve_database_id(self, info):
+        return self.pk
 
     # Campos calculados o representaciones amigables
     session_type_display = graphene.String()
@@ -87,10 +95,16 @@ class CyclePaymentSummaryType(graphene.ObjectType):
 
 
 class CycleType(graphene.ObjectType):
+    id = graphene.ID(description="ID único virtual del ciclo")
     patient_id = graphene.ID()
+    patient_db_id = graphene.Int()
+    patient = graphene.Field(PatientType)
     patient_name = graphene.String()
     cycle_number = graphene.Int()
     session_count = graphene.Int(description="Total de sesiones en el ciclo")
+    completed_count = graphene.Int(description="Sesiones completadas en el ciclo")
+    status = graphene.String(description="Estado del ciclo (Activo/Finalizado)")
+    sessions = graphene.List(SessionType, description="Sesiones que pertenecen a este ciclo")
     first_session_date = graphene.DateTime(description="Fecha de la primera sesión del ciclo")
     last_session_date = graphene.DateTime(description="Fecha de la última sesión del ciclo")
     therapists = graphene.List(UserType, description="Terapeutas que atendieron en este ciclo")

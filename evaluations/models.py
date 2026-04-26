@@ -76,6 +76,14 @@ class ScaleEvaluation(models.Model):
         db_table = "scale_evaluations"
         ordering = ["-evaluated_at"]
 
+    @property
+    def total_score(self):
+        if self.scale.scale_type == Scale.ScaleType.SUBSCALE:
+            return sum(r.score for r in self.subscale_responses.all())
+        elif self.scale.scale_type == Scale.ScaleType.VALUE_LIST:
+            return sum(r.scale_value.value for r in self.value_responses.all())
+        return 0
+
     def __str__(self):
         ctx = f"sesión {self.session_id}" if self.session_id else "fuera de sesión"
         return f"{self.scale} — {self.patient} ({ctx})"
@@ -136,7 +144,8 @@ class Form(models.Model):
 class FormQuestion(models.Model):
 
     class QuestionType(models.TextChoices):
-        TEXT = "text", "Texto libre"
+        TEXT_LONG = "text_long", "Texto libre"
+        TEXT = "text", "Texto corto"
         BOOLEAN = "boolean", "Sí / No"
         SCALE = "scale", "Escala"
         MULTIPLE_CHOICE = "multiple_choice", "Opción múltiple"

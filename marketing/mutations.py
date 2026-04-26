@@ -92,8 +92,73 @@ class UpdateCampaignSpent(graphene.Mutation):
         campaign.save(update_fields=["spent", "updated_at"])
         return UpdateCampaignSpent(campaign=campaign)
 
+class UpdateCampaign(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        name = graphene.String()
+        platform = graphene.String()
+        budget = graphene.Float()
+        status = graphene.String()
+
+    campaign = graphene.Field(MarketingCampaignType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        
+        try:
+            campaign = MarketingCampaign.objects.get(pk=real_id)
+            for key, value in kwargs.items():
+                if key == 'budget':
+                    setattr(campaign, key, Decimal(str(value)))
+                else:
+                    setattr(campaign, key, value)
+            campaign.save()
+            return UpdateCampaign(campaign=campaign)
+        except MarketingCampaign.DoesNotExist:
+            raise GraphQLError("Campaña no encontrada")
+
+class DeleteCampaign(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            campaign = MarketingCampaign.objects.get(pk=real_id)
+            campaign.delete()
+            return DeleteCampaign(success=True)
+        except MarketingCampaign.DoesNotExist:
+            return DeleteCampaign(success=False)
+
+class DeleteLead(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            lead = Lead.objects.get(pk=real_id)
+            lead.delete()
+            return DeleteLead(success=True)
+        except Lead.DoesNotExist:
+            return DeleteLead(success=False)
+
 class Mutation(graphene.ObjectType):
     create_campaign = CreateCampaign.Field()
+    update_campaign = UpdateCampaign.Field()
+    delete_campaign = DeleteCampaign.Field()
+    update_campaign_spent = UpdateCampaignSpent.Field()
     create_lead = CreateLead.Field()
     update_lead_status = UpdateLeadStatus.Field()
-    update_campaign_spent = UpdateCampaignSpent.Field()
+    delete_lead = DeleteLead.Field()
