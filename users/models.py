@@ -10,6 +10,9 @@ class User(AbstractUser):
     foto = models.ImageField(upload_to="users/fotos/", blank=True, null=True)
     cv = models.FileField(upload_to="users/cv/", blank=True, null=True)
     email = models.EmailField(unique=True, null=True, blank=True)
+    
+    # Usamos los 'groups' nativos de AbstractUser para los roles
+    
     class Meta:
         db_table = "users"
 

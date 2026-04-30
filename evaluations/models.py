@@ -145,7 +145,9 @@ class FormQuestion(models.Model):
 
     class QuestionType(models.TextChoices):
         TEXT_LONG = "text_long", "Texto libre"
-        TEXT = "text", "Texto corto"
+        TEXTAREA = "text", "Texto corto"
+        NUMBER = "number", "Número"
+        DATE = "date", "Fecha"
         BOOLEAN = "boolean", "Sí / No"
         SCALE = "scale", "Escala"
         MULTIPLE_CHOICE = "multiple_choice", "Opción múltiple"

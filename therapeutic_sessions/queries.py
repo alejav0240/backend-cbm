@@ -2,7 +2,7 @@ import graphene
 from graphql import GraphQLError
 
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
-from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType
+from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -100,10 +100,12 @@ class Query(graphene.ObjectType):
     )
     session = graphene.Field(SessionType, id=graphene.ID(required=True))
 
-    digital_resources = graphene.List(
-        DigitalResourceType,
+    digital_resources = graphene.Field(
+        PaginatedDigitalResources,
         type=graphene.String(),
         search=graphene.String(),
+        page=graphene.Int(),
+        page_size=graphene.Int(),
     )
     digital_resource = graphene.Field(DigitalResourceType, id=graphene.ID(required=True))
 
@@ -166,13 +168,24 @@ class Query(graphene.ObjectType):
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
 
-    def resolve_digital_resources(self, info, type=None, search=None):
+    def resolve_digital_resources(self, info, type=None, search=None, page=1, page_size=10):
         qs = DigitalResource.objects.all()
         if type:
             qs = qs.filter(type=type)
         if search:
             qs = qs.filter(title__icontains=search)
-        return qs
+            
+        total_count = qs.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+        results = qs[offset:offset + page_size]
+
+        return PaginatedDigitalResources(
+            results=results,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     def resolve_digital_resource(self, info, id):
         try:

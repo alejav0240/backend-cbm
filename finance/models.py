@@ -48,6 +48,7 @@ class Payment(models.Model):
     price_per_session = models.DecimalField(max_digits=10, decimal_places=2)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
+    payment_proof_url = models.TextField(blank=True, null=True)
     payment_date = models.DateTimeField(auto_now_add=True)
     payment_status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING

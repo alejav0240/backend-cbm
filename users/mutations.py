@@ -3,10 +3,82 @@
 import graphene
 import graphql_jwt
 from graphql import GraphQLError
+from django.contrib.auth.models import Group
+from django.db import transaction
 
 from .models import User, Notification
-from .types import UserType, NotificationType
+from .types import UserType, NotificationType, RoleType
+from .permissions_map import get_permissions_for_modules
 
+
+class CreateRole(graphene.Mutation):
+    class Arguments:
+        name = graphene.String(required=True)
+        permissions = graphene.List(graphene.String)
+
+    role = graphene.Field(RoleType)
+
+    def mutate(self, info, name, permissions=None):
+        if permissions is None:
+            permissions = []
+        if Group.objects.filter(name=name).exists():
+            raise GraphQLError("El rol ya existe")
+        
+        with transaction.atomic():
+            group = Group.objects.create(name=name)
+            # Traducir módulos de UI a Permisos de Django
+            perms = get_permissions_for_modules(permissions)
+            if perms:
+                group.permissions.set(perms)
+                
+        return CreateRole(role=group)
+
+class UpdateRole(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        name = graphene.String()
+        permissions = graphene.List(graphene.String)
+
+    role = graphene.Field(RoleType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+            
+        try:
+            group = Group.objects.get(pk=real_id)
+            
+            with transaction.atomic():
+                if 'name' in kwargs and kwargs['name']:
+                    group.name = kwargs['name']
+                    group.save(update_fields=['name'])
+                    
+                if 'permissions' in kwargs:
+                    perms = get_permissions_for_modules(kwargs['permissions'] or [])
+                    group.permissions.set(perms)
+                    
+            return UpdateRole(role=group)
+        except Group.DoesNotExist:
+            raise GraphQLError("Rol no encontrado")
+
+class DeleteRole(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            group = Group.objects.get(pk=real_id)
+            group.delete()
+            return DeleteRole(success=True)
+        except Group.DoesNotExist:
+            return DeleteRole(success=False)
 
 # ── Registro ────────────────────────────────────────────────────────────────
 class CreateUser(graphene.Mutation):
@@ -146,6 +218,10 @@ class Mutation(graphene.ObjectType):
     update_user = UpdateUser.Field()
     change_password = ChangePassword.Field()
     mark_notification_read = MarkNotificationRead.Field()
+    
+    create_role = CreateRole.Field()
+    update_role = UpdateRole.Field()
+    delete_role = DeleteRole.Field()
 
     # JWT Nativo
     token_auth = ObtainToken.Field()

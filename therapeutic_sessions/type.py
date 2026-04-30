@@ -23,6 +23,12 @@ class DigitalResourceType(DjangoObjectType):
     def resolve_type_display(self, info):
         return self.get_type_display()
 
+class PaginatedDigitalResources(graphene.ObjectType):
+    results = graphene.List(DigitalResourceType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
 
 # 2. Inventory Item
 class InventoryItemType(DjangoObjectType):

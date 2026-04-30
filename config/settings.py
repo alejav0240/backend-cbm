@@ -33,7 +33,7 @@ INSTALLED_APPS = [
     "unfold.contrib.location_field",  # optional, if django-location-field package is used
     "unfold.contrib.constance",  # optional, if django-constance package is used
 
-    "django.contrib.admin",  # required
+    "config.apps.CBMAdminConfig",  # replaced django.contrib.admin
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -71,7 +71,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -193,3 +193,183 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+from django.urls import reverse_lazy
+from django.utils.translation import gettext_lazy as _
+
+UNFOLD = {
+    "SITE_TITLE": "CBM Admin",
+    "SITE_HEADER": "CBM Plataforma",
+    "SITE_SYMBOL": "medical_services",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": True,
+    "COLORS": {
+        "primary": {
+            "50": "250 245 255",
+            "100": "243 232 255",
+            "200": "233 213 255",
+            "300": "216 180 254",
+            "400": "192 132 252",
+            "500": "168 85 247",
+            "600": "147 51 234",
+            "700": "126 34 206",
+            "800": "107 33 168",
+            "900": "88 28 135",
+            "950": "59 7 100",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": _("Administración y Usuarios"),
+                "separator": True,
+                "items": [
+                    {
+                        "title": _("Dashboard"),
+                        "icon": "dashboard",
+                        "link": reverse_lazy("admin:index"),
+                    },
+                    {
+                        "title": _("Usuarios"),
+                        "icon": "people",
+                        "link": reverse_lazy("admin:users_user_changelist"),
+                    },
+                    {
+                        "title": _("Grupos y Roles"),
+                        "icon": "admin_panel_settings",
+                        "link": reverse_lazy("admin:auth_group_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": _("Gestión Clínica"),
+                "separator": True,
+                "items": [
+                    {
+                        "title": _("Pacientes"),
+                        "icon": "person",
+                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                    },
+                    {
+                        "title": _("Planes de Intervención"),
+                        "icon": "assignment",
+                        "link": reverse_lazy("admin:clinical_interventionplan_changelist"),
+                    },
+                    {
+                        "title": _("Reportes Terapéuticos"),
+                        "icon": "analytics",
+                        "link": reverse_lazy("admin:clinical_therapyreport_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": _("Sesiones y Recursos"),
+                "separator": True,
+                "items": [
+                    {
+                        "title": _("Sesiones"),
+                        "icon": "event",
+                        "link": reverse_lazy("admin:therapeutic_sessions_session_changelist"),
+                    },
+                    {
+                        "title": _("Inventario"),
+                        "icon": "inventory_2",
+                        "link": reverse_lazy("admin:therapeutic_sessions_inventoryitem_changelist"),
+                    },
+                    {
+                        "title": _("Recursos Digitales"),
+                        "icon": "cloud_download",
+                        "link": reverse_lazy("admin:therapeutic_sessions_digitalresource_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": _("Gestión Financiera"),
+                "separator": True,
+                "items": [
+                    {
+                        "title": _("Pagos"),
+                        "icon": "payments",
+                        "link": reverse_lazy("admin:finance_payment_changelist"),
+                    },
+                    {
+                        "title": _("Gastos"),
+                        "icon": "money_off",
+                        "link": reverse_lazy("admin:finance_expense_changelist"),
+                    },
+                    {
+                        "title": _("Cursos"),
+                        "icon": "school",
+                        "link": reverse_lazy("admin:finance_course_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
+    "TABS": [
+        {
+            "models": [
+                "users.user",
+                "auth.group",
+            ],
+            "items": [
+                {
+                    "title": _("Usuarios"),
+                    "link": reverse_lazy("admin:users_user_changelist"),
+                },
+                {
+                    "title": _("Grupos y Roles"),
+                    "link": reverse_lazy("admin:auth_group_changelist"),
+                },
+            ],
+        },
+        {
+            "models": [
+                "clinical.patient",
+                "clinical.interventionplan",
+                "clinical.therapyreport",
+            ],
+            "items": [
+                {
+                    "title": _("Pacientes"),
+                    "link": reverse_lazy("admin:clinical_patient_changelist"),
+                },
+                {
+                    "title": _("Planes"),
+                    "link": reverse_lazy("admin:clinical_interventionplan_changelist"),
+                },
+                {
+                    "title": _("Reportes"),
+                    "link": reverse_lazy("admin:clinical_therapyreport_changelist"),
+                },
+            ],
+        },
+    ],
+    "DASHBOARD": {
+        "navigation": [
+            {
+                "title": _("Atajos Rápidos"),
+                "items": [
+                    {
+                        "title": _("Pacientes"),
+                        "icon": "person",
+                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                    },
+                    {
+                        "title": _("Sesiones"),
+                        "icon": "event",
+                        "link": reverse_lazy("admin:therapeutic_sessions_session_changelist"),
+                    },
+                ],
+            },
+        ],
+        "widgets": [
+            {
+                "wrapper_class": "col-span-full",
+                "template": "admin/widgets/dashboard.html",
+            },
+        ],
+    },
+}

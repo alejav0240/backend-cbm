@@ -1,19 +1,48 @@
 import graphene
 from graphql import GraphQLError
+from django.contrib.auth.models import Group
 from .models import User, Notification
-from .types import UserType, NotificationType
+from .types import UserType, NotificationType, RoleType
+
+
+class PaginatedUsers(graphene.ObjectType):
+    results = graphene.List(UserType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
 
 
 class Query(graphene.ObjectType):
     me = graphene.Field(UserType)
-    users = graphene.List(UserType)
+    users = graphene.Field(
+        PaginatedUsers,
+        search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+    )
     user = graphene.Field(UserType, id=graphene.ID(required=True))
+
+    roles = graphene.List(RoleType)
+    role = graphene.Field(RoleType, id=graphene.ID(required=True))
 
     notifications = graphene.List(
         NotificationType,
         is_read=graphene.Boolean(),
     )
     unread_notifications_count = graphene.Int()
+
+    def resolve_roles(root, info):
+        return Group.objects.all()
+
+    def resolve_role(root, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return Group.objects.get(pk=real_id)
+        except Group.DoesNotExist:
+            raise GraphQLError("Rol no encontrado")
 
     # ── me ──────────────────────────────────────────────────────────────────
     def resolve_me(root, info):
@@ -23,13 +52,36 @@ class Query(graphene.ObjectType):
         return user
 
     # ── users (solo staff) ──────────────────────────────────────────────────
-    def resolve_users(root, info):
+    def resolve_users(root, info, search=None, page=1, page_size=10):
         user = info.context.user
         if not user.is_authenticated:
             raise GraphQLError("No autenticado.")
         if not user.is_staff:
             raise GraphQLError("No autorizado: se requiere rol de administrador.")
-        return User.objects.all()
+        
+        qs = User.objects.all().order_by('-date_joined')
+        
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(ci__icontains=search)
+            )
+
+        total_count = qs.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+        results = qs[offset:offset + page_size]
+
+        return PaginatedUsers(
+            results=results,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     # ── user por id (solo staff o el propio usuario) ─────────────────────────
     def resolve_user(root, info, id):

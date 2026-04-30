@@ -1,11 +1,14 @@
 import graphene
 from graphql import GraphQLError
 
-from marketing.models import MarketingCampaign, Lead
-from marketing.type import MarketingCampaignType, LeadType
+from marketing.models import MarketingCampaign, Lead, BlogPost
+from marketing.type import MarketingCampaignType, LeadType, BlogPostType
 
 
 class Query(graphene.ObjectType):
+    blog_posts = graphene.List(BlogPostType, status=graphene.String())
+    blog_post = graphene.Field(BlogPostType, id=graphene.ID(required=True))
+
     marketing_campaigns = graphene.List(
         MarketingCampaignType,
         status=graphene.String(),
@@ -19,6 +22,22 @@ class Query(graphene.ObjectType):
         status=graphene.String(),
     )
     lead = graphene.Field(LeadType, id=graphene.ID(required=True))
+
+    def resolve_blog_posts(self, info, status=None):
+        qs = BlogPost.objects.all()
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+    def resolve_blog_post(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+        try:
+            return BlogPost.objects.get(pk=real_id)
+        except BlogPost.DoesNotExist:
+            raise GraphQLError("Artículo no encontrado")
 
     def resolve_marketing_campaigns(self, info, status=None, platform=None):
         qs = MarketingCampaign.objects.prefetch_related("leads").all()

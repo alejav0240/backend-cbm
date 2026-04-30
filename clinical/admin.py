@@ -50,10 +50,25 @@ class PlanStepInline(TabularInline):
 
 @admin.register(Patient)
 class PatientAdmin(ModelAdmin):
+    change_list_template = "admin/custom_change_list.html"
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
     list_filter_submit = True
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        total = Patient.objects.count()
+        active = Patient.objects.filter(status="active").count()
+        discharged = Patient.objects.filter(status="discharged").count()
+        
+        extra_context["kpis"] = [
+            {"label": "Total Pacientes", "value": total, "icon": "person", "color": "primary"},
+            {"label": "Activos", "value": active, "icon": "how_to_reg", "color": "success"},
+            {"label": "Dada de Alta", "value": discharged, "icon": "task_alt", "color": "info"},
+            {"label": "Planes Activos", "value": InterventionPlan.objects.count(), "icon": "assignment", "color": "warning"},
+        ]
+        return super().changelist_view(request, extra_context=extra_context)
 
     list_display = (
         "id",

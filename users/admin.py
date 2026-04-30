@@ -1,7 +1,8 @@
 # users/admin.py
 
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import Group
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.utils.translation import gettext_lazy as _
 from django.utils.html import format_html
 
@@ -10,6 +11,25 @@ from unfold.forms import UserChangeForm, UserCreationForm
 from unfold.decorators import display
 
 from .models import Notification, User
+
+admin.site.unregister(Group)
+
+
+class UserInline(TabularInline):
+    model = User.groups.through
+    extra = 1
+    verbose_name = "Usuario"
+    verbose_name_plural = "Usuarios en este grupo"
+    autocomplete_fields = ("user",)
+
+
+@admin.register(Group)
+class GroupAdmin(ModelAdmin, BaseGroupAdmin):
+    compressed_fields = True
+    list_fullwidth = True
+    search_fields = ("name",)
+    filter_horizontal = ("permissions",)
+    inlines = (UserInline,)
 
 
 # ==============================
@@ -28,10 +48,25 @@ class NotificationInline(TabularInline):
 # ==============================
 @admin.register(User)
 class UserAdmin(ModelAdmin, BaseUserAdmin):
+    change_list_template = "admin/custom_change_list.html"
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
     list_filter_submit = True
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        active_users = User.objects.filter(is_active=True).count()
+        staff_users = User.objects.filter(is_staff=True).count()
+        total_users = User.objects.count()
+
+        extra_context["kpis"] = [
+            {"label": "Total Usuarios", "value": total_users, "icon": "group", "color": "primary"},
+            {"label": "Activos", "value": active_users, "icon": "person_check", "color": "success"},
+            {"label": "Personal (Staff)", "value": staff_users, "icon": "shield_person", "color": "warning"},
+            {"label": "Grupos", "value": Group.objects.count(), "icon": "admin_panel_settings", "color": "danger"},
+        ]
+        return super().changelist_view(request, extra_context=extra_context)
 
     form = UserChangeForm
     add_form = UserCreationForm

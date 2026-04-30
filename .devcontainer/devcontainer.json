@@ -8,21 +8,46 @@
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
+        "ms-python.debugpy",
         "batisteo.vscode-django",
         "graphql.vscode-graphql",
         "njpwerner.autodocstring",
         "tamasfe.even-better-toml",
-        "editorconfig.editorconfig"
+        "editorconfig.editorconfig",
+        "charliermarsh.ruff"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": true,
-        "python.formatting.provider": "black"
+        "python.languageServer": "Pylance",
+        "python.formatting.provider": "none",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit"
+          }
+        },
+        "editor.formatOnSave": true
       }
+    },
+    "jetbrains": {
+      "plugins": [
+        "com.jetbrains.python",
+        "com.intellij.database"
+      ]
     }
   },
-  "remoteUser": "root",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "remoteUser": "vscode",
   "forwardPorts": [8000, 5432],
-  "postCreateCommand": "pip install -r requirements.txt && python manage.py migrate"
+  "postCreateCommand": "pip install --user -r requirements.txt && python manage.py migrate --noinput"
 }
+

@@ -32,3 +32,4 @@ pillow
 
 # Dev
 ipython
+mysql-connector-python

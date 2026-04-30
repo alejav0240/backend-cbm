@@ -1,7 +1,17 @@
 import graphene
 from graphene_django import DjangoObjectType
 
-from .models import MarketingCampaign, Lead
+from .models import MarketingCampaign, Lead, BlogPost
+
+
+class BlogPostType(DjangoObjectType):
+    class Meta:
+        model = BlogPost
+        fields = (
+            "id", "title", "excerpt", "content", "category", 
+            "author", "image_url", "read_time", "status",
+            "created_at", "updated_at"
+        )
 
 
 class MarketingCampaignType(DjangoObjectType):

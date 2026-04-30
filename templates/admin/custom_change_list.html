@@ -1,0 +1,26 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+    {% if kpis %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {% for kpi in kpis %}
+        <div class="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all duration-300 flex items-center gap-5 group">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110 shadow-sm
+                {% if kpi.color == 'success' %}bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-1 dark:ring-emerald-500/20
+                {% elif kpi.color == 'warning' %}bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-1 dark:ring-amber-500/20
+                {% elif kpi.color == 'danger' %}bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-1 dark:ring-rose-500/20
+                {% elif kpi.color == 'info' %}bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 dark:ring-1 dark:ring-blue-500/20
+                {% else %}bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 dark:ring-1 dark:ring-purple-500/20{% endif %}">
+                <span class="material-symbols-outlined !text-2xl">{{ kpi.icon|default:"analytics" }}</span>
+            </div>
+            <div>
+                <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">{{ kpi.label }}</p>
+                <h3 class="text-2xl font-black text-gray-900 dark:text-white mt-0.5">{{ kpi.value }}</h3>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {{ block.super }}
+{% endblock %}

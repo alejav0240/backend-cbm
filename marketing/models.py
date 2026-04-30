@@ -1,6 +1,31 @@
 from django.db import models
 
 
+class BlogPost(models.Model):
+    class PostStatus(models.TextChoices):
+        DRAFT = "draft", "Borrador"
+        PUBLISHED = "published", "Publicado"
+
+    title = models.CharField(max_length=255)
+    excerpt = models.TextField(blank=True, null=True)
+    content = models.TextField()
+    category = models.CharField(max_length=100)
+    author = models.CharField(max_length=255)  # Puede ser un FK a User, pero por ahora seguimos la UI (string libre)
+    image_url = models.CharField(max_length=500, blank=True, null=True)
+    read_time = models.CharField(max_length=50, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=PostStatus.choices, default=PostStatus.PUBLISHED)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "blog_posts"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title
+
+
 class MarketingCampaign(models.Model):
 
     class CampaignStatus(models.TextChoices):

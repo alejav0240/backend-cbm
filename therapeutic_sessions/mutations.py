@@ -4,8 +4,8 @@ import base64
 from graphql import GraphQLError
 from django.db.models.functions import Coalesce
 
-from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem
-from therapeutic_sessions.type import SessionType, SessionResourceType, SessionInventoryType, InventoryItemType
+from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem, DigitalResource
+from therapeutic_sessions.type import SessionType, SessionResourceType, SessionInventoryType, InventoryItemType, DigitalResourceType
 
 from django.db.models import Max
 
@@ -198,6 +198,59 @@ class DeleteInventoryItem(graphene.Mutation):
         except InventoryItem.DoesNotExist:
             return DeleteInventoryItem(success=False)
 
+class CreateDigitalResource(graphene.Mutation):
+    class Arguments:
+        title = graphene.String(required=True)
+        type = graphene.String(required=True)
+        category = graphene.String()
+        url = graphene.String(required=True)
+
+    resource = graphene.Field(DigitalResourceType)
+
+    def mutate(self, info, title, type, url, category=None):
+        resource = DigitalResource.objects.create(
+            title=title,
+            type=type,
+            url=url,
+            category=category
+        )
+        return CreateDigitalResource(resource=resource)
+
+class UpdateDigitalResource(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        title = graphene.String()
+        type = graphene.String()
+        category = graphene.String()
+        url = graphene.String()
+
+    resource = graphene.Field(DigitalResourceType)
+
+    def mutate(self, info, id, **kwargs):
+        db_id = get_db_id(id)
+        try:
+            resource = DigitalResource.objects.get(pk=db_id)
+            for key, value in kwargs.items():
+                setattr(resource, key, value)
+            resource.save()
+            return UpdateDigitalResource(resource=resource)
+        except DigitalResource.DoesNotExist:
+            raise GraphQLError("Recurso no encontrado")
+
+class DeleteDigitalResource(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        db_id = get_db_id(id)
+        try:
+            resource = DigitalResource.objects.get(pk=db_id)
+            resource.delete()
+            return DeleteDigitalResource(success=True)
+        except DigitalResource.DoesNotExist:
+            return DeleteDigitalResource(success=False)
+
 class Mutation(graphene.ObjectType):
     create_session = CreateSession.Field()
     update_session_payment_status = UpdateSessionPaymentStatus.Field()
@@ -206,3 +259,6 @@ class Mutation(graphene.ObjectType):
     create_inventory_item = CreateInventoryItem.Field()
     update_inventory_item = UpdateInventoryItem.Field()
     delete_inventory_item = DeleteInventoryItem.Field()
+    create_digital_resource = CreateDigitalResource.Field()
+    update_digital_resource = UpdateDigitalResource.Field()
+    delete_digital_resource = DeleteDigitalResource.Field()

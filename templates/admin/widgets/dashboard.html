@@ -1,0 +1,188 @@
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- KPIs Principales -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <!-- Usuarios -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all duration-300 group">
+        <div class="flex items-center justify-between mb-4">
+            <div class="w-12 h-12 bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 dark:ring-1 dark:ring-purple-500/20 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110">
+                <span class="material-symbols-outlined !text-3xl">group</span>
+            </div>
+            <span class="text-xs font-bold px-2 py-1 bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400 rounded-lg">+12%</span>
+        </div>
+        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Usuarios</p>
+        <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-1">24</h3>
+    </div>
+    
+    <!-- Pacientes -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md hover:border-emerald-500/30 dark:hover:border-emerald-500/50 transition-all duration-300 group">
+        <div class="flex items-center justify-between mb-4">
+            <div class="w-12 h-12 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-1 dark:ring-emerald-500/20 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110">
+                <span class="material-symbols-outlined !text-3xl">person</span>
+            </div>
+            <span class="text-xs font-bold px-2 py-1 bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400 rounded-lg">+5</span>
+        </div>
+        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Pacientes</p>
+        <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-1">156</h3>
+    </div>
+
+    <!-- Sesiones -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md hover:border-amber-500/30 dark:hover:border-amber-500/50 transition-all duration-300 group">
+        <div class="flex items-center justify-between mb-4">
+            <div class="w-12 h-12 bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-1 dark:ring-amber-500/20 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110">
+                <span class="material-symbols-outlined !text-3xl">event</span>
+            </div>
+            <span class="text-xs font-bold px-2 py-1 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 rounded-lg">Hoy</span>
+        </div>
+        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Sesiones</p>
+        <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-1">12</h3>
+    </div>
+
+    <!-- Pagos -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-md hover:border-rose-500/30 dark:hover:border-rose-500/50 transition-all duration-300 group">
+        <div class="flex items-center justify-between mb-4">
+            <div class="w-12 h-12 bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-1 dark:ring-rose-500/20 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110">
+                <span class="material-symbols-outlined !text-3xl">warning</span>
+            </div>
+            <span class="text-xs font-bold px-2 py-1 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 rounded-lg">Pendiente</span>
+        </div>
+        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Deuda Total</p>
+        <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-1">Bs. 8,420</h3>
+    </div>
+</div>
+
+<!-- Gráficos Interactivos -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+    <div class="lg:col-span-2 bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
+        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+             <span class="w-2 h-5 bg-purple-500 rounded-full"></span>
+             Actividad de Sesiones (Mensual)
+        </h4>
+        <div class="h-64">
+            <canvas id="sessionsChart"></canvas>
+        </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
+        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+            <span class="w-2 h-5 bg-emerald-500 rounded-full"></span>
+            Distribución de Pacientes
+        </h4>
+        <div class="h-64">
+            <canvas id="patientsChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <!-- Acciones Rápidas -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
+        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+            <span class="material-symbols-outlined text-purple-600 dark:text-purple-400">bolt</span>
+            Acciones Rápidas
+        </h4>
+        <div class="grid grid-cols-2 gap-4">
+            <a href="/admin/clinical/patient/add/" class="flex items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-transparent hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all group">
+                <div class="w-10 h-10 rounded-lg bg-white dark:bg-white/10 flex items-center justify-center shadow-sm group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                    <span class="material-symbols-outlined">person_add</span>
+                </div>
+                <span class="text-sm font-bold text-gray-700 dark:text-gray-300">Nuevo Paciente</span>
+            </a>
+            <a href="/admin/therapeutic_sessions/session/add/" class="flex items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-transparent hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all group">
+                <div class="w-10 h-10 rounded-lg bg-white dark:bg-white/10 flex items-center justify-center shadow-sm group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                    <span class="material-symbols-outlined">add_task</span>
+                </div>
+                <span class="text-sm font-bold text-gray-700 dark:text-gray-300">Nueva Sesión</span>
+            </a>
+             <a href="/admin/finance/payment/add/" class="flex items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-transparent hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all group">
+                <div class="w-10 h-10 rounded-lg bg-white dark:bg-white/10 flex items-center justify-center shadow-sm group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                    <span class="material-symbols-outlined">receipt_long</span>
+                </div>
+                <span class="text-sm font-bold text-gray-700 dark:text-gray-300">Registrar Pago</span>
+            </a>
+            <a href="/admin/clinical/interventionplan/add/" class="flex items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-transparent hover:border-purple-500/30 dark:hover:border-purple-500/50 transition-all group">
+                <div class="w-10 h-10 rounded-lg bg-white dark:bg-white/10 flex items-center justify-center shadow-sm group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                    <span class="material-symbols-outlined">assignment_add</span>
+                </div>
+                <span class="text-sm font-bold text-gray-700 dark:text-gray-300">Nuevo Plan</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Estado del Sistema -->
+    <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
+        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-6">Estado del Sistema</h4>
+        <div class="space-y-5">
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Base de Datos</span>
+                <span class="flex items-center gap-1.5 text-xs font-black text-green-600 bg-green-50 dark:bg-green-500/10 dark:text-green-400 px-3 py-1 rounded-full border border-green-200/50 dark:border-green-500/20">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    ONLINE
+                </span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Servicio de Correo</span>
+                <span class="flex items-center gap-1.5 text-xs font-black text-green-600 bg-green-50 dark:bg-green-500/10 dark:text-green-400 px-3 py-1 rounded-full border border-green-200/50 dark:border-green-500/20">
+                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                    ACTIVO
+                </span>
+            </div>
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Almacenamiento (Media)</span>
+                    <span class="text-sm font-black text-gray-900 dark:text-white">45% <span class="text-gray-400 font-normal">(2.4 GB)</span></span>
+                </div>
+                <div class="w-full bg-gray-100 dark:bg-white/10 rounded-full h-2.5">
+                    <div class="bg-gradient-to-r from-purple-500 to-purple-400 h-2.5 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.4)]" style="width: 45%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const ctxSessions = document.getElementById('sessionsChart').getContext('2d');
+        new Chart(ctxSessions, {
+            type: 'line',
+            data: {
+                labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'],
+                datasets: [{
+                    label: 'Sesiones',
+                    data: [65, 59, 80, 81, 56, 85],
+                    fill: true,
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                    borderColor: 'rgb(168, 85, 247)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        const ctxPatients = document.getElementById('patientsChart').getContext('2d');
+        new Chart(ctxPatients, {
+            type: 'doughnut',
+            data: {
+                labels: ['Activos', 'Pendientes', 'Inactivos'],
+                datasets: [{
+                    data: [110, 30, 16],
+                    backgroundColor: [
+                        'rgb(16, 185, 129)',
+                        'rgb(245, 158, 11)',
+                        'rgb(244, 63, 94)'
+                    ],
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+    });
+</script>
