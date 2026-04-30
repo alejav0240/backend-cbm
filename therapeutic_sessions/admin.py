@@ -122,10 +122,24 @@ class InventoryItemAdmin(ModelAdmin):
 
 @admin.register(Session)
 class SessionAdmin(ModelAdmin):
+    change_list_template = "admin/custom_change_list.html"
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
     list_filter_submit = True
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        from django.utils import timezone
+        today = timezone.now().date()
+        
+        extra_context["kpis"] = [
+            {"label": "Total Sesiones", "value": Session.objects.count(), "icon": "calendar_month", "color": "primary"},
+            {"label": "Hoy", "value": Session.objects.filter(session_date__date=today).count(), "icon": "event", "color": "success"},
+            {"label": "Pendientes Pago", "value": Session.objects.filter(payment_status="pending").count(), "icon": "payments", "color": "danger"},
+            {"label": "Inventario en Uso", "value": InventoryItem.objects.filter(status="in_use").count(), "icon": "inventory_2", "color": "warning"},
+        ]
+        return super().changelist_view(request, extra_context=extra_context)
 
     list_display = (
         "patient",

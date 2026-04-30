@@ -1,8 +1,81 @@
 import graphene
 from decimal import Decimal
 from graphql import GraphQLError
-from marketing.models import MarketingCampaign, Lead
-from marketing.type import MarketingCampaignType, LeadType
+from marketing.models import MarketingCampaign, Lead, BlogPost
+from marketing.type import MarketingCampaignType, LeadType, BlogPostType
+
+class CreateBlogPost(graphene.Mutation):
+    class Arguments:
+        title = graphene.String(required=True)
+        excerpt = graphene.String()
+        content = graphene.String(required=True)
+        category = graphene.String(required=True)
+        author = graphene.String(required=True)
+        image_url = graphene.String()
+        read_time = graphene.String()
+        status = graphene.String()
+
+    post = graphene.Field(BlogPostType)
+
+    def mutate(self, info, title, content, category, author, excerpt=None, image_url=None, read_time=None, status="draft"):
+        post = BlogPost.objects.create(
+            title=title,
+            excerpt=excerpt,
+            content=content,
+            category=category,
+            author=author,
+            image_url=image_url,
+            read_time=read_time,
+            status=status
+        )
+        return CreateBlogPost(post=post)
+
+class UpdateBlogPost(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        title = graphene.String()
+        excerpt = graphene.String()
+        content = graphene.String()
+        category = graphene.String()
+        author = graphene.String()
+        image_url = graphene.String()
+        read_time = graphene.String()
+        status = graphene.String()
+
+    post = graphene.Field(BlogPostType)
+
+    def mutate(self, info, id, **kwargs):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+            
+        try:
+            post = BlogPost.objects.get(pk=real_id)
+            for key, value in kwargs.items():
+                setattr(post, key, value)
+            post.save()
+            return UpdateBlogPost(post=post)
+        except BlogPost.DoesNotExist:
+            raise GraphQLError("Artículo no encontrado")
+
+class DeleteBlogPost(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+    success = graphene.Boolean()
+
+    def mutate(self, info, id):
+        try:
+            real_id = int(graphene.relay.Node.from_global_id(id)[1])
+        except:
+            real_id = id
+            
+        try:
+            post = BlogPost.objects.get(pk=real_id)
+            post.delete()
+            return DeleteBlogPost(success=True)
+        except BlogPost.DoesNotExist:
+            return DeleteBlogPost(success=False)
 
 class CreateCampaign(graphene.Mutation):
     class Arguments:
@@ -162,3 +235,6 @@ class Mutation(graphene.ObjectType):
     create_lead = CreateLead.Field()
     update_lead_status = UpdateLeadStatus.Field()
     delete_lead = DeleteLead.Field()
+    create_blog_post = CreateBlogPost.Field()
+    update_blog_post = UpdateBlogPost.Field()
+    delete_blog_post = DeleteBlogPost.Field()

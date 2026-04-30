@@ -50,10 +50,25 @@ class DiscountAdmin(ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(ModelAdmin):
+    change_list_template = "admin/custom_change_list.html"
     compressed_fields = True
     warn_unsaved_form = True
     list_fullwidth = True
     list_filter_submit = True
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        from django.db.models import Sum
+        total_recuperado = Payment.objects.aggregate(Sum("amount_paid"))["amount_paid__sum"] or 0
+        pendientes = Payment.objects.filter(payment_status="pending").count()
+        
+        extra_context["kpis"] = [
+            {"label": "Recaudación Total", "value": f"Bs. {total_recuperado:,.2f}", "icon": "payments", "color": "success"},
+            {"label": "Pagos Pendientes", "value": pendientes, "icon": "money_off", "color": "danger"},
+            {"label": "Becas/Descuentos", "value": Payment.objects.filter(discount__isnull=False).count(), "icon": "redeem", "color": "warning"},
+            {"label": "Total Transacciones", "value": Payment.objects.count(), "icon": "history", "color": "primary"},
+        ]
+        return super().changelist_view(request, extra_context=extra_context)
 
     list_display = (
         "patient",

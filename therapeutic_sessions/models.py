@@ -11,8 +11,10 @@ class DigitalResource(models.Model):
     class ResourceType(models.TextChoices):
         AUDIO = "audio", "Audio"
         VIDEO = "video", "Video"
+        IMAGE = "image", "Imagen"
         SHEET_MUSIC = "sheet_music", "Partitura"
         DOCUMENT = "document", "Documento"
+        WEB_LINK = "web_link", "Enlace web"
 
     title = models.CharField(max_length=255)
     type = models.CharField(max_length=20, choices=ResourceType.choices)

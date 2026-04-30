@@ -4,7 +4,9 @@ services:
   backend:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: .devcontainer/Dockerfile
+    env_file:
+      - ../../.env
     volumes:
       - ..:/app:cached
     # Overrides default command so things don't shut down after the process ends.
@@ -12,15 +14,19 @@ services:
     # Ensure it uses the same network as the root compose
     networks:
       - cbm-network
+    depends_on:
+      - db
 
   db:
     # Use the same configuration as the root compose for the DB
     image: postgres:15
     restart: unless-stopped
+    env_file:
+      - ../../.env
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-cbm_db}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -32,3 +38,4 @@ networks:
 
 volumes:
   postgres_data:
+
