@@ -6,6 +6,7 @@ from finance.schema import Query as FinanceQuery, Mutation as FinanceMutation
 from evaluations.schema import Query as EvaluationsQuery, Mutation as EvaluationsMutation
 from clinical.schema import Query as ClinicalQuery, Mutation as ClinicalMutation
 from marketing.schema import Query as MarketingQuery, Mutation as MarketingMutation
+from .stats import Query as StatsQuery
 
 class Query(
     UsersQuery,
@@ -15,6 +16,7 @@ class Query(
     FinanceQuery,
     EvaluationsQuery,
     ClinicalQuery,
+    StatsQuery,
     graphene.ObjectType
 ):
     pass

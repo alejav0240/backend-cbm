@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from clinical.models import InterventionPlan, Patient, PatientClinicalNote, PlanStep
 from evaluations.models import Scale, ScaleEvaluation, ScaleEvaluationSubscaleResponse, Subscale
-from finance.models import Payment
+from finance.models import Discount, Payment
 from therapeutic_sessions.models import Session
 from users.models import User
 
@@ -120,12 +120,10 @@ class Command(BaseCommand):
                 therapist,
             )
             payment_proofs = self._extract_payment_proofs(datasets["archivospagos"])
-            cycle_count_by_payment = self._count_cycles_by_payment(datasets["ciclos"])
             payments_by_legacy = self._import_payments(
                 datasets["pagos"],
                 info_map,
                 payment_proofs,
-                cycle_count_by_payment,
             )
             self._import_sessions(datasets["ciclos"], payments_by_legacy, therapist)
             self._import_intervention_plans(
@@ -248,6 +246,9 @@ class Command(BaseCommand):
                     FROM clientes cli
                     LEFT JOIN infoclientes inf ON cli.id = inf.id_cliente
                 """
+            elif table_name == "pagos":
+                # Query simple para pagos; compatibilidad manejada por pick()
+                query = "SELECT * FROM pagos"
             elif table_name == "usuarios":
                 query = """
                     SELECT
@@ -272,6 +273,15 @@ class Command(BaseCommand):
             for row in rows:
                 # Compatibilidad con variantes de esquema legacy (backup local vs nube)
                 if table_name == "pagos":
+                    # Nueva estructura: patient_id, price_per_session, amount_paid, payment_type, descuento
+                    row_list = [
+                        pick(row, "patient_id"),
+                        pick(row, "price_per_session"),
+                        pick(row, "amount_paid"),
+                        pick(row, "payment_type"),
+                        pick(row, "descuento"),
+                    ]
+                elif table_name == "pagos_legacy":  # Para compatibilidad con query antiguo
                     row_list = [
                         pick(row, "id"),
                         pick(row, "id_infocliente"),
@@ -596,64 +606,84 @@ class Command(BaseCommand):
                 proof_by_payment_id[legacy_payment_id] = file_path
         return proof_by_payment_id
 
-    def _count_cycles_by_payment(self, rows):
-        counts = defaultdict(int)
-        for row in rows:
-            if len(row) < 13:
-                continue
-            legacy_payment_id = self._to_int(row[1])
-            counts[legacy_payment_id] += 1
-        return counts
-
-    def _import_payments(self, rows, info_map, payment_proofs, cycle_count_by_payment):
+    def _import_payments(self, rows, info_map, payment_proofs):
         payments_by_legacy = {}
         imported = 0
+        
+        # Mapeo de descuentos: 50 → id 1, 25 → id 2
+        discount_mapping = {
+            "50": 1,
+            "25": 2,
+        }
 
         for row in rows:
-            if len(row) < 11:
+            # Estructura del query: patient_id, price_per_session, amount_paid, payment_type, descuento
+            if len(row) < 5:
                 continue
 
-            legacy_payment_id = self._to_int(row[0])
-            legacy_info_id = self._to_int(row[1])
-            info = info_map.get(legacy_info_id)
-            if not info:
+            # Buscar el patient_id en los datos que vinieron (this es el cli.id del JOIN)
+            # Necesitamos mapear esto de vuelta al legacy_info_id
+            # Por ahora usamos la relación que ya existe en info_map
+
+            patient_id = self._to_int(row[0])
+            price_per_session = self._to_decimal(row[1], Decimal("0"))
+            amount_paid = self._to_decimal(row[2], Decimal("0"))
+            payment_type_raw = self._clean_text(row[3]).lower()
+            descuento_raw = self._clean_text(row[4])
+
+            # Encontrar el patient en info_map por patient_id
+            patient = None
+            for legacy_info_id, info in info_map.items():
+                if info["patient"].id == patient_id:
+                    patient = info["patient"]
+                    break
+
+            if not patient:
                 continue
 
-            patient = info["patient"]
-            price_total = self._to_decimal(row[2], Decimal("0"))
-            amount_paid = self._to_decimal(row[4], Decimal("0"))
-            sessions_count = max(cycle_count_by_payment.get(legacy_payment_id, 0), 1)
-
-            if sessions_count > 0:
-                price_per_session = (price_total / Decimal(sessions_count)).quantize(Decimal("0.01"))
+            # Mapear tipo (mensual → therapy_monthly, sesion → therapy_session)
+            if "mensual" in payment_type_raw:
+                payment_type = Payment.PaymentType.THERAPY_MONTHLY
+                sessions_count = 1  # Para planes mensuales
+            elif "sesion" in payment_type_raw:
+                payment_type = Payment.PaymentType.THERAPY_SESSION
+                sessions_count = 1  # Se determinará por ciclos si existe
             else:
-                price_per_session = price_total
+                payment_type = Payment.PaymentType.THERAPY_SESSION
+                sessions_count = 1
 
-            debt = price_total - amount_paid
-            if debt <= 0:
-                payment_status = Payment.PaymentStatus.COMPLETED
-            elif amount_paid <= 0:
-                payment_status = Payment.PaymentStatus.PENDING
-            else:
-                payment_status = Payment.PaymentStatus.PARTIAL
+            # Mapear descuento
+            discount = None
+            if descuento_raw and descuento_raw != "0":
+                discount_id = discount_mapping.get(descuento_raw)
+                if discount_id:
+                    try:
+                        discount = Discount.objects.get(id=discount_id)
+                    except Discount.DoesNotExist:
+                        pass
 
-            payment_proof_url = payment_proofs.get(legacy_payment_id)
+            # Determinar método de pago (si existe comprobante → QR, sino → CASH)
+            payment_proof_url = payment_proofs.get(patient.id)
             payment_method = (
                 Payment.PaymentMethod.QR if payment_proof_url else Payment.PaymentMethod.CASH
             )
 
+            # Por defecto, todos los pagos migrados se marcan como COMPLETED
+            payment_status = Payment.PaymentStatus.COMPLETED
+
             payment = Payment.objects.create(
                 patient=patient,
-                discount=None,
+                discount=discount,
                 sessions_count=sessions_count,
                 price_per_session=price_per_session,
                 amount_paid=amount_paid,
                 payment_method=payment_method,
                 payment_proof_url=payment_proof_url,
                 payment_status=payment_status,
+                payment_type=payment_type,
             )
 
-            payments_by_legacy[legacy_payment_id] = payment
+            payments_by_legacy[patient.id] = payment
             imported += 1
 
         self.stdout.write(self.style.SUCCESS(f"Payments migrados: {imported}"))
