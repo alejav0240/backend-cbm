@@ -17,6 +17,8 @@ class Query(graphene.ObjectType):
     users = graphene.Field(
         PaginatedUsers,
         search=graphene.String(),
+        role_name=graphene.String(),
+        exclude_role=graphene.String(),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
     )
@@ -52,7 +54,7 @@ class Query(graphene.ObjectType):
         return user
 
     # ── users (solo staff) ──────────────────────────────────────────────────
-    def resolve_users(root, info, search=None, page=1, page_size=10):
+    def resolve_users(root, info, search=None, role_name=None, exclude_role=None, page=1, page_size=10):
         user = info.context.user
         if not user.is_authenticated:
             raise GraphQLError("No autenticado.")
@@ -61,6 +63,12 @@ class Query(graphene.ObjectType):
         
         qs = User.objects.all().order_by('-date_joined')
         
+        if role_name:
+            qs = qs.filter(groups__name__iexact=role_name)
+        
+        if exclude_role:
+            qs = qs.exclude(groups__name__iexact=exclude_role)
+
         if search:
             from django.db.models import Q
             qs = qs.filter(

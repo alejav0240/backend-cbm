@@ -30,15 +30,21 @@ class Payment(models.Model):
     """
 
     class PaymentMethod(models.TextChoices):
-        CASH = "cash", "Efectivo"
-        TRANSFER = "transfer", "Transferencia"
-        CARD = "card", "Tarjeta"
+        CASH = "efectivo", "Efectivo"
+        TRANSFER = "transferencia", "Transferencia"
+        CARD = "tarjeta", "Tarjeta"
         QR = "qr", "QR"
 
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", "Pendiente"
         PARTIAL = "partial", "Parcial"
         COMPLETED = "completed", "Completado"
+
+    class PaymentType(models.TextChoices):
+        THERAPY_SESSION = "therapy_session", "Sesión de Terapia"
+        THERAPY_MONTHLY = "therapy_monthly", "Terapia Mensual"
+        COURSE = "course", "Curso"
+        OTHER = "other", "Otro"
 
     patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="payments")
     discount = models.ForeignKey(
@@ -52,6 +58,9 @@ class Payment(models.Model):
     payment_date = models.DateTimeField(auto_now_add=True)
     payment_status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+    )
+    payment_type = models.CharField(
+        max_length=20, choices=PaymentType.choices, default=PaymentType.THERAPY_SESSION
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -140,9 +149,10 @@ class CourseEnrollment(models.Model):
 class CoursePayment(models.Model):
 
     class PaymentMethod(models.TextChoices):
-        CASH = "cash", "Efectivo"
-        TRANSFER = "transfer", "Transferencia"
-        CARD = "card", "Tarjeta"
+        CASH = "efectivo", "Efectivo"
+        TRANSFER = "transferencia", "Transferencia"
+        CARD = "tarjeta", "Tarjeta"
+        QR = "qr", "QR"
 
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", "Pendiente"

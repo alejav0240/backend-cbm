@@ -30,6 +30,13 @@ class PaymentType(DjangoObjectType):
         return float(self.debt)
 
 
+class PaginatedPaymentType(graphene.ObjectType):
+    objects = graphene.List(PaymentType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
 class ExpenseType(DjangoObjectType):
     class Meta:
         model = Expense

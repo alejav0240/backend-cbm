@@ -39,6 +39,12 @@ class PaginatedPatients(graphene.ObjectType):
     total_pages = graphene.Int()
     current_page = graphene.Int()
 
+class PaginatedInterventionPlans(graphene.ObjectType):
+    results = graphene.List(InterventionPlanType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
 class Query(graphene.ObjectType):
     patients = graphene.Field(
         PaginatedPatients,
@@ -56,9 +62,12 @@ class Query(graphene.ObjectType):
         category=graphene.String(),
     )
 
-    intervention_plans = graphene.List(
-        InterventionPlanType,
+    intervention_plans = graphene.Field(
+        PaginatedInterventionPlans,
         patient_id=graphene.ID(required=False),
+        search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
     intervention_plan = graphene.Field(InterventionPlanType, id=graphene.ID(required=True))
 
@@ -106,12 +115,30 @@ class Query(graphene.ObjectType):
             qs = qs.filter(category=category)
         return qs
 
-    def resolve_intervention_plans(self, info, patient_id=None):
+    def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
         qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
         if patient_id:
             real_patient_id = get_real_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
-        return qs
+        
+        if search:
+            qs = qs.filter(patient__first_name__icontains=search) \
+                 | qs.filter(patient__last_name__icontains=search) \
+                 | qs.filter(main_objective__icontains=search)
+
+        qs = qs.order_by('-start_date', '-id')
+
+        total_count = qs.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+        results = qs[offset:offset + page_size]
+
+        return PaginatedInterventionPlans(
+            results=results,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page
+        )
 
     def resolve_intervention_plan(self, info, id):
         real_id = get_real_id(id)
