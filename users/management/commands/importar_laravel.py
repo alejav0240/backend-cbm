@@ -94,7 +94,7 @@ class Command(BaseCommand):
                 "archivospagos": self._query_remote_db(conn_remote, "archivospagos"),
                 "ciclos": self._query_remote_db(conn_remote, "ciclos"),
                 "plandeintervencions": self._query_remote_db(conn_remote, "plandeintervencions"),
-                "subplandeintervencions": self._query_remote_db(conn_remote, "subplandeintervencions"),
+                # subplandeintervencions ya está agregado en el query de plandeintervencions
                 "matrizescalas": self._query_remote_db(conn_remote, "matrizescalas"),
                 "submatrizescalas": self._query_remote_db(conn_remote, "submatrizescalas"),
                 "demucas": self._query_remote_db(conn_remote, "demucas"),
@@ -128,7 +128,6 @@ class Command(BaseCommand):
             self._import_sessions(datasets["ciclos"], payments_by_legacy, therapist)
             self._import_intervention_plans(
                 datasets["plandeintervencions"],
-                datasets["subplandeintervencions"],
                 info_map,
                 therapist,
             )
@@ -249,6 +248,34 @@ class Command(BaseCommand):
             elif table_name == "pagos":
                 # Query simple para pagos; compatibilidad manejada por pick()
                 query = "SELECT * FROM pagos"
+            elif table_name == "plandeintervencions":
+                # Query optimizado que trae main_objective, order_index, moment, objetivo, focus, mlt, approach, duration
+                # y agrupa automáticamente los recursos musicales y énfasis musical
+                query = """
+                    SELECT
+                        pi.id,
+                        COALESCE(inf.objgenerales, 'Objetivo migrado desde legacy') AS main_objective,
+                        pi.orden AS order_index,
+                        inf.id_cliente,
+                        pi.momento AS moment,
+                        pi.objetivo AS objective,
+                        pi.foco AS focus,
+                        pi.mlt AS mlt_method,
+                        pi.enfoque AS approach,
+                        pi.duracion AS duration_minutes,
+                        (SELECT GROUP_CONCAT(sp.nombre SEPARATOR ' | ')
+                         FROM subplandeintervencions sp
+                         WHERE sp.categoria = 'RECURSOS MUSICALES'
+                           AND sp.id_plandeintervencion = pi.id) AS musical_resources,
+                        (SELECT GROUP_CONCAT(sp.nombre SEPARATOR ' | ')
+                         FROM subplandeintervencions sp
+                         WHERE sp.categoria = 'ENFASIS MUSICAL'
+                           AND sp.id_plandeintervencion = pi.id) AS musical_emphasis,
+                        pi.created_at,
+                        pi.updated_at
+                    FROM plandeintervencions pi
+                    INNER JOIN infoclientes inf ON pi.id_infocliente = inf.id
+                """
             elif table_name == "usuarios":
                 query = """
                     SELECT
@@ -324,6 +351,25 @@ class Command(BaseCommand):
                         pick(row, "detalles", "estadopago"),
                         pick(row, "notas", "created_at"),
                         pick(row, "user_id", "updated_at"),
+                    ]
+                elif table_name == "plandeintervencions":
+                    # Query optimizado: ya tiene main_objective, order_index, momento, objetivo, focus, mlt, approach, duration
+                    # y los recursos musicales y énfasis musical pre-agregados
+                    row_list = [
+                        pick(row, "id"),
+                        pick(row, "order_index"),
+                        pick(row, "id_cliente"),  # legacy_info_id
+                        pick(row, "moment"),
+                        pick(row, "objective"),
+                        pick(row, "focus"),
+                        pick(row, "mlt_method"),
+                        pick(row, "approach"),
+                        pick(row, "duration_minutes"),
+                        pick(row, "main_objective"),
+                        pick(row, "musical_resources"),
+                        pick(row, "musical_emphasis"),
+                        pick(row, "created_at"),
+                        pick(row, "updated_at"),
                     ]
                 elif table_name == "ciclos":
                     row_list = [
@@ -731,13 +777,20 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Sessions migradas: {imported}"))
 
-    def _import_intervention_plans(self, plan_rows, subplan_rows, info_map, created_by):
+    def _import_intervention_plans(self, plan_rows, info_map, created_by):
+        """Import intervention plans and steps from optimized query that aggregates subplans.
+        
+        Structure (from optimized query):
+        0: id, 1: order_index, 2: id_cliente (legacy_info_id), 3: moment, 4: objective,
+        5: focus, 6: mlt_method, 7: approach, 8: duration_minutes, 9: main_objective,
+        10: musical_resources (pre-aggregated), 11: musical_emphasis (pre-aggregated),
+        12: created_at, 13: updated_at
+        """
         plan_by_patient = {}
-        step_by_legacy_plan_id = {}
         imported_steps = 0
 
         for row in plan_rows:
-            if len(row) < 11:
+            if len(row) < 14:
                 continue
 
             legacy_plan_id = self._to_int(row[0])
@@ -750,7 +803,7 @@ class Command(BaseCommand):
             patient = info["patient"]
             plan = plan_by_patient.get(patient.id)
             if not plan:
-                main_objective = self._clean_text(row[4]) or "Objetivo migrado desde legacy"
+                main_objective = self._limit_text(self._clean_text(row[9]) or "Objetivo migrado desde legacy", 500)
                 plan = InterventionPlan.objects.create(
                     patient=patient,
                     created_by=created_by,
@@ -759,51 +812,29 @@ class Command(BaseCommand):
                 )
                 plan_by_patient[patient.id] = plan
 
+            moment = self._map_plan_moment(row[3])
+            objective = self._limit_text(self._clean_text(row[4]) or "Paso migrado", 255)
+            focus = self._clean_text(row[5]) or None
+            approach = self._limit_text(self._clean_text(row[6]), 255) or None
+            mlt_method = self._limit_text(self._clean_text(row[7]), 100) or None
+            duration_minutes = self._to_int(row[8])
+            musical_resources = self._clean_text(row[10]) or None
+            musical_emphasis = self._clean_text(row[11]) or None
+
             step = PlanStep.objects.create(
                 plan=plan,
-                moment=self._map_plan_moment(row[3]),
-                duration_minutes=self._to_int(row[8]),
-                objective=self._limit_text(self._clean_text(row[4]) or "Paso migrado", 255),
-                focus=self._clean_text(row[5]) or None,
-                musical_resources=None,
-                musical_emphasis=None,
-                approach=self._limit_text(self._clean_text(row[7]), 255) or None,
-                mlt_method=self._limit_text(self._clean_text(row[6]), 100) or None,
+                moment=moment,
+                duration_minutes=duration_minutes,
+                objective=objective,
+                focus=focus,
+                musical_resources=musical_resources,
+                musical_emphasis=musical_emphasis,
+                approach=approach,
+                mlt_method=mlt_method,
                 order_index=order_index,
             )
 
-            step_by_legacy_plan_id[legacy_plan_id] = step
             imported_steps += 1
-
-        for row in subplan_rows:
-            if len(row) < 6:
-                continue
-
-            legacy_plan_id = self._to_int(row[1])
-            step = step_by_legacy_plan_id.get(legacy_plan_id)
-            if not step:
-                continue
-
-            category = self._clean_text(row[2]).upper()
-            value = self._clean_text(row[3])
-            if not value:
-                continue
-
-            if "RECURSO" in category:
-                step.musical_resources = self._append_text(step.musical_resources, value)
-                step.save(update_fields=["musical_resources"])
-            elif "ENFASIS" in category:
-                step.musical_emphasis = self._append_text(step.musical_emphasis, value)
-                step.save(update_fields=["musical_emphasis"])
-            elif "MLT" in category:
-                step.mlt_method = self._append_text(step.mlt_method, value)
-                step.save(update_fields=["mlt_method"])
-            elif "ENFOQUE" in category:
-                step.approach = self._append_text(step.approach, value)
-                step.save(update_fields=["approach"])
-            else:
-                step.focus = self._append_text(step.focus, value)
-                step.save(update_fields=["focus"])
 
         self.stdout.write(self.style.SUCCESS(f"PlanSteps migrados: {imported_steps}"))
 
@@ -1011,10 +1042,28 @@ class Command(BaseCommand):
     def _map_plan_moment(self, legacy_moment):
         value = self._clean_text(legacy_moment).lower()
         if value in {"bienvenida", "inicio", "inicial"}:
-            return PlanStep.Moment.INITIAL
-        if value in {"relajacion", "relajacion.", "cierre"}:
-            return PlanStep.Moment.CLOSURE
-        return PlanStep.Moment.DEVELOPMENT
+            return PlanStep.Moment.BIENVENIDA
+        if value in {"relajacion", "relajacion.", "despedida", "cierre"}:
+            return PlanStep.Moment.RELAJACION
+        # Mapear otros valores conocidos del enum
+        moment_mapping = {
+            "iso": PlanStep.Moment.ISO,
+            "melodico": PlanStep.Moment.MELODICO,
+            "ritmico": PlanStep.Moment.RITMICO,
+            "armonico": PlanStep.Moment.ARMONICO,
+            "abstraccion": PlanStep.Moment.ABSTRACCION,
+            "danza libre": PlanStep.Moment.DANZA_LIBRE,
+            "danza_libre": PlanStep.Moment.DANZA_LIBRE,
+            "expresion corporal": PlanStep.Moment.EXPRESION_CORPORAL,
+            "expresion_corporal": PlanStep.Moment.EXPRESION_CORPORAL,
+            "ritmo y espacio": PlanStep.Moment.RITMO_Y_ESPACIO,
+            "ritmo_y_espacio": PlanStep.Moment.RITMO_Y_ESPACIO,
+        }
+        mapped = moment_mapping.get(value)
+        if mapped:
+            return mapped
+        # Default a BIENVENIDA si no se reconoce
+        return PlanStep.Moment.BIENVENIDA
 
     def _score_from_legacy(self, escala_text, multiplicar_value, max_value):
         parsed = self._to_int(multiplicar_value)
