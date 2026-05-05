@@ -341,7 +341,7 @@ class CreateStepPlan(graphene.Mutation):
         # 2. Creación del registro
         step = PlanStep.objects.create(
             plan_id=plan_id,
-            moment=moment.lower(), # Aseguramos que guarde 'initial', 'development' o 'closure'
+            moment=moment,
             objective=objective,
             duration_minutes=kwargs.get('duration_minutes'),
             focus=kwargs.get('focus'),
@@ -476,10 +476,7 @@ class UpdateStepPlan(graphene.Mutation):
         try:
             step = PlanStep.objects.get(pk=id)
             for key, value in kwargs.items():
-                if key == 'moment' and value:
-                    step.moment = value.lower()
-                else:
-                    setattr(step, key, value)
+                setattr(step, key, value)
             step.save()
             return UpdateStepPlan(step=step)
         except PlanStep.DoesNotExist:
