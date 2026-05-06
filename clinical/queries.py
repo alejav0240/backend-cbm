@@ -8,6 +8,7 @@ import base64
 
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType
+from config.utils import login_required
 
 def get_real_id(id_attr):
     if not id_attr:
@@ -78,6 +79,7 @@ class Query(graphene.ObjectType):
 
     patient_growth = graphene.List(GrowthPointType)
 
+    @login_required
     def resolve_patients(self, info, status=None, search=None, page=1, page_size=10):
         qs = Patient.objects.select_related("tutor").all()
         if status:
@@ -101,6 +103,7 @@ class Query(graphene.ObjectType):
             current_page=page,
         )
 
+    @login_required
     def resolve_patient(self, info, id):
         real_id = get_real_id(id)
         try:
@@ -108,6 +111,7 @@ class Query(graphene.ObjectType):
         except (Patient.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Paciente con ID {real_id} no encontrado")
 
+    @login_required
     def resolve_clinical_notes(self, info, patient_id, category=None):
         real_patient_id = get_real_id(patient_id)
         qs = PatientClinicalNote.objects.filter(patient_id=real_patient_id).select_related("author")
@@ -115,6 +119,7 @@ class Query(graphene.ObjectType):
             qs = qs.filter(category=category)
         return qs
 
+    @login_required
     def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
         qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
         if patient_id:
@@ -140,6 +145,7 @@ class Query(graphene.ObjectType):
             current_page=page
         )
 
+    @login_required
     def resolve_intervention_plan(self, info, id):
         real_id = get_real_id(id)
         try:
@@ -147,6 +153,7 @@ class Query(graphene.ObjectType):
         except (InterventionPlan.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Plan con ID {real_id} no encontrado")
 
+    @login_required
     def resolve_therapy_reports(self, info, patient_id=None):
         qs = TherapyReport.objects.select_related("patient", "generated_by").all()
         if patient_id:
@@ -154,6 +161,7 @@ class Query(graphene.ObjectType):
             qs = qs.filter(patient_id=real_patient_id)
         return qs
 
+    @login_required
     def resolve_patient_growth(self, info):
         last_6_months = {}
         for i in range(5, -1, -1):

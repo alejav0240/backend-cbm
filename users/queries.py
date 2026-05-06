@@ -3,6 +3,7 @@ from graphql import GraphQLError
 from django.contrib.auth.models import Group
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
+from config.utils import login_required, staff_member_required
 
 
 class PaginatedUsers(graphene.ObjectType):
@@ -47,20 +48,13 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Rol no encontrado")
 
     # ── me ──────────────────────────────────────────────────────────────────
+    @login_required
     def resolve_me(root, info):
-        user = info.context.user
-        if user.is_anonymous:
-            raise GraphQLError("No autenticado.")
-        return user
+        return info.context.user
 
     # ── users (solo staff) ──────────────────────────────────────────────────
+    @staff_member_required
     def resolve_users(root, info, search=None, role_name=None, exclude_role=None, page=1, page_size=10):
-        user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
-        if not user.is_staff:
-            raise GraphQLError("No autorizado: se requiere rol de administrador.")
-        
         qs = User.objects.all().order_by('-date_joined')
         
         if role_name:
@@ -92,10 +86,9 @@ class Query(graphene.ObjectType):
         )
 
     # ── user por id (solo staff o el propio usuario) ─────────────────────────
+    @login_required
     def resolve_user(root, info, id):
         user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
             
         try:
             real_id = int(graphene.relay.Node.from_global_id(id)[1])
@@ -110,18 +103,16 @@ class Query(graphene.ObjectType):
             raise GraphQLError(f"Usuario {real_id} no encontrado.")
 
     # ── notificaciones (solo las propias) ────────────────────────────────────
+    @login_required
     def resolve_notifications(root, info, is_read=None):
         user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
         qs = Notification.objects.filter(user=user)
         if is_read is not None:
             qs = qs.filter(is_read=is_read)
         return qs
 
     # ── contador rápido ──────────────────────────────────────────────────────
+    @login_required
     def resolve_unread_notifications_count(root, info):
         user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
         return Notification.objects.filter(user=user, is_read=False).count()
