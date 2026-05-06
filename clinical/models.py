@@ -89,6 +89,19 @@ class InterventionPlan(models.Model):
     def __str__(self):
         return f"Plan de {self.patient} — {self.start_date}"
 
+    def update_progress(self):
+        """Calcula y actualiza el porcentaje de progreso basado en los pasos completados."""
+        total_steps = self.steps.count()
+        if total_steps == 0:
+            new_progress = 0
+        else:
+            completed_steps = self.steps.filter(is_completed=True).count()
+            new_progress = int((completed_steps / total_steps) * 100)
+        
+        if self.progress_percent != new_progress:
+            self.progress_percent = new_progress
+            self.save(update_fields=["progress_percent", "updated_at"])
+
 class PlanStep(models.Model):
 
     class Moment(models.TextChoices):
@@ -205,6 +218,7 @@ class PlanStep(models.Model):
     plan = models.ForeignKey(InterventionPlan, on_delete=models.CASCADE, related_name="steps")
     moment = models.CharField(max_length=20, choices=Moment.choices)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
+    actual_duration = models.PositiveIntegerField(blank=True, null=True)
     objective = models.CharField(max_length=255, choices=Objective.choices)
     focus = models.TextField(blank=True, null=True, choices=Focus.choices)
     musical_resources = models.TextField(blank=True, null=True)
@@ -220,6 +234,17 @@ class PlanStep(models.Model):
 
     def __str__(self):
         return f"{self.get_moment_display()} — {self.objective[:60]}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.plan:
+            self.plan.update_progress()
+
+    def delete(self, *args, **kwargs):
+        plan = self.plan
+        super().delete(*args, **kwargs)
+        if plan:
+            plan.update_progress()
 
 
 class TherapyReport(models.Model):

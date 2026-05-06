@@ -251,8 +251,62 @@ class DeleteDigitalResource(graphene.Mutation):
         except DigitalResource.DoesNotExist:
             return DeleteDigitalResource(success=False)
 
+class CreateCycle(graphene.Mutation):
+    class Arguments:
+        patient_id = graphene.ID(required=True)
+        therapist_id = graphene.ID(required=True)
+        start_date = graphene.Date(required=True)
+        num_sessions = graphene.Int(default_value=4)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    def mutate(self, info, patient_id, therapist_id, start_date, num_sessions=4):
+        db_patient_id = get_db_id(patient_id)
+        db_therapist_id = get_db_id(therapist_id)
+
+        if not db_patient_id:
+            raise GraphQLError("ID de paciente inválido.")
+        if not db_therapist_id:
+            raise GraphQLError("ID de terapeuta inválido.")
+
+        # 1. Obtener el último número de sesión
+        last_session = Session.objects.filter(patient_id=db_patient_id).aggregate(
+            last_num=Coalesce(Max('session_number'), 0)
+        )
+        current_num = last_session['last_num']
+
+        # 2. Crear lote de sesiones (una por semana por defecto, o según lógica del proyecto)
+        from datetime import timedelta
+        
+        sessions_to_create = []
+        for i in range(num_sessions):
+            current_num += 1
+            calculated_cycle = math.ceil(current_num / 4)
+            
+            # Programar una sesión cada semana (7 días)
+            session_date = start_date + timedelta(weeks=i)
+            
+            sessions_to_create.append(
+                Session(
+                    patient_id=db_patient_id,
+                    therapist_id=db_therapist_id,
+                    session_date=session_date,
+                    session_type="Individual", # Valor por defecto
+                    session_number=current_num,
+                    cycle_number=calculated_cycle,
+                    session_status="Programada",
+                    payment_status="pending"
+                )
+            )
+        
+        Session.objects.bulk_create(sessions_to_create)
+        
+        return CreateCycle(success=True, message=f"Se han creado {num_sessions} sesiones exitosamente.")
+
 class Mutation(graphene.ObjectType):
     create_session = CreateSession.Field()
+    create_cycle = CreateCycle.Field()
     update_session_payment_status = UpdateSessionPaymentStatus.Field()
     add_session_resource = AddSessionResource.Field()
     add_session_inventory_item = AddSessionInventoryItem.Field()

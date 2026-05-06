@@ -59,7 +59,7 @@ class PlanStepType(DjangoObjectType):
     class Meta:
         model = PlanStep
         fields = (
-            "id", "plan", "moment", "duration_minutes",
+            "id", "plan", "moment", "duration_minutes", "actual_duration",
             "objective", "focus", "musical_resources",
             "musical_emphasis", "approach", "mlt_method",
             "order_index", "is_completed",

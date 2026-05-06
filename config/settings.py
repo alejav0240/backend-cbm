@@ -143,12 +143,13 @@ JWT_REFRESH_EXPIRATION_DELTA = datetime.timedelta(days=7)
 GRAPHQL_JWT = {
     "JWT_VERIFY_EXPIRATION": True,
     "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
+    "JWT_REUSE_REFRESH_TOKENS": True,
 
     # Cookies
     "JWT_COOKIE_NAME": "access_token",
     "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
     "JWT_COOKIE_HTTPONLY": True,
-    "JWT_COOKIE_SECURE": False,
+    "JWT_COOKIE_SECURE": False, # En prod debería ser True
     "JWT_COOKIE_SAMESITE": "Lax",
 }
 
