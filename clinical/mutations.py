@@ -9,6 +9,7 @@ from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlan
 from users.models import User
 from django.db.models import Max
 from django.db.models.functions import Coalesce
+from config.utils import get_db_id
 
 
 def _generate_username(last_name: str, ci: str | None) -> str:
@@ -169,14 +170,7 @@ class UpdatePatientStatus(graphene.Mutation):
     patient = graphene.Field(PatientType)
 
     def mutate(self, info, id, status):
-        # Manejar ID de Relay o ID directo y convertir a int
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            try:
-                real_id = int(id)
-            except:
-                real_id = id
+        real_id = get_db_id(id)
 
         try:
             patient = Patient.objects.get(pk=real_id)
@@ -200,16 +194,8 @@ class UpdatePatient(graphene.Mutation):
 
     # 2. El parámetro DEBE llamarse 'id' para coincidir con Arguments
     def mutate(self, info, id, image_url=None, residence=None, diagnosis=None, registration_complete=None):
+        real_id = get_db_id(id)
         try:
-            # Manejar ID de Relay o ID directo y convertir a int
-            try:
-                real_id = int(graphene.relay.Node.from_global_id(id)[1])
-            except:
-                try:
-                    real_id = int(id)
-                except:
-                    real_id = id
-                
             # 3. Usa ese 'id' para buscar al paciente
             patient = Patient.objects.get(pk=real_id)
 

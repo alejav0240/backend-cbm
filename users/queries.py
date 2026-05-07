@@ -3,7 +3,7 @@ from graphql import GraphQLError
 from django.contrib.auth.models import Group
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
-from config.utils import login_required, staff_member_required
+from config.utils import login_required, staff_member_required, get_db_id
 
 
 class PaginatedUsers(graphene.ObjectType):
@@ -38,10 +38,7 @@ class Query(graphene.ObjectType):
         return Group.objects.all()
 
     def resolve_role(root, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return Group.objects.get(pk=real_id)
         except Group.DoesNotExist:
@@ -89,11 +86,7 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_user(root, info, id):
         user = info.context.user
-            
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
 
         if not user.is_staff and str(user.pk) != str(real_id):
             raise GraphQLError("No autorizado.")

@@ -8,31 +8,7 @@ import base64
 
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType
-from config.utils import login_required
-
-def get_real_id(id_attr):
-    if not id_attr:
-        return None
-    
-    # Si ya es un entero o parece serlo, no decodificamos
-    if isinstance(id_attr, int) or (isinstance(id_attr, str) and id_attr.isdigit()):
-        return id_attr
-        
-    try:
-        # Intentar decodificación manual de Relay (Base64)
-        # Relay IDs suelen ser "Tipo:ID" codificados en Base64
-        decoded = base64.b64decode(str(id_attr)).decode('utf-8')
-        if ":" in decoded:
-            return decoded.split(":")[1]
-        return decoded
-    except Exception:
-        # Si falla el Base64, intentar el helper de Graphene por si acaso
-        try:
-            from graphql_relay import from_global_id
-            return from_global_id(id_attr)[1]
-        except Exception:
-            # Si todo falla, devolver el original
-            return id_attr
+from config.utils import login_required, get_db_id
 
 class PaginatedPatients(graphene.ObjectType):
     results = graphene.List(PatientType)
@@ -105,7 +81,7 @@ class Query(graphene.ObjectType):
 
     @login_required
     def resolve_patient(self, info, id):
-        real_id = get_real_id(id)
+        real_id = get_db_id(id)
         try:
             return Patient.objects.select_related("tutor").get(pk=real_id)
         except (Patient.DoesNotExist, ValueError, TypeError):
@@ -113,7 +89,7 @@ class Query(graphene.ObjectType):
 
     @login_required
     def resolve_clinical_notes(self, info, patient_id, category=None):
-        real_patient_id = get_real_id(patient_id)
+        real_patient_id = get_db_id(patient_id)
         qs = PatientClinicalNote.objects.filter(patient_id=real_patient_id).select_related("author")
         if category:
             qs = qs.filter(category=category)
@@ -123,7 +99,7 @@ class Query(graphene.ObjectType):
     def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
         qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
         if patient_id:
-            real_patient_id = get_real_id(patient_id)
+            real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
         
         if search:
@@ -147,7 +123,7 @@ class Query(graphene.ObjectType):
 
     @login_required
     def resolve_intervention_plan(self, info, id):
-        real_id = get_real_id(id)
+        real_id = get_db_id(id)
         try:
             return InterventionPlan.objects.prefetch_related("steps").get(pk=real_id)
         except (InterventionPlan.DoesNotExist, ValueError, TypeError):
@@ -157,7 +133,7 @@ class Query(graphene.ObjectType):
     def resolve_therapy_reports(self, info, patient_id=None):
         qs = TherapyReport.objects.select_related("patient", "generated_by").all()
         if patient_id:
-            real_patient_id = get_real_id(patient_id)
+            real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
         return qs
 

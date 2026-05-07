@@ -1,8 +1,16 @@
+import math
 import graphene
 from decimal import Decimal
+from datetime import timedelta
 from graphql import GraphQLError
+from django.db import transaction
+from django.db.models import Max
+from django.db.models.functions import Coalesce
+
 from finance.models import CoursePayment, CourseEnrollment, Expense, Payment, Discount, Course
 from finance.type import CourseEnrollmentType, ExpenseType, PaymentType, CourseType
+from therapeutic_sessions.models import Session
+from config.utils import get_db_id
 
 class CreatePayment(graphene.Mutation):
     class Arguments:
@@ -18,10 +26,9 @@ class CreatePayment(graphene.Mutation):
     def mutate(self, info, patient_id, sessions_count, price_per_session,
                amount_paid, payment_method, discount_id=None):
         
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            real_patient_id = patient_id
+        real_patient_id = get_db_id(patient_id)
+        if not real_patient_id:
+            raise GraphQLError("ID de paciente inválido")
 
         base_total = Decimal(str(price_per_session)) * sessions_count
         final_total = base_total
@@ -30,17 +37,13 @@ class CreatePayment(graphene.Mutation):
         discount_obj = None
         if discount_id:
             try:
-                try:
-                    real_discount_id = int(graphene.relay.Node.from_global_id(discount_id)[1])
-                except:
-                    real_discount_id = discount_id
-                    
+                real_discount_id = get_db_id(discount_id)
                 discount_obj = Discount.objects.get(pk=real_discount_id)
                 if discount_obj.type == Discount.DiscountType.PERCENTAGE:
                     final_total = base_total * (Decimal('1') - (discount_obj.value / Decimal('100')))
                 else: # FIXED
                     final_total = base_total - discount_obj.value
-            except Discount.DoesNotExist:
+            except (Discount.DoesNotExist, ValueError):
                 raise GraphQLError("Descuento no encontrado")
 
         paid = Decimal(str(amount_paid))
@@ -53,15 +56,70 @@ class CreatePayment(graphene.Mutation):
         else:
             status = Payment.PaymentStatus.PENDING
 
-        payment = Payment.objects.create(
-            patient_id=real_patient_id,
-            sessions_count=sessions_count,
-            price_per_session=price_per_session,
-            amount_paid=amount_paid,
-            payment_method=payment_method,
-            discount=discount_obj,
-            payment_status=status,
-        )
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                patient_id=real_patient_id,
+                sessions_count=sessions_count,
+                price_per_session=price_per_session,
+                amount_paid=amount_paid,
+                payment_method=payment_method,
+                discount=discount_obj,
+                payment_status=status,
+            )
+
+            # ── Lógica de Actualización y Creación de Sesiones ─────────────────
+            # 1. Obtener sesiones pendientes del paciente
+            pending_sessions = list(Session.objects.filter(
+                patient_id=real_patient_id,
+                payment_status=Session.PaymentStatus.PENDING
+            ).order_by('session_date'))
+
+            sessions_to_mark = min(len(pending_sessions), sessions_count)
+            
+            # Actualizar las existentes
+            for i in range(sessions_to_mark):
+                sess = pending_sessions[i]
+                sess.payment_status = Session.PaymentStatus.PAID
+                sess.save(update_fields=['payment_status', 'updated_at'])
+
+            # 2. Si faltan sesiones por cubrir, crearlas automáticamente
+            remaining_to_create = sessions_count - sessions_to_mark
+            
+            if remaining_to_create > 0:
+                # Buscar la última sesión para determinar fecha y terapeuta base
+                last_sess = Session.objects.filter(patient_id=real_patient_id).order_by('-session_date').first()
+                
+                if last_sess:
+                    base_date = last_sess.session_date
+                    base_therapist_id = last_sess.therapist_id
+                    base_type = last_sess.session_type
+                    current_session_num = last_sess.session_number
+                else:
+                    # Si no hay ninguna sesión previa, no podemos automatizar el horario/terapeuta fácilmente
+                    # Por ahora lanzamos error para evitar inconsistencias
+                    raise GraphQLError("No hay sesiones previas para este paciente. Crea al menos una sesión manual antes de registrar un pago anticipado.")
+
+                new_sessions = []
+                for i in range(1, remaining_to_create + 1):
+                    current_session_num += 1
+                    calculated_cycle = math.ceil(current_session_num / 4)
+                    
+                    new_sessions.append(
+                        Session(
+                            patient_id=real_patient_id,
+                            therapist_id=base_therapist_id,
+                            session_date=base_date + timedelta(weeks=i),
+                            session_type=base_type,
+                            session_number=current_session_num,
+                            cycle_number=calculated_cycle,
+                            session_status=Session.SessionStatus.CONFIRMADA,
+                            payment_status=Session.PaymentStatus.PAID
+                        )
+                    )
+                
+                if new_sessions:
+                    Session.objects.bulk_create(new_sessions)
+
         return CreatePayment(payment=payment)
 
 class CreateExpense(graphene.Mutation):
@@ -94,10 +152,7 @@ class EnrollInCourse(graphene.Mutation):
 
     def mutate(self, info, course_id, full_name, payment_method,
                amount, carnet=None):
-        try:
-            real_course_id = int(graphene.relay.Node.from_global_id(course_id)[1])
-        except:
-            real_course_id = course_id
+        real_course_id = get_db_id(course_id)
 
         try:
             # Verificamos que el curso exista antes de enrolar
@@ -229,10 +284,7 @@ class UpdateCourse(graphene.Mutation):
     course = graphene.Field(CourseType)
 
     def mutate(self, info, id, **kwargs):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             course = Course.objects.get(pk=real_id)
             for key, value in kwargs.items():
@@ -251,10 +303,7 @@ class DeleteCourse(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             course = Course.objects.get(pk=real_id)
             course.delete()

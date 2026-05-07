@@ -6,38 +6,9 @@ from django.db.models.functions import Coalesce
 
 from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem, DigitalResource
 from therapeutic_sessions.type import SessionType, SessionResourceType, SessionInventoryType, InventoryItemType, DigitalResourceType
+from config.utils import get_db_id
 
 from django.db.models import Max
-
-def get_db_id(global_id):
-    """
-    Helper para obtener el ID real de la DB desde un ID de Relay o un ID plano.
-    """
-    if not global_id:
-        return None
-    
-    # Si ya es un número o string numérico directo
-    if isinstance(global_id, int):
-        return global_id
-    if isinstance(global_id, str) and global_id.isdigit():
-        return int(global_id)
-    
-    # Intentar decodificar Relay Global ID (Base64)
-    try:
-        # Añadir padding si falta (común en transmisiones base64)
-        if isinstance(global_id, str):
-            padding = len(global_id) % 4
-            if padding:
-                global_id += "=" * (4 - padding)
-            
-            decoded = base64.b64decode(global_id).decode('utf-8')
-            if ':' in decoded:
-                # El formato de Relay es "TypeName:InternalID"
-                return int(decoded.split(':')[1])
-    except Exception:
-        pass
-        
-    return None
 
 class CreateSession(graphene.Mutation):
     class Arguments:
