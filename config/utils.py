@@ -1,5 +1,36 @@
 from graphql import GraphQLError
 from functools import wraps
+import base64
+
+def get_db_id(global_id):
+    """
+    Helper para obtener el ID real de la DB desde un ID de Relay o un ID plano.
+    """
+    if not global_id:
+        return None
+    
+    # Si ya es un número o string numérico directo
+    if isinstance(global_id, int):
+        return global_id
+    if isinstance(global_id, str) and global_id.isdigit():
+        return int(global_id)
+    
+    # Intentar decodificar Relay Global ID (Base64)
+    try:
+        # Añadir padding si falta (común en transmisiones base64)
+        if isinstance(global_id, str):
+            padding = len(global_id) % 4
+            if padding:
+                global_id += "=" * (4 - padding)
+            
+            decoded = base64.b64decode(global_id.encode('utf-8')).decode('utf-8')
+            if ':' in decoded:
+                # El formato de Relay es "TypeName:InternalID"
+                return int(decoded.split(':')[1])
+    except Exception:
+        pass
+        
+    return None
 
 def login_required(func):
     @wraps(func)

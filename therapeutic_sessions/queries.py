@@ -3,6 +3,7 @@ from graphql import GraphQLError
 
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
+from config.utils import get_db_id
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,16 +134,10 @@ class Query(graphene.ObjectType):
                          session_type=None, payment_status=None, session_status=None,):
         qs = Session.objects.select_related("patient", "therapist", "group").all()
         if patient_id:
-            try:
-                real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-            except:
-                real_patient_id = patient_id
+            real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
         if therapist_id:
-            try:
-                real_therapist_id = int(graphene.relay.Node.from_global_id(therapist_id)[1])
-            except:
-                real_therapist_id = therapist_id
+            real_therapist_id = get_db_id(therapist_id)
             qs = qs.filter(therapist_id=real_therapist_id)
         if session_type:
             qs = qs.filter(session_type=session_type)
@@ -153,10 +148,7 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_session(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return Session.objects.select_related(
                 "patient", "therapist", "group"
@@ -188,10 +180,7 @@ class Query(graphene.ObjectType):
         )
 
     def resolve_digital_resource(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return DigitalResource.objects.get(pk=real_id)
         except DigitalResource.DoesNotExist:
@@ -206,20 +195,14 @@ class Query(graphene.ObjectType):
         return qs
 
     def resolve_inventory_item(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return InventoryItem.objects.get(pk=real_id)
         except InventoryItem.DoesNotExist:
             raise GraphQLError("Item de inventario no encontrado")
 
     def resolve_patient_cycles(self, info, patient_id):
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            real_patient_id = patient_id
+        real_patient_id = get_db_id(patient_id)
         qs = Session.objects.filter(patient_id=real_patient_id, cycle_number__isnull=False)
         return _build_cycles(qs)
 
