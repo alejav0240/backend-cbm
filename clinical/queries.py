@@ -8,7 +8,7 @@ import base64
 
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType
-from config.utils import login_required, get_db_id
+from config.utils import login_required, get_db_id, module_permission_required
 
 class PaginatedPatients(graphene.ObjectType):
     results = graphene.List(PatientType)
@@ -55,7 +55,7 @@ class Query(graphene.ObjectType):
 
     patient_growth = graphene.List(GrowthPointType)
 
-    @login_required
+    @module_permission_required('pacientes', action='view')
     def resolve_patients(self, info, status=None, search=None, page=1, page_size=10):
         qs = Patient.objects.select_related("tutor").all()
         if status:
@@ -79,7 +79,7 @@ class Query(graphene.ObjectType):
             current_page=page,
         )
 
-    @login_required
+    @module_permission_required('pacientes', action='view')
     def resolve_patient(self, info, id):
         real_id = get_db_id(id)
         try:
@@ -95,7 +95,7 @@ class Query(graphene.ObjectType):
             qs = qs.filter(category=category)
         return qs
 
-    @login_required
+    @module_permission_required('planes', action='view')
     def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
         qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
         if patient_id:
@@ -129,7 +129,7 @@ class Query(graphene.ObjectType):
         except (InterventionPlan.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Plan con ID {real_id} no encontrado")
 
-    @login_required
+    @module_permission_required('informes', action='view')
     def resolve_therapy_reports(self, info, patient_id=None):
         qs = TherapyReport.objects.select_related("patient", "generated_by").all()
         if patient_id:

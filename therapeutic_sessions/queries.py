@@ -3,7 +3,7 @@ from graphql import GraphQLError
 
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
-from config.utils import get_db_id
+from config.utils import get_db_id, module_permission_required
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -130,6 +130,7 @@ class Query(graphene.ObjectType):
         description="Ciclos de todos los pacientes, ordenados por paciente y cycle_number.",
     )
 
+    @module_permission_required('sesiones', action='view')
     def resolve_sessions(self, info, patient_id=None, therapist_id=None,
                          session_type=None, payment_status=None, session_status=None,):
         qs = Session.objects.select_related("patient", "therapist", "group").all()
@@ -147,6 +148,7 @@ class Query(graphene.ObjectType):
             qs = qs.filter(session_status=session_status) # FIX: Corregido de session_type a session_status
         return qs
 
+    @module_permission_required('sesiones', action='view')
     def resolve_session(self, info, id):
         real_id = get_db_id(id)
         try:
@@ -160,6 +162,7 @@ class Query(graphene.ObjectType):
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
 
+    @module_permission_required('recursos', action='view')
     def resolve_digital_resources(self, info, type=None, search=None, page=1, page_size=10):
         qs = DigitalResource.objects.all()
         if type:
@@ -179,6 +182,7 @@ class Query(graphene.ObjectType):
             current_page=page,
         )
 
+    @module_permission_required('recursos', action='view')
     def resolve_digital_resource(self, info, id):
         real_id = get_db_id(id)
         try:
@@ -186,6 +190,7 @@ class Query(graphene.ObjectType):
         except DigitalResource.DoesNotExist:
             raise GraphQLError("Recurso digital no encontrado")
 
+    @module_permission_required('inventario', action='view')
     def resolve_inventory_items(self, info, status=None, type=None):
         qs = InventoryItem.objects.all()
         if status:
@@ -194,6 +199,7 @@ class Query(graphene.ObjectType):
             qs = qs.filter(type=type)
         return qs
 
+    @module_permission_required('inventario', action='view')
     def resolve_inventory_item(self, info, id):
         real_id = get_db_id(id)
         try:

@@ -51,3 +51,35 @@ def staff_member_required(func):
             raise GraphQLError("No autorizado: se requiere rol de administrador.")
         return func(root, info, *args, **kwargs)
     return wrapper
+
+def module_permission_required(module_name, action='view'):
+    """
+    Decorador para verificar si el usuario tiene un permiso específico sobre un módulo.
+    Acciones válidas: 'view', 'add', 'change', 'delete'
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(root, info, *args, **kwargs):
+            user = info.context.user
+            if not user.is_authenticated:
+                raise GraphQLError("No autenticado.")
+            
+            if user.is_superuser or user.is_staff:
+                return func(root, info, *args, **kwargs)
+
+            from users.permissions_map import MODULE_MODEL_MAP
+            
+            if module_name not in MODULE_MODEL_MAP:
+                raise GraphQLError(f"Módulo '{module_name}' no definido.")
+
+            app_label, model_name = MODULE_MODEL_MAP[module_name]
+            
+            # Formato de permiso de Django: app_label.accion_modelname
+            permission_codename = f"{app_label}.{action}_{model_name}"
+            
+            if user.has_perm(permission_codename):
+                return func(root, info, *args, **kwargs)
+            
+            raise GraphQLError(f"No tienes permiso para realizar la acción '{action}' en el módulo {module_name}.")
+        return wrapper
+    return decorator

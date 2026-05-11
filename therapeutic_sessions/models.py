@@ -70,6 +70,7 @@ class Session(models.Model):
     class SessionStatus(models.TextChoices):
         COMPLETADA = "completa", "Completa"
         CONFIRMADA = "confirma", "Confirma"
+        AGENDADA = "agendada", "Agendada"
         REPROGRAMA = "reprograma", "Reprograma"
         CANCELADA = "cancelada", "Cancelada"
 

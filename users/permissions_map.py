@@ -4,12 +4,24 @@ from django.contrib.auth.models import Permission
 MODULE_MODEL_MAP = {
     'pacientes': ('clinical', 'patient'),
     'sesiones': ('therapeutic_sessions', 'session'),
-    'agenda': ('clinical', 'patientclinicalnote'), # Usado como proxy para agenda
+    'agenda': ('clinical', 'patientclinicalnote'), # Proxy para agenda
     'pagos': ('finance', 'payment'),
     'recursos': ('therapeutic_sessions', 'digitalresource'),
     'formularios': ('evaluations', 'form'),
     'roles': ('auth', 'group'),
-    'configuracion': ('users', 'user'),
+    'usuarios': ('users', 'user'),
+    'evaluaciones': ('evaluations', 'evaluation'),
+    'planes': ('clinical', 'interventionplan'),
+    'escalas': ('evaluations', 'evaluationscale'),
+    'informes': ('clinical', 'therapyreport'),
+    'gastos': ('finance', 'expense'),
+    'inventario': ('therapeutic_sessions', 'inventoryitem'),
+    'analisis': ('clinical', 'therapyreport'), # Reutilizamos informes para análisis
+    'marketing': ('marketing', 'marketingcampaign'),
+    'blog': ('marketing', 'blogpost'),
+    'cursos': ('finance', 'course'),
+    'instituciones': ('institutions', 'institution'),
+    'ajustes': ('users', 'user'),
 }
 
 def get_permissions_for_modules(modules):

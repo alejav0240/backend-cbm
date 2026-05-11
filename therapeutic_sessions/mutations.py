@@ -5,8 +5,8 @@ from graphql import GraphQLError
 from django.db.models.functions import Coalesce
 
 from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem, DigitalResource
-from therapeutic_sessions.type import SessionType, SessionResourceType, SessionInventoryType, InventoryItemType, DigitalResourceType
-from config.utils import get_db_id
+from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
+from config.utils import get_db_id, module_permission_required
 
 from django.db.models import Max
 
@@ -23,6 +23,7 @@ class CreateSession(graphene.Mutation):
 
     session = graphene.Field(SessionType)
 
+    @module_permission_required('sesiones', action='add')
     def mutate(self, info, patient_id=None, therapist_id=None, session_date=None, session_type=None,
                duration_minutes=None, notes=None, group_id=None, video_url=None):
         
@@ -33,7 +34,6 @@ class CreateSession(graphene.Mutation):
         if not db_therapist_id:
             raise GraphQLError("ID de terapeuta inválido o no proporcionado.")
 
-        # 1. Calcular el número de sesión correlativo para este paciente
         current_session_number = 0
         if db_patient_id:
             last_session_data = Session.objects.filter(patient_id=db_patient_id).aggregate(
@@ -41,10 +41,8 @@ class CreateSession(graphene.Mutation):
             )
             current_session_number = last_session_data['last_num'] + 1
 
-        # 2. Calcular el ciclo (cada 4 sesiones es un ciclo)
         calculated_cycle = math.ceil(current_session_number / 4) if current_session_number > 0 else 0
 
-        # 3. Crear la sesión con los IDs numéricos reales
         session = Session.objects.create(
             patient_id=db_patient_id,
             therapist_id=db_therapist_id,
@@ -68,6 +66,7 @@ class UpdateSessionPaymentStatus(graphene.Mutation):
 
     session = graphene.Field(SessionType)
 
+    @module_permission_required('sesiones', action='change')
     def mutate(self, info, id, payment_status):
         real_id = get_db_id(id)
         try:
@@ -85,8 +84,9 @@ class AddSessionResource(graphene.Mutation):
         session_id = graphene.ID(required=True)
         resource_id = graphene.ID(required=True)
 
-    session_resource = graphene.Field(SessionResourceType)
+    session_resource = graphene.Field(SessionType)
 
+    @module_permission_required('sesiones', action='change')
     def mutate(self, info, session_id, resource_id):
         db_session_id = get_db_id(session_id)
         db_resource_id = get_db_id(resource_id)
@@ -102,8 +102,9 @@ class AddSessionInventoryItem(graphene.Mutation):
         session_id = graphene.ID(required=True)
         item_id = graphene.ID(required=True)
 
-    session_inventory = graphene.Field(SessionInventoryType)
+    session_inventory = graphene.Field(SessionType)
 
+    @module_permission_required('sesiones', action='change')
     def mutate(self, info, session_id, item_id):
         db_session_id = get_db_id(session_id)
         db_item_id = get_db_id(item_id)
@@ -123,6 +124,7 @@ class CreateInventoryItem(graphene.Mutation):
 
     item = graphene.Field(InventoryItemType)
 
+    @module_permission_required('inventario', action='add')
     def mutate(self, info, name, type, condition, room, status="available"):
         item = InventoryItem.objects.create(
             name=name,
@@ -144,6 +146,7 @@ class UpdateInventoryItem(graphene.Mutation):
 
     item = graphene.Field(InventoryItemType)
 
+    @module_permission_required('inventario', action='change')
     def mutate(self, info, id, **kwargs):
         db_id = get_db_id(id)
         try:
@@ -160,6 +163,7 @@ class DeleteInventoryItem(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('inventario', action='delete')
     def mutate(self, info, id):
         db_id = get_db_id(id)
         try:
@@ -178,6 +182,7 @@ class CreateDigitalResource(graphene.Mutation):
 
     resource = graphene.Field(DigitalResourceType)
 
+    @module_permission_required('recursos', action='add')
     def mutate(self, info, title, type, url, category=None):
         resource = DigitalResource.objects.create(
             title=title,
@@ -197,6 +202,7 @@ class UpdateDigitalResource(graphene.Mutation):
 
     resource = graphene.Field(DigitalResourceType)
 
+    @module_permission_required('recursos', action='change')
     def mutate(self, info, id, **kwargs):
         db_id = get_db_id(id)
         try:
@@ -213,6 +219,7 @@ class DeleteDigitalResource(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('recursos', action='delete')
     def mutate(self, info, id):
         db_id = get_db_id(id)
         try:
@@ -232,6 +239,7 @@ class CreateCycle(graphene.Mutation):
     success = graphene.Boolean()
     message = graphene.String()
 
+    @module_permission_required('sesiones', action='add')
     def mutate(self, info, patient_id, therapist_id, start_date, num_sessions=4):
         db_patient_id = get_db_id(patient_id)
         db_therapist_id = get_db_id(therapist_id)
@@ -241,21 +249,17 @@ class CreateCycle(graphene.Mutation):
         if not db_therapist_id:
             raise GraphQLError("ID de terapeuta inválido.")
 
-        # 1. Obtener el último número de sesión
         last_session = Session.objects.filter(patient_id=db_patient_id).aggregate(
             last_num=Coalesce(Max('session_number'), 0)
         )
         current_num = last_session['last_num']
 
-        # 2. Crear lote de sesiones (una por semana por defecto, o según lógica del proyecto)
         from datetime import timedelta
         
         sessions_to_create = []
         for i in range(num_sessions):
             current_num += 1
             calculated_cycle = math.ceil(current_num / 4)
-            
-            # Programar una sesión cada semana (7 días)
             session_date = start_date + timedelta(weeks=i)
             
             sessions_to_create.append(
@@ -263,16 +267,15 @@ class CreateCycle(graphene.Mutation):
                     patient_id=db_patient_id,
                     therapist_id=db_therapist_id,
                     session_date=session_date,
-                    session_type="Individual", # Valor por defecto
+                    session_type="individual",
                     session_number=current_num,
                     cycle_number=calculated_cycle,
-                    session_status="Programada",
+                    session_status="agendada",
                     payment_status="pending"
                 )
             )
         
         Session.objects.bulk_create(sessions_to_create)
-        
         return CreateCycle(success=True, message=f"Se han creado {num_sessions} sesiones exitosamente.")
 
 class Mutation(graphene.ObjectType):
