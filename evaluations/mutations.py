@@ -21,6 +21,7 @@ from evaluations.type import (
     ScaleType,
     FormType
 )
+from config.utils import module_permission_required, get_db_id
 
 class QuestionInput(graphene.InputObjectType):
     question = graphene.String(required=True)
@@ -36,6 +37,7 @@ class CreateForm(graphene.Mutation):
 
     form = graphene.Field(FormType)
 
+    @module_permission_required('formularios', action='add')
     def mutate(self, info, name, questions, description=None):
         with transaction.atomic():
             form = Form.objects.create(name=name, description=description)
@@ -54,11 +56,9 @@ class DeleteForm(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('formularios', action='delete')
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             form = Form.objects.get(pk=real_id)
             form.delete()
@@ -75,18 +75,12 @@ class AssignForm(graphene.Mutation):
 
     assignment = graphene.Field(FormAssignmentType)
 
+    @module_permission_required('formularios', action='add')
     def mutate(self, info, form_id, assigned_to_id, assigned_by_id, patient_id=None):
-        def get_real_id(gid):
-            if not gid: return None
-            try:
-                return int(graphene.relay.Node.from_global_id(gid)[1])
-            except:
-                return gid
-        
-        real_form_id = get_real_id(form_id)
-        real_to_id = get_real_id(assigned_to_id)
-        real_by_id = get_real_id(assigned_by_id)
-        real_patient_id = get_real_id(patient_id)
+        real_form_id = get_db_id(form_id)
+        real_to_id = get_db_id(assigned_to_id)
+        real_by_id = get_db_id(assigned_by_id)
+        real_patient_id = get_db_id(patient_id)
 
         try:
             assignment = FormAssignment.objects.create(
@@ -118,6 +112,7 @@ class CreateScale(graphene.Mutation):
 
     scale = graphene.Field(ScaleType)
 
+    @module_permission_required('escalas', action='add')
     def mutate(self, info, name, scale_type, description=None, subscales=None, values=None):
         with transaction.atomic():
             scale = Scale.objects.create(
@@ -148,11 +143,9 @@ class DeleteScale(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('escalas', action='delete')
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             scale = Scale.objects.get(pk=real_id)
             scale.delete()
@@ -170,19 +163,10 @@ class SubmitFormResponse(graphene.Mutation):
     response = graphene.Field(FormResponseType)
 
     def mutate(self, info, assignment_id, question_id, response_text):
-        # Resolver IDs si vienen de Relay (GraphQL Global ID)
-        try:
-            real_assignment_id = int(graphene.relay.Node.from_global_id(assignment_id)[1])
-        except:
-            real_assignment_id = assignment_id
-            
-        try:
-            real_question_id = int(graphene.relay.Node.from_global_id(question_id)[1])
-        except:
-            real_question_id = question_id
+        real_assignment_id = get_db_id(assignment_id)
+        real_question_id = get_db_id(question_id)
 
         try:
-            # Usar update_or_create para permitir sobrescribir una respuesta anterior
             response, created = FormResponse.objects.update_or_create(
                 assignment_id=real_assignment_id,
                 question_id=real_question_id,
@@ -190,7 +174,6 @@ class SubmitFormResponse(graphene.Mutation):
             )
             return SubmitFormResponse(success=True, response=response)
         except Exception as e:
-            # Puedes loguear el error 'e' aquí si es necesario
             return SubmitFormResponse(success=False, response=None)
 
 
@@ -207,21 +190,14 @@ class SubmitFullForm(graphene.Mutation):
     assignment = graphene.Field(FormAssignmentType)
 
     def mutate(self, info, assignment_id, responses):
-        try:
-            real_assignment_id = int(graphene.relay.Node.from_global_id(assignment_id)[1])
-        except:
-            real_assignment_id = assignment_id
+        real_assignment_id = get_db_id(assignment_id)
 
         try:
             assignment = FormAssignment.objects.get(pk=real_assignment_id)
             
             with transaction.atomic():
                 for resp in responses:
-                    try:
-                        real_q_id = int(graphene.relay.Node.from_global_id(resp.question_id)[1])
-                    except:
-                        real_q_id = resp.question_id
-                        
+                    real_q_id = get_db_id(resp.question_id)
                     FormResponse.objects.update_or_create(
                         assignment=assignment,
                         question_id=real_q_id,
@@ -243,30 +219,21 @@ class AddScaleResponse(graphene.Mutation):
         evaluator_id = graphene.ID(required=True)
         scale_id = graphene.ID(required=True)
         session_id = graphene.ID()
-        # Se envía lista de subescalas si la escala es tipo SUBSCALE
         subscales = graphene.List(ResponseSubScale)
-        # Se envía un solo valor_id si la escala es VALUE_LIST
         value_id = graphene.ID()
 
     success = graphene.Boolean()
     message = graphene.String()
 
+    @module_permission_required('evaluaciones', action='add')
     def mutate(self, info, patient_id, evaluator_id, scale_id, 
                session_id=None, subscales=None, value_id=None):
         
-        # Desempaquetar IDs si es necesario (Relay)
-        def get_real_id(gid):
-            if not gid: return None
-            try:
-                return int(graphene.relay.Node.from_global_id(gid)[1])
-            except:
-                return gid
-
         try:
-            real_patient_id = get_real_id(patient_id)
-            real_evaluator_id = get_real_id(evaluator_id)
-            real_scale_id = get_real_id(scale_id)
-            real_session_id = get_real_id(session_id)
+            real_patient_id = get_db_id(patient_id)
+            real_evaluator_id = get_db_id(evaluator_id)
+            real_scale_id = get_db_id(scale_id)
+            real_session_id = get_db_id(session_id)
 
             with transaction.atomic():
                 evaluation = ScaleEvaluation.objects.create(
@@ -278,7 +245,7 @@ class AddScaleResponse(graphene.Mutation):
 
                 if subscales:
                     for sub in subscales:
-                        real_sub_id = get_real_id(sub.subscale_id)
+                        real_sub_id = get_db_id(sub.subscale_id)
                         ScaleEvaluationSubscaleResponse.objects.create(
                             evaluation=evaluation,
                             subscale_id=real_sub_id,
@@ -286,7 +253,7 @@ class AddScaleResponse(graphene.Mutation):
                         )
                 
                 if value_id:
-                    real_value_id = get_real_id(value_id)
+                    real_value_id = get_db_id(value_id)
                     ScaleEvaluationValueResponse.objects.create(
                         evaluation=evaluation,
                         scale_value_id=real_value_id

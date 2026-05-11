@@ -3,6 +3,7 @@ import graphene
 from graphql import GraphQLError
 from finance.models import Discount, Payment, Expense, Course, CourseEnrollment
 from finance.type import DiscountType, PaymentType, ExpenseType, CourseType, CourseEnrollmentType, PaginatedPaymentType
+from config.utils import module_permission_required, get_db_id
 
 class Query(graphene.ObjectType):
     discounts = graphene.List(DiscountType)
@@ -30,17 +31,15 @@ class Query(graphene.ObjectType):
         course_id=graphene.ID(),
     )
 
+    @module_permission_required('pagos', action='view')
     def resolve_discounts(self, info):
         return Discount.objects.all()
 
+    @module_permission_required('pagos', action='view')
     def resolve_payments(self, info, patient_id=None, payment_status=None, search=None, page=1, page_size=10):
         qs = Payment.objects.select_related("patient", "discount").all()
         if patient_id:
-            try:
-                from graphql_relay import from_global_id
-                real_patient_id = from_global_id(patient_id)[1]
-            except:
-                real_patient_id = patient_id
+            real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
         if payment_status:
             qs = qs.filter(payment_status=payment_status)
@@ -62,16 +61,15 @@ class Query(graphene.ObjectType):
             current_page=page,
         )
 
+    @module_permission_required('pagos', action='view')
     def resolve_payment(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return Payment.objects.select_related("patient", "discount").get(pk=real_id)
         except Payment.DoesNotExist:
             raise GraphQLError("Pago no encontrado")
 
+    @module_permission_required('gastos', action='view')
     def resolve_expenses(self, info, status=None, category=None):
         qs = Expense.objects.all()
         if status:
@@ -80,28 +78,25 @@ class Query(graphene.ObjectType):
             qs = qs.filter(category__icontains=category)
         return qs
 
+    @module_permission_required('cursos', action='view')
     def resolve_courses(self, info, state=None):
         qs = Course.objects.prefetch_related("enrollments").all()
         if state:
             qs = qs.filter(state=state)
         return qs
 
+    @module_permission_required('cursos', action='view')
     def resolve_course(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             return Course.objects.prefetch_related("enrollments__payment").get(pk=real_id)
         except Course.DoesNotExist:
             raise GraphQLError("Curso no encontrado")
 
+    @module_permission_required('cursos', action='view')
     def resolve_course_enrollments(self, info, course_id=None):
         qs = CourseEnrollment.objects.select_related("course").all()
         if course_id:
-            try:
-                real_course_id = int(graphene.relay.Node.from_global_id(course_id)[1])
-            except:
-                real_course_id = course_id
+            real_course_id = get_db_id(course_id)
             qs = qs.filter(course_id=real_course_id)
         return qs

@@ -3,7 +3,7 @@ from graphql import GraphQLError
 from django.contrib.auth.models import Group
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
-from config.utils import login_required, staff_member_required, get_db_id
+from config.utils import login_required, staff_member_required, get_db_id, module_permission_required
 
 
 class PaginatedUsers(graphene.ObjectType):
@@ -34,9 +34,11 @@ class Query(graphene.ObjectType):
     )
     unread_notifications_count = graphene.Int()
 
+    @module_permission_required('roles', action='view')
     def resolve_roles(root, info):
         return Group.objects.all()
 
+    @module_permission_required('roles', action='view')
     def resolve_role(root, info, id):
         real_id = get_db_id(id)
         try:
@@ -49,8 +51,8 @@ class Query(graphene.ObjectType):
     def resolve_me(root, info):
         return info.context.user
 
-    # ── users (solo staff) ──────────────────────────────────────────────────
-    @staff_member_required
+    # ── users ───────────────────────────────────────────────────────────────
+    @module_permission_required('usuarios', action='view')
     def resolve_users(root, info, search=None, role_name=None, exclude_role=None, page=1, page_size=10):
         qs = User.objects.all().order_by('-date_joined')
         
@@ -88,7 +90,10 @@ class Query(graphene.ObjectType):
         user = info.context.user
         real_id = get_db_id(id)
 
-        if not user.is_staff and str(user.pk) != str(real_id):
+        # Un usuario con permiso de ver 'usuarios' puede ver a cualquiera
+        has_view_users = user.has_perm('users.view_user') or user.is_staff or user.is_superuser
+
+        if not has_view_users and str(user.pk) != str(real_id):
             raise GraphQLError("No autorizado.")
         try:
             return User.objects.get(pk=real_id)

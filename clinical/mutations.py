@@ -6,10 +6,13 @@ from django.contrib.auth.hashers import make_password
 from django.db import transaction
 from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport
 from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType, TherapyReportType
+from therapeutic_sessions.models import Session
 from users.models import User
 from django.db.models import Max
 from django.db.models.functions import Coalesce
-from config.utils import get_db_id
+from config.utils import get_db_id, module_permission_required
+import datetime
+import math
 
 
 def _generate_username(last_name: str, ci: str | None) -> str:
@@ -40,6 +43,18 @@ def _generate_password(last_name: str, ci: str | None) -> str:
     year = str(date.today().year)
     return f"{name_part}{ci_part}{year}"
 
+def get_next_weekday(start_date, weekday_name):
+    days_of_week = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+    try:
+        target_weekday = days_of_week.index(weekday_name)
+    except ValueError:
+        return start_date
+        
+    days_ahead = target_weekday - start_date.weekday()
+    if days_ahead <= 0: # Target day already happened this week or is today
+        days_ahead += 7
+    return start_date + datetime.timedelta(days_ahead)
+
 class CreatePatient(graphene.Mutation):
     class Arguments:
         # autor
@@ -61,12 +76,17 @@ class CreatePatient(graphene.Mutation):
         tutor_email     = graphene.String()
         tutor_ci        = graphene.String()
 
+        # Sesiones Iniciales
+        selected_day    = graphene.String()
+        selected_time   = graphene.String()
+
     patient         = graphene.Field(PatientType)
     tutor_username  = graphene.String()
     tutor_password  = graphene.String()
     tutor_created   = graphene.Boolean()
 
     @transaction.atomic
+    @module_permission_required('pacientes', action='add')
     def mutate(self, info,
                author_id=None,
                first_name=None, last_name=None,
@@ -74,7 +94,8 @@ class CreatePatient(graphene.Mutation):
                image_url=None, diagnosis=None,
                residence=None, notes=None,
                tutor_name=None, tutor_celular=None,
-               tutor_email=None, tutor_ci=None):
+               tutor_email=None, tutor_ci=None,
+               selected_day=None, selected_time=None):
 
         tutor = None
         tutor_username = None
@@ -155,12 +176,52 @@ class CreatePatient(graphene.Mutation):
         ]
 
         PatientClinicalNote.objects.bulk_create(default_notes)
+
+        # ── Sesiones Iniciales (Ciclo de 4) ───────────────────────
+        if selected_day and selected_time:
+            try:
+                # Calcular la primera fecha
+                today = datetime.date.today()
+                first_session_date = get_next_weekday(today, selected_day)
+                
+                # Parsear la hora
+                hour, minute = map(int, selected_time.split(':'))
+                
+                # Combinar fecha y hora
+                start_datetime = datetime.datetime.combine(first_session_date, datetime.time(hour, minute))
+                
+                sessions_to_create = []
+                for i in range(4):
+                    session_number = i + 1
+                    calculated_cycle = math.ceil(session_number / 4)
+                    
+                    # Programar una sesión cada semana (7 días)
+                    session_date = start_datetime + datetime.timedelta(weeks=i)
+                    
+                    sessions_to_create.append(
+                        Session(
+                            patient=patient,
+                            therapist_id=author_id,
+                            session_date=session_date,
+                            session_type="individual",
+                            session_number=session_number,
+                            cycle_number=calculated_cycle,
+                            session_status="agendada", # Antes "confirma"
+                            payment_status="pending"
+                        )
+                    )
+                Session.objects.bulk_create(sessions_to_create)
+            except Exception as e:
+                # No queremos que falle el registro del paciente si fallan las sesiones
+                print(f"Error creando sesiones iniciales: {e}")
+
         return CreatePatient(
             patient        = patient,
             tutor_username = tutor_username,
             tutor_password = tutor_password_plain,
             tutor_created  = tutor_created,
         )
+
 
 class UpdatePatientStatus(graphene.Mutation):
     class Arguments:
@@ -169,6 +230,7 @@ class UpdatePatientStatus(graphene.Mutation):
 
     patient = graphene.Field(PatientType)
 
+    @module_permission_required('pacientes', action='change')
     def mutate(self, info, id, status):
         real_id = get_db_id(id)
 
@@ -183,7 +245,6 @@ class UpdatePatientStatus(graphene.Mutation):
 
 class UpdatePatient(graphene.Mutation):
     class Arguments:
-        # 1. Asegúrate de que el nombre sea 'id' aquí
         id = graphene.ID(required=True)
         image_url = graphene.String()
         residence = graphene.String()
@@ -192,11 +253,10 @@ class UpdatePatient(graphene.Mutation):
 
     patient = graphene.Field(PatientType)
 
-    # 2. El parámetro DEBE llamarse 'id' para coincidir con Arguments
+    @module_permission_required('pacientes', action='change')
     def mutate(self, info, id, image_url=None, residence=None, diagnosis=None, registration_complete=None):
         real_id = get_db_id(id)
         try:
-            # 3. Usa ese 'id' para buscar al paciente
             patient = Patient.objects.get(pk=real_id)
 
             if image_url is not None:
@@ -218,52 +278,20 @@ class BasicNote(graphene.InputObjectType):
     category = graphene.String()
     content = graphene.String()
 
-# TODO Revisar si es util
-class AddClinicalNote(graphene.Mutation):
-    class Arguments:
-        patient_id = graphene.ID(required=True)
-        author_id = graphene.ID(required=True)
-        notes = graphene.List(BasicNote, required=True)
-
-    notes_created = graphene.List(PatientClinicalNoteType)
-
-    def mutate(self, info, patient_id, author_id, notes):
-        note_objects = [
-            PatientClinicalNote(
-                patient_id=patient_id,
-                author_id=author_id,
-                category=n.category,
-                content=n.content
-            ) for n in notes
-        ]
-
-        created_instances = PatientClinicalNote.objects.bulk_create(note_objects)
-
-        return AddClinicalNote(notes_created=created_instances)
-
 class UpdateClinicalNotes(graphene.Mutation):
     class Arguments:
         patient_id = graphene.ID(required=True)
         author_id = graphene.ID(required=True)
         notes = graphene.List(BasicNote, required=True)
 
-    # Devolvemos la lista de notas actualizadas
     notes_updated = graphene.List(PatientClinicalNoteType)
 
+    @module_permission_required('pacientes', action='change')
     def mutate(self, info, patient_id, author_id, notes):
-        # Manejar ID de Relay o ID directo para el paciente
-        try:
-            real_patient_id = int(graphene.relay.Node.from_global_id(patient_id)[1])
-        except:
-            try:
-                real_patient_id = int(patient_id)
-            except:
-                real_patient_id = patient_id
-
+        real_patient_id = get_db_id(patient_id)
         updated_instances = []
 
         for n in notes:
-            # Sincronizamos con el modelo usando .upper()
             category_upper = n.category.upper()
             
             note, created = PatientClinicalNote.objects.update_or_create(
@@ -271,7 +299,7 @@ class UpdateClinicalNotes(graphene.Mutation):
                 category=category_upper,
                 defaults={
                     'content': n.content,
-                    'author_id': author_id  # Actualiza quién hizo la última edición
+                    'author_id': author_id
                 }
             )
             updated_instances.append(note)
@@ -288,6 +316,7 @@ class CreateInterventionPlan(graphene.Mutation):
 
     plan = graphene.Field(InterventionPlanType)
 
+    @module_permission_required('planes', action='add')
     def mutate(self, info, patient_id, created_by_id, main_objective,
                start_date=None, end_date=None):
         plan = InterventionPlan.objects.create(
@@ -302,8 +331,8 @@ class CreateInterventionPlan(graphene.Mutation):
 class CreateStepPlan(graphene.Mutation):
     class Arguments:
         plan_id = graphene.ID(required=True)
-        moment = graphene.String(required=True)  # Corregido de 'momment'
-        duration_minutes = graphene.Int()        # En Graphene es .Int(), no .Integer()
+        moment = graphene.String(required=True)
+        duration_minutes = graphene.Int()
         objective = graphene.String(required=True)
         focus = graphene.String()
         musical_resources = graphene.String()
@@ -312,11 +341,10 @@ class CreateStepPlan(graphene.Mutation):
         mlt_method = graphene.String()
         order_index = graphene.Int()
 
-    # El campo que devuelve la mutación
-    step = graphene.Field(PlanStepType) # Asumiendo que ya definiste tu DjangoObjectType
+    step = graphene.Field(PlanStepType)
 
+    @module_permission_required('planes', action='change')
     def mutate(self, info, plan_id, moment, objective, **kwargs):
-        # 1. Lógica automática para el índice de orden
         order_index = kwargs.get('order_index')
         if order_index is None:
             last_order = PlanStep.objects.filter(plan_id=plan_id).aggregate(
@@ -324,7 +352,6 @@ class CreateStepPlan(graphene.Mutation):
             )
             order_index = last_order['max_order'] + 1
 
-        # 2. Creación del registro
         step = PlanStep.objects.create(
             plan_id=plan_id,
             moment=moment,
@@ -347,6 +374,7 @@ class UpdatePlanProgress(graphene.Mutation):
 
     plan = graphene.Field(InterventionPlanType)
 
+    @module_permission_required('planes', action='change')
     def mutate(self, info, id, progress_percent):
         try:
             plan = InterventionPlan.objects.get(pk=id)
@@ -364,27 +392,19 @@ class UpdateStepProgress(graphene.Mutation):
         is_completed = graphene.Boolean()
         actual_duration = graphene.Int()
 
-    # Devolvemos el objeto actualizado
     step = graphene.Field(PlanStepType)
     success = graphene.Boolean()
 
+    @module_permission_required('planes', action='change')
     def mutate(self, info, step_id, is_completed=None, actual_duration=None):
         try:
-            # 1. Buscar el paso del plan
             step = PlanStep.objects.get(pk=step_id)
-
-            # 2. Actualización parcial (solo si los valores vienen en la mutación)
             if is_completed is not None:
                 step.is_completed = is_completed
-
             if actual_duration is not None:
                 step.actual_duration = actual_duration
-
-            # 3. Guardar cambios
             step.save()
-
             return UpdateStepProgress(step=step, success=True)
-
         except PlanStep.DoesNotExist:
             raise Exception("El paso del plan no existe.")
 
@@ -395,18 +415,13 @@ class DeletePatient(graphene.Mutation):
     success = graphene.Boolean()
     message = graphene.String()
 
+    @module_permission_required('pacientes', action='delete')
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            # En este proyecto usamos IDs directos, pero manejamos la posibilidad de Relay IDs por si acaso
-            try:
-                real_id = graphene.relay.Node.from_global_id(id)[1]
-            except:
-                real_id = id
-
             patient = Patient.objects.get(pk=real_id)
             patient.delete()
             return DeletePatient(success=True, message="Paciente eliminado correctamente")
-
         except Patient.DoesNotExist:
             return DeletePatient(success=False, message="El paciente no existe")
         except Exception as e:
@@ -421,6 +436,7 @@ class UpdateInterventionPlan(graphene.Mutation):
 
     plan = graphene.Field(InterventionPlanType)
 
+    @module_permission_required('planes', action='change')
     def mutate(self, info, id, **kwargs):
         try:
             plan = InterventionPlan.objects.get(pk=id)
@@ -436,6 +452,7 @@ class DeleteInterventionPlan(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('planes', action='delete')
     def mutate(self, info, id):
         try:
             plan = InterventionPlan.objects.get(pk=id)
@@ -458,6 +475,7 @@ class UpdateStepPlan(graphene.Mutation):
 
     step = graphene.Field(PlanStepType)
 
+    @module_permission_required('planes', action='change')
     def mutate(self, info, id, **kwargs):
         try:
             step = PlanStep.objects.get(pk=id)
@@ -473,6 +491,7 @@ class DeleteStepPlan(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('planes', action='delete')
     def mutate(self, info, id):
         try:
             step = PlanStep.objects.get(pk=id)
@@ -489,6 +508,7 @@ class CreateTherapyReport(graphene.Mutation):
 
     report = graphene.Field(TherapyReportType)
 
+    @module_permission_required('informes', action='add')
     def mutate(self, info, patient_id, generated_by_id, report_url):
         report = TherapyReport.objects.create(
             patient_id=patient_id,
@@ -502,6 +522,7 @@ class DeleteTherapyReport(graphene.Mutation):
         id = graphene.ID(required=True)
     success = graphene.Boolean()
 
+    @module_permission_required('informes', action='delete')
     def mutate(self, info, id):
         try:
             report = TherapyReport.objects.get(pk=id)
@@ -513,7 +534,6 @@ class DeleteTherapyReport(graphene.Mutation):
 class Mutation(graphene.ObjectType):
     create_patient = CreatePatient.Field()
     update_patient_status = UpdatePatientStatus.Field()
-    add_clinical_note = AddClinicalNote.Field()
     create_intervention_plan = CreateInterventionPlan.Field()
     update_intervention_plan = UpdateInterventionPlan.Field()
     delete_intervention_plan = DeleteInterventionPlan.Field()
