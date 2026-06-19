@@ -8,7 +8,7 @@ from django.db.models import Max
 from django.db.models.functions import Coalesce
 
 from finance.models import CoursePayment, CourseEnrollment, Expense, Payment, Discount, Course
-from finance.type import CourseEnrollmentType, ExpenseType, PaymentType, CourseType
+from finance.type import CourseEnrollmentType, DiscountType, ExpenseType, PaymentType, CourseType
 from therapeutic_sessions.models import Session
 from config.utils import get_db_id
 
@@ -311,6 +311,53 @@ class DeleteCourse(graphene.Mutation):
         except Course.DoesNotExist:
             return DeleteCourse(success=False)
 
+class CreateDiscount(graphene.Mutation):
+    class Arguments:
+        name = graphene.String(required=True)
+        type = graphene.String(required=True)
+        value = graphene.Float(required=True)
+        description = graphene.String()
+
+    discount = graphene.Field(DiscountType)
+
+    def mutate(self, info, name, type, value, description=None):
+        if type not in [Discount.DiscountType.PERCENTAGE, Discount.DiscountType.FIXED]:
+            raise GraphQLError("Tipo de descuento inválido")
+        
+        discount = Discount.objects.create(
+            name=name,
+            type=type,
+            value=Decimal(str(value)),
+            description=description
+        )
+        return CreateDiscount(discount=discount)
+    
+class UpdateDiscount(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        name = graphene.String()
+        type = graphene.String()
+        value = graphene.Float()
+        description = graphene.String()
+
+    discount = graphene.Field(DiscountType)
+
+    def mutate(self, info, id, **kwargs):
+        real_id = get_db_id(id)
+        try:
+            discount = Discount.objects.get(pk=real_id)
+            for key, value in kwargs.items():
+                if key == 'type' and value not in [Discount.DiscountType.PERCENTAGE, Discount.DiscountType.FIXED]:
+                    raise GraphQLError("Tipo de descuento inválido")
+                if key == 'value':
+                    setattr(discount, key, Decimal(str(value)))
+                else:
+                    setattr(discount, key, value)
+            discount.save()
+            return UpdateDiscount(discount=discount)
+        except Discount.DoesNotExist:
+            raise GraphQLError("Descuento no encontrado")
+
 class Mutation(graphene.ObjectType):
     create_payment = CreatePayment.Field()
     update_payment = UpdatePayment.Field()
@@ -322,3 +369,5 @@ class Mutation(graphene.ObjectType):
     create_course = CreateCourse.Field()
     update_course = UpdateCourse.Field()
     delete_course = DeleteCourse.Field()
+    create_discount = CreateDiscount.Field()
+    update_discount = UpdateDiscount.Field()

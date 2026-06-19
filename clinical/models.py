@@ -246,7 +246,6 @@ class PlanStep(models.Model):
         if plan:
             plan.update_progress()
 
-
 class TherapyReport(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="therapy_reports")
     generated_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="generated_reports")

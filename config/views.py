@@ -1,5 +1,11 @@
 from graphene_django.views import GraphQLView
 from django.http import JsonResponse
+from django.middleware.csrf import get_token
+from django.views.decorators.http import require_GET
+
+@require_GET
+def csrf_token_view(request):
+    return JsonResponse({"csrfToken": get_token(request)})
 
 class CBMGraphQLView(GraphQLView):
     def execute_graphql_request(self, *args, **kwargs):

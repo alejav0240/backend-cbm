@@ -59,6 +59,35 @@ class CreateSession(graphene.Mutation):
         return CreateSession(session=session)
 
 
+class UpdateSession(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        notes = graphene.String()
+        duration_minutes = graphene.Int()
+        video_url = graphene.String()
+        session_status = graphene.String()
+
+    session = graphene.Field(SessionType)
+
+    @module_permission_required('sesiones', action='change')
+    def mutate(self, info, id, notes=None, duration_minutes=None, video_url=None, session_status=None):
+        real_id = get_db_id(id)
+        try:
+            session = Session.objects.get(pk=real_id)
+            if notes is not None:
+                session.notes = notes
+            if duration_minutes is not None:
+                session.duration_minutes = duration_minutes
+            if video_url is not None:
+                session.video_url = video_url
+            if session_status is not None:
+                session.session_status = session_status
+            session.save()
+            return UpdateSession(session=session)
+        except Session.DoesNotExist:
+            raise GraphQLError("Sesión no encontrada")
+
+
 class UpdateSessionPaymentStatus(graphene.Mutation):
     class Arguments:
         id = graphene.ID(required=True)
@@ -84,17 +113,17 @@ class AddSessionResource(graphene.Mutation):
         session_id = graphene.ID(required=True)
         resource_id = graphene.ID(required=True)
 
-    session_resource = graphene.Field(SessionType)
+    session_resource = graphene.Boolean()
 
     @module_permission_required('sesiones', action='change')
     def mutate(self, info, session_id, resource_id):
         db_session_id = get_db_id(session_id)
         db_resource_id = get_db_id(resource_id)
 
-        sr, _ = SessionResource.objects.get_or_create(
+        SessionResource.objects.get_or_create(
             session_id=db_session_id, resource_id=db_resource_id
         )
-        return AddSessionResource(session_resource=sr)
+        return AddSessionResource(session_resource=True)
 
 
 class AddSessionInventoryItem(graphene.Mutation):
@@ -278,9 +307,30 @@ class CreateCycle(graphene.Mutation):
         Session.objects.bulk_create(sessions_to_create)
         return CreateCycle(success=True, message=f"Se han creado {num_sessions} sesiones exitosamente.")
 
+class DeleteSession(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    @module_permission_required('sesiones', action='delete')
+    def mutate(self, info, id):
+        real_id = get_db_id(id)
+        try:
+            session = Session.objects.get(pk=real_id)
+            session.delete()
+            return DeleteSession(success=True, message="Sesión eliminada correctamente")
+        except Session.DoesNotExist:
+            return DeleteSession(success=False, message="La sesión no existe")
+        except Exception as e:
+            return DeleteSession(success=False, message=str(e))
+
+
 class Mutation(graphene.ObjectType):
     create_session = CreateSession.Field()
     create_cycle = CreateCycle.Field()
+    update_session = UpdateSession.Field()
     update_session_payment_status = UpdateSessionPaymentStatus.Field()
     add_session_resource = AddSessionResource.Field()
     add_session_inventory_item = AddSessionInventoryItem.Field()
@@ -290,3 +340,4 @@ class Mutation(graphene.ObjectType):
     create_digital_resource = CreateDigitalResource.Field()
     update_digital_resource = UpdateDigitalResource.Field()
     delete_digital_resource = DeleteDigitalResource.Field()
+    delete_session = DeleteSession.Field()
