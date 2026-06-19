@@ -25,24 +25,38 @@ MODULE_MODEL_MAP = {
 }
 
 def get_permissions_for_modules(modules):
-    """Convierte una lista de strings de módulos ['pacientes'] a objetos Permission de Django."""
+    """Convierte módulos ['pacientes'] o permisos ['pacientes:view'] a objetos Permission de Django."""
     perms = []
-    for mod in modules:
+    valid_actions = {'view', 'add', 'change', 'delete'}
+
+    for raw_module in modules:
+        mod, action = (raw_module.split(':', 1) + [None])[:2] if ':' in raw_module else (raw_module, None)
+
         if mod in MODULE_MODEL_MAP:
             app_label, model_name = MODULE_MODEL_MAP[mod]
-            # Obtenemos todos los permisos CRUD (add, change, delete, view) para este modelo
-            model_perms = Permission.objects.filter(content_type__app_label=app_label, content_type__model=model_name)
+
+            model_perms = Permission.objects.filter(
+                content_type__app_label=app_label,
+                content_type__model=model_name
+            )
+
+            if action in valid_actions:
+                model_perms = model_perms.filter(codename=f'{action}_{model_name}')
+
             perms.extend(list(model_perms))
     return perms
 
 def get_modules_for_group(group):
-    """Convierte los permisos de un auth.Group a una lista de strings de módulos para la UI."""
+    """Convierte los permisos de un auth.Group a permisos por acción para la UI."""
     modules = []
     group_perms = group.permissions.select_related('content_type').all()
-    # Creamos un set de los modelos a los que tiene acceso este grupo
-    group_models = set((p.content_type.app_label, p.content_type.model) for p in group_perms)
+    group_permissions = set(
+        (p.content_type.app_label, p.content_type.model, p.codename)
+        for p in group_perms
+    )
     
     for mod, (app_label, model_name) in MODULE_MODEL_MAP.items():
-        if (app_label, model_name) in group_models:
-            modules.append(mod)
+        for action in ['view', 'add', 'change', 'delete']:
+            if (app_label, model_name, f'{action}_{model_name}') in group_permissions:
+                modules.append(f'{mod}:{action}')
     return modules

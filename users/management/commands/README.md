@@ -1,8 +1,21 @@
 # ETL Migración Legacy Laravel → Django (importar_laravel.py)
 
-Comando de migración completo que traslada datos desde una base de datos legacy Laravel (MariaDB) hacia modelos Django en PostgreSQL.
+Comando de migración refactorizado que traslada datos desde una base de datos legacy Laravel (MariaDB) hacia modelos Django en PostgreSQL.
+
+## 🏗️ Arquitectura Modular (Refactorizada)
+
+El comando ha sido refactorizado para seguir principios de **Clean Code** y **Responsabilidad Única**. La lógica de transformación se encuentra ahora en el paquete `importers/`:
+
+- **`BaseImporter`**: Utilidades comunes para limpieza de texto, conversión de tipos y manejo de fechas.
+- **`UserImporter`**: Migración de usuarios y creación de cuentas legacy.
+- **`PatientImporter`**: Gestión de pacientes y sus notas clínicas (objetivos, áreas social/cognitiva/física, etc.).
+- **`PaymentImporter`**: Procesamiento de pagos, descuentos y comprobantes.
+- **`SessionImporter`**: Migración de sesiones, estados de pago y apuntes terapéuticos.
+- **`InterventionPlanImporter`**: Importación de planes de intervención con agregación de recursos musicales.
+- **`ScaleImporter`**: Migración de escalas de evaluación y respuestas históricas.
 
 ## 📋 Requisitos Previos
+... (rest of requirements)
 
 ### Base de datos Legacy
 - **Motor**: MariaDB/MySQL 5.7+
@@ -277,21 +290,20 @@ docker exec legacy_mariadb mysql -uhmusicot -p'GI8}(&Fg~5J;' \
 
 Si el conteo es > 0 y aún así no migra, revisa si `id_infocliente` existe en la tabla.
 
-## 📊 Estadísticas Esperadas (Backup Actual)
+## 📊 Estadísticas Confirmadas (Migración Exitosa)
 
-Basado en el backup `lagacy.sql`:
+Basado en la ejecución final del ETL Refactorizado:
 
-| Tabla/Modelo | Registros |
-|--------------|-----------|
-| Usuarios legacy | 8 |
-| Tutores legacy | 161+ |
-| Pacientes | 173 |
-| Notas clínicas | 173+ |
-| Pagos | 0 (actualmente) |
-| Sesiones | ~2417 |
+| Tabla/Modelo | Registros Migrados |
+|--------------|-------------------|
+| Usuarios (Legacy + Tutores) | 173 |
+| Pacientes | 148 |
+| Notas clínicas | 643 |
+| Pagos | 645 |
+| Sesiones | 2541 |
 | PlanSteps | 163 |
 | Escalas | 15 |
-| Respuestas evaluación | ~4560 |
+| Respuestas evaluación | 7175 |
 
 ## 🔐 Seguridad
 

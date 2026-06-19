@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from users.models import User
 from clinical.models import Patient
 
@@ -28,6 +29,7 @@ class Subscale(models.Model):
     scale = models.ForeignKey(Scale, on_delete=models.CASCADE, related_name="subscales")
     name = models.CharField(max_length=255)
     description = models.CharField(max_length=255, blank=True, null=True)
+    category = models.CharField(max_length=255, blank=True, null=True)
     max_value = models.PositiveIntegerField()
 
     class Meta:
@@ -70,7 +72,7 @@ class ScaleEvaluation(models.Model):
         blank=True,
         related_name="scale_evaluations",
     )
-    evaluated_at = models.DateTimeField(auto_now_add=True)
+    evaluated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         db_table = "scale_evaluations"
