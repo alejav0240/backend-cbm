@@ -43,6 +43,7 @@ Si la conexión directa a la BD remota no funciona, crea un contenedor local:
 ```bash
 docker run -d --name legacy_mariadb \
   --network cbm-platafom_cbm-network \
+  -p 3306:3306 \
   -e MARIADB_ROOT_PASSWORD=legacy_root \
   -e MARIADB_DATABASE=hmusicot_musicoterapiadb \
   -e MARIADB_USER=hmusicot \

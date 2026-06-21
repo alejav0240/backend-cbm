@@ -9,6 +9,7 @@ from therapeutic_sessions.models import (
 )
 from users.types import UserType
 from clinical.type import PatientType
+from evaluations.type import ScaleEvaluationType, FormAssignmentType
 
 
 # 1. Digital Resource
@@ -25,6 +26,28 @@ class DigitalResourceType(DjangoObjectType):
 
 class PaginatedDigitalResources(graphene.ObjectType):
     results = graphene.List(DigitalResourceType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedSessions(graphene.ObjectType):
+    """
+    Resultado paginado de sesiones.
+    - Paginación normal (by_cycles=False): `sessions` contiene los datos.
+    - Paginación por ciclos (by_cycles=True): `cycles` contiene los datos y `sessions` es null.
+    """
+    sessions = graphene.List(lambda: SessionType)
+    cycles = graphene.List(lambda: CycleType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+    by_cycles = graphene.Boolean(description="Indica si la respuesta está paginada por ciclos.")
+
+
+class PaginatedCycles(graphene.ObjectType):
+    """Paginación por ciclos: cada página contiene ciclos completos."""
+    results = graphene.List(lambda: CycleType)
     total_count = graphene.Int()
     total_pages = graphene.Int()
     current_page = graphene.Int()
@@ -67,7 +90,8 @@ class SessionType(DjangoObjectType):
             "notes", "video_url",
             "payment_status", "created_at", "updated_at",
             "session_resources", "session_inventory",
-            "session_status","session_number",
+            "session_status", "session_number",
+            "scale_evaluations",
         )
         interfaces = (graphene.relay.Node,)
 
@@ -80,12 +104,25 @@ class SessionType(DjangoObjectType):
     # Campos calculados o representaciones amigables
     session_type_display = graphene.String()
     payment_status_display = graphene.String()
+    # Formularios del paciente relacionados con esta sesión (via patient FK)
+    form_assignments = graphene.List(
+        FormAssignmentType,
+        description="Asignaciones de formularios del paciente vinculado a esta sesión.",
+    )
 
     def resolve_session_type_display(self, info):
         return self.get_session_type_display()
 
     def resolve_payment_status_display(self, info):
         return self.get_payment_status_display()
+
+    def resolve_form_assignments(self, info):
+        if not self.patient_id:
+            return []
+        from evaluations.models import FormAssignment
+        return FormAssignment.objects.filter(patient_id=self.patient_id).select_related(
+            "form", "assigned_to", "assigned_by"
+        ).prefetch_related("responses")
 
 # ─────────────────────────────────────────
 # CICLOS (tipo virtual — no es un modelo)

@@ -14,7 +14,7 @@ class ScaleType(DjangoObjectType):
 class SubscaleType(DjangoObjectType):
     class Meta:
         model = Subscale
-        fields = ("id", "scale", "name", "description", "max_value")
+        fields = ("id", "scale", "name", "description", "category", "max_value")
 
 
 class ScaleValueType(DjangoObjectType):
