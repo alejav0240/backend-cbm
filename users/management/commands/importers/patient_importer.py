@@ -21,6 +21,7 @@ class PatientImporter(BaseImporter):
         self.info_map = {}
         self.stats = {'patients': 0, 'notes': 0}
         self._cache_groups = {}
+        self._seen_cis = set()  # rastrear CIs ya usados para detectar duplicados legacy
 
     def import_patients(self, rows: List[List[str]], users_by_name: Dict[str, User], default_therapist: User) -> Tuple[Dict[int, Patient], Dict[int, dict]]:
         """
@@ -29,6 +30,7 @@ class PatientImporter(BaseImporter):
         self.patients_by_legacy_client = {}
         self.info_map = {}
         self.stats = {'patients': 0, 'notes': 0}
+        self._seen_cis = set()
 
         total_rows = len(rows)
         self.logger(f"📥 Iniciando importación de {total_rows} pacientes...")
@@ -47,12 +49,27 @@ class PatientImporter(BaseImporter):
 
         return self.patients_by_legacy_client, self.info_map
 
+    # CIs que son placeholders conocidos en el sistema legacy
+    PLACEHOLDER_CIS = {"0", "0000", "000", "1234"}
+
     def _process_row(self, row, users_by_name, default_therapist):
         legacy_client_id = self._to_int(row[0])
         first_name = self._limit_text(self._clean_text(row[1]), 100)
         last_name = self._limit_text(self._clean_text(row[2]), 100)
         ci_raw = self._clean_text(row[3])
-        ci = self._limit_text(ci_raw if ci_raw and ci_raw not in {"0", "0000"} else f"LEGACY-PAT-{legacy_client_id}", 30)
+
+        # Usar LEGACY-PAT-{id} si el CI es un placeholder conocido o ya está usado por otro paciente
+        if not ci_raw or ci_raw in self.PLACEHOLDER_CIS:
+            ci = self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
+        else:
+            # Verificar si ya existe otro paciente con este CI (duplicado real en legacy)
+            ci_candidate = self._limit_text(ci_raw, 30)
+            if ci_candidate in self._seen_cis:
+                ci = self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
+                self.logger(f"⚠️  CI duplicado '{ci_raw}' para cliente id={legacy_client_id} ({first_name} {last_name}) → usando {ci}")
+            else:
+                ci = ci_candidate
+            self._seen_cis.add(ci_candidate)
         birth_date = self._to_date(row[4])
         image_url = self._clean_text(row[5]) or None
         
@@ -69,7 +86,12 @@ class PatientImporter(BaseImporter):
         methods = self._clean_text(row[17])
         questionnaire = self._clean_text(row[18])
         
-        legacy_info_id = self._to_int(row[19]) if len(row) > 19 else legacy_client_id
+        legacy_info_id = self._to_int(row[19]) if len(row) > 19 else None
+        # Si el cliente no tiene infocliente (LEFT JOIN devuelve NULL), usar client_id como clave
+        # con signo negativo para no colisionar con ids reales de infoclientes
+        if legacy_info_id is None:
+            legacy_info_id = -legacy_client_id
+            self.logger(f"⚠️  Cliente id={legacy_client_id} ({first_name} {last_name}) sin infocliente → info_map key={legacy_info_id}")
         created_at = self._to_datetime(row[20]) if len(row) > 20 else timezone.now()
 
         status = Patient.Status.ACTIVE

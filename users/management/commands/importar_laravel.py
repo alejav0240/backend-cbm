@@ -153,12 +153,9 @@ class Command(BaseCommand):
                 FROM archivospagos
             """,
             "ciclos": """
-                SELECT c.id, inc.id, ci.id, id_pago, nrociclo, sesion, estadosesion, ci.fecha,
-                       estadopago, eri, cim, ejecucion, apuntes, ci.created_at, ci.updated_at
-                FROM clientes c
-                INNER JOIN infoclientes inc ON c.id = inc.id_cliente
-                INNER JOIN pagos pg ON inc.id = pg.id_infocliente
-                INNER JOIN ciclos ci ON pg.id = ci.id_pago
+                SELECT ci.id, ci.id_pago, ci.nrociclo, ci.sesion, ci.estadosesion, ci.fecha,
+                       ci.estadopago, ci.eri, ci.cim, ci.ejecucion, ci.apuntes, ci.created_at, ci.updated_at
+                FROM ciclos ci
             """,
             "plandeintervencions": """
                 SELECT pi.id, pi.orden, inf.id, pi.momento, pi.objetivo, pi.foco, 

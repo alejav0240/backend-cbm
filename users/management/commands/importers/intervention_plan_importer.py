@@ -2,7 +2,7 @@
 from typing import Dict, List
 
 from django.utils import timezone
-
+import sys
 from clinical.models import InterventionPlan, PlanStep
 from users.models import User
 from .base_importer import BaseImporter
@@ -34,6 +34,7 @@ class InterventionPlanImporter(BaseImporter):
                 self._process_row(row, info_map, created_by, plan_by_patient)
             except Exception as e:
                 self.logger(f"❌ Error procesando paso de plan en fila {index}: {str(e)}")
+                sys.exit(1)
 
         self.logger(f"✅ Pasos de planes migrados: {self.stats['steps']}")
 

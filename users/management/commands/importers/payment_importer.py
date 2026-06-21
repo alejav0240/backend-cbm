@@ -32,14 +32,25 @@ class PaymentImporter(BaseImporter):
         total_rows = len(rows)
         self.logger(f"📥 Iniciando importación de {total_rows} pagos...")
 
+        skipped_no_info = []
+
         for index, row in enumerate(rows, 1):
             if len(row) < 5:
                 continue
 
             try:
-                self._process_row(row, info_map, payment_proofs, discount_mapping)
+                result = self._process_row(row, info_map, payment_proofs, discount_mapping)
+                if result == 'no_info':
+                    legacy_payment_id = self._to_int(row[0])
+                    patient_legacy_info_id = self._to_int(row[1])
+                    skipped_no_info.append((index, legacy_payment_id, patient_legacy_info_id))
             except Exception as e:
                 self.logger(f"❌ Error procesando pago en fila {index}: {str(e)}")
+
+        if skipped_no_info:
+            self.logger(f"⚠️  Pagos descartados por info_map no encontrado: {len(skipped_no_info)}")
+            for fila, pid, iid in skipped_no_info:
+                self.logger(f"    fila {fila}: legacy_payment_id={pid} | id_infocliente={iid} (sin paciente asociado)")
 
         self.logger(f"✅ Pagos migrados: {self.stats['payments']}")
         return self.payments_by_legacy
@@ -54,7 +65,7 @@ class PaymentImporter(BaseImporter):
 
         info = info_map.get(patient_legacy_info_id)
         if not info:
-            return
+            return 'no_info'
         
         patient = info["patient"]
 

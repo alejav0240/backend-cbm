@@ -636,7 +636,8 @@ class Command(BaseCommand):
             session_date = self._to_date(row[5]) or timezone.now().date()
             session_datetime = timezone.make_aware(datetime.combine(session_date, time(12, 0)))
             session_number = self._to_int(row[3], 0)
-            cycle_number = self._to_int(row[2], 0)
+            raw_cycle = self._to_int(row[2])
+            cycle_number = raw_cycle if raw_cycle is not None and raw_cycle > 0 else None
             session_status = self._map_session_status(row[4])
             payment_status = self._map_session_payment_status(row[6])
 

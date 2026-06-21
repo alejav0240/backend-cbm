@@ -2,7 +2,10 @@ import graphene
 from graphql import GraphQLError
 
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
-from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
+from therapeutic_sessions.type import (
+    SessionType, DigitalResourceType, InventoryItemType, CycleType,
+    PaginatedDigitalResources, PaginatedSessions, PaginatedCycles,
+)
 from config.utils import get_db_id, module_permission_required
 
 
@@ -16,7 +19,8 @@ from config.utils import get_db_id, module_permission_required
 def _build_cycles(base_qs):
     """
     Recibe un queryset de Session con cycle_number__isnull=False.
-    Devuelve una lista de CycleType ordenada por patient y cycle_number.
+    Devuelve una lista de CycleType ordenada de más reciente a más antiguo
+    (descendente por cycle_number). Página 1 = ciclo más reciente.
     """
     from collections import defaultdict
     from .type import CyclePaymentSummaryType, CycleType
@@ -25,6 +29,14 @@ def _build_cycles(base_qs):
     sessions = (
         base_qs
         .select_related("patient", "therapist")
+        .prefetch_related(
+            "session_resources__resource",
+            "session_inventory__item",
+            "scale_evaluations__scale",
+            "scale_evaluations__evaluator",
+            "scale_evaluations__subscale_responses__subscale",
+            "scale_evaluations__value_responses__scale_value",
+        )
         .order_by("patient_id", "cycle_number", "session_date")
     )
 
@@ -54,10 +66,10 @@ def _build_cycles(base_qs):
         paid = sum(1 for s in sess_list if s.payment_status == "paid")
         pending = sum(1 for s in sess_list if s.payment_status == "pending")
         exempt = sum(1 for s in sess_list if s.payment_status == "exempt")
-        
+
         # Conteo de completitud
         completed = sum(1 for s in sess_list if s.session_status.lower() == "completa")
-        
+
         # Estado del ciclo
         status = "Finalizado" if completed == len(sess_list) else "Activo"
 
@@ -87,17 +99,34 @@ def _build_cycles(base_qs):
                 ),
             )
         )
+
+    # Más reciente primero: ciclo con mayor cycle_number = página 1
+    cycles.sort(key=lambda c: c.cycle_number, reverse=True)
     return cycles
 
 
 class Query(graphene.ObjectType):
-    sessions = graphene.List(
-        SessionType,
+    sessions = graphene.Field(
+        PaginatedSessions,
         patient_id=graphene.ID(),
         therapist_id=graphene.ID(),
         session_type=graphene.String(),
         payment_status=graphene.String(),
         session_status=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+        by_cycles=graphene.Boolean(
+            default_value=False,
+            description="False → paginación normal de sesiones. True → paginación por ciclos (devuelve PaginatedCycles).",
+        ),
+    )
+    paginated_cycles = graphene.Field(
+        PaginatedCycles,
+        patient_id=graphene.ID(),
+        therapist_id=graphene.ID(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+        description="Paginación por ciclos. Disponible también desde `sessions(byCycles: true)`.",
     )
     session = graphene.Field(SessionType, id=graphene.ID(required=True))
 
@@ -132,21 +161,73 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('sesiones', action='view')
     def resolve_sessions(self, info, patient_id=None, therapist_id=None,
-                         session_type=None, payment_status=None, session_status=None,):
+                         session_type=None, payment_status=None, session_status=None,
+                         page=1, page_size=10, by_cycles=False):
         qs = Session.objects.select_related("patient", "therapist", "group").all()
         if patient_id:
-            real_patient_id = get_db_id(patient_id)
-            qs = qs.filter(patient_id=real_patient_id)
+            qs = qs.filter(patient_id=get_db_id(patient_id))
         if therapist_id:
-            real_therapist_id = get_db_id(therapist_id)
-            qs = qs.filter(therapist_id=real_therapist_id)
+            qs = qs.filter(therapist_id=get_db_id(therapist_id))
         if session_type:
             qs = qs.filter(session_type=session_type)
         if payment_status:
             qs = qs.filter(payment_status=payment_status)
         if session_status:
-            qs = qs.filter(session_status=session_status) # FIX: Corregido de session_type a session_status
-        return qs
+            qs = qs.filter(session_status=session_status)
+
+        if by_cycles:
+            # ── Paginación por ciclos: 1 ciclo por página, página 1 = más reciente ──
+            cycles_qs = qs.filter(cycle_number__isnull=False)
+            all_cycles = _build_cycles(cycles_qs)
+            total_count = len(all_cycles)
+            total_pages = total_count  # cada ciclo es una página
+            offset = page - 1         # page_size=1 fijo
+            page_cycles = all_cycles[offset:offset + 1]
+            return PaginatedSessions(
+                sessions=None,
+                cycles=page_cycles,
+                total_count=total_count,
+                total_pages=total_pages,
+                current_page=page,
+                by_cycles=True,
+            )
+
+        # ── Paginación normal ──────────────────────────────────────────────
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedSessions(
+            sessions=list(qs[offset:offset + page_size]),
+            cycles=None,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+            by_cycles=False,
+        )
+
+    @module_permission_required('sesiones', action='view')
+    def resolve_paginated_cycles(self, info, patient_id=None, therapist_id=None,
+                                 page=1, page_size=10):
+        qs = Session.objects.select_related("patient", "therapist", "group").filter(
+            cycle_number__isnull=False
+        )
+        if patient_id:
+            qs = qs.filter(patient_id=get_db_id(patient_id))
+        if therapist_id:
+            qs = qs.filter(therapist_id=get_db_id(therapist_id))
+
+        all_cycles = _build_cycles(qs)
+        total_count = len(all_cycles)
+        total_pages = total_count  # cada ciclo es una página
+        offset = page - 1         # page_size=1 fijo
+        page_cycles = all_cycles[offset:offset + 1]
+
+        return PaginatedCycles(
+            results=page_cycles,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('sesiones', action='view')
     def resolve_session(self, info, id):
@@ -157,7 +238,10 @@ class Query(graphene.ObjectType):
             ).prefetch_related(
                 "session_resources__resource",
                 "session_inventory__item",
-                # "scale_evaluations", # Comentado si el campo no existe en el modelo para evitar fallos
+                "scale_evaluations__scale",
+                "scale_evaluations__evaluator",
+                "scale_evaluations__subscale_responses__subscale",
+                "scale_evaluations__value_responses__scale_value",
             ).get(pk=real_id)
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")

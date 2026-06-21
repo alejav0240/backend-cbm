@@ -1,6 +1,7 @@
 
 from datetime import datetime, time
 from typing import Dict, List
+import sys
 
 from django.utils import timezone
 from django.db import transaction
@@ -32,39 +33,59 @@ class SessionImporter(BaseImporter):
         total_rows = len(rows)
         self.logger(f"📥 Iniciando importación de {total_rows} sesiones...")
 
+        skipped_no_payment = []
+        skipped_short_row = []
+
         for index, row in enumerate(rows, 1):
-            if len(row) < 14:
+            if len(row) < 12:
+                skipped_short_row.append(index)
                 continue
 
             try:
-                self._process_row(row, payments_by_legacy, therapist)
+                result = self._process_row(row, payments_by_legacy, therapist)
+                if result == 'no_payment':
+                    legacy_payment_id = self._to_int(row[1])
+                    skipped_no_payment.append((index, legacy_payment_id, row))
             except Exception as e:
                 self.logger(f"❌ Error procesando sesión en fila {index}: {str(e)}")
+                self.logger(f"❌ Error procesando en fila {index}: {str(row)}")
+                sys.exit(1)
 
+        # Reporte de descartadas
+        if skipped_short_row:
+            self.logger(f"⚠️  Filas descartadas por columnas insuficientes (<14): {len(skipped_short_row)} → filas {skipped_short_row}")
+        if skipped_no_payment:
+            self.logger(f"⚠️  Sesiones descartadas por payment no encontrado: {len(skipped_no_payment)}")
+            for fila, pid, r in skipped_no_payment:
+                self.logger(f"    fila {fila}: id_pago={pid} | ciclo_id={r[0]} | nrociclo={r[2]} | estado={r[4]}")
+
+        total_discarded = len(skipped_short_row) + len(skipped_no_payment)
+        self.logger(f"📊 Resumen: {total_rows} recibidas | {self.stats['sessions']} importadas | {total_discarded} descartadas")
         self.logger(f"✅ Sesiones migradas: {self.stats['sessions']}")
         self.logger(f"✅ Evaluaciones ERI/CIM vinculadas: {self.stats['evaluations']}")
 
     def _process_row(self, row, payments_by_legacy, therapist):
-        # Indices basados en query: 0:c.id, 1:inc.id, 2:ci.id, 3:id_pago, 4:nrociclo, 5:sesion, 6:estadosesion, 7:ci.fecha, 8:estadopago, 9:eri, 10:cim, 11:ejecucion, 12:apuntes, 13:ci.created_at
-        legacy_id = self._to_int(row[2])
-        legacy_payment_id = self._to_int(row[3])
+        # Indices: 0:ci.id, 1:ci.id_pago, 2:nrociclo, 3:sesion, 4:estadosesion, 5:ci.fecha, 6:estadopago, 7:eri, 8:cim, 9:ejecucion, 10:apuntes, 11:ci.created_at, 12:ci.updated_at
+        legacy_id = self._to_int(row[0])
+        legacy_payment_id = self._to_int(row[1])
         payment = payments_by_legacy.get(legacy_payment_id)
         
         if not payment:
-            return
+            return 'no_payment'
 
-        session_date = self._to_date(row[7]) or timezone.now().date()
+        session_date = self._to_date(row[5]) or timezone.now().date()
         session_datetime = timezone.make_aware(datetime.combine(session_date, time(12, 0)))
-        session_number = self._to_int(row[5], 0)
-        cycle_number = self._to_int(row[4], 0)
-        session_status = self._map_session_status(row[6])
-        payment_status = self._map_session_payment_status(row[8])
-        created_at = self._to_datetime(row[13]) if len(row) > 13 else timezone.now()
+        session_number = self._to_int(row[3], 0)
+        raw_cycle = self._to_int(row[2])
+        cycle_number = raw_cycle if raw_cycle is not None and raw_cycle > 0 else None
+        session_status = self._map_session_status(row[4])
+        payment_status = self._map_session_payment_status(row[6])
+        created_at = self._to_datetime(row[11]) if len(row) > 11 else timezone.now()
 
-        eri_text = self._clean_text(row[9])
-        cim_text = self._clean_text(row[10])
-        ejecucion = self._clean_text(row[11])
-        apuntes = self._clean_text(row[12]) # Notas limpias
+        eri_text = self._clean_text(row[7])
+        cim_text = self._clean_text(row[8])
+        ejecucion = self._clean_text(row[9])
+        apuntes = self._clean_text(row[10])
         
         notes_parts = [p for p in [ejecucion, apuntes] if p]
         notes = "\n".join(notes_parts) if notes_parts else None
