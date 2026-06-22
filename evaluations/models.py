@@ -172,6 +172,13 @@ class FormAssignment(models.Model):
     form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="assignments")
     assigned_to = models.ForeignKey(User, on_delete=models.PROTECT, related_name="received_form_assignments")
     assigned_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="sent_form_assignments")
+    session = models.ForeignKey(
+        "therapeutic_sessions.Session",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="form_assignments",
+    )
     patient = models.ForeignKey(
         Patient,
         on_delete=models.SET_NULL,

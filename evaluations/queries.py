@@ -26,6 +26,8 @@ class Query(graphene.ObjectType):
         FormAssignmentType,
         assigned_to_id=graphene.ID(),
         patient_id=graphene.ID(),
+        form_id=graphene.ID(),
+        session_id=graphene.ID(),
     )
     form_assignment = graphene.Field(FormAssignmentType, id=graphene.ID(required=True))
 
@@ -91,16 +93,27 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Formulario no encontrado")
 
     @module_permission_required('formularios', action='view')
-    def resolve_form_assignments(self, info, assigned_to_id=None, patient_id=None):
+    def resolve_form_assignments(self, info, assigned_to_id=None, patient_id=None, form_id=None, session_id=None):
         qs = FormAssignment.objects.select_related(
-            "form", "assigned_to", "assigned_by", "patient"
+            "form", "assigned_to", "assigned_by", "patient", "session"
         ).prefetch_related("responses")
+
         if assigned_to_id:
             real_assigned_to_id = get_db_id(assigned_to_id)
             qs = qs.filter(assigned_to_id=real_assigned_to_id)
+
         if patient_id:
             real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
+
+        if form_id:
+            real_form_id = get_db_id(form_id)
+            qs = qs.filter(form_id=real_form_id)
+
+        if session_id:
+            real_session_id = get_db_id(session_id)
+            qs = qs.filter(session_id=real_session_id)
+
         return qs
 
     @module_permission_required('formularios', action='view')

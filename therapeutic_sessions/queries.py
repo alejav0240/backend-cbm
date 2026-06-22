@@ -5,6 +5,7 @@ from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import (
     SessionType, DigitalResourceType, InventoryItemType, CycleType,
     PaginatedDigitalResources, PaginatedSessions, PaginatedCycles,
+    PaginatedPatientsLastCycle,
 )
 from config.utils import get_db_id, module_permission_required
 
@@ -159,6 +160,16 @@ class Query(graphene.ObjectType):
         description="Ciclos de todos los pacientes, ordenados por paciente y cycle_number.",
     )
 
+    # Último ciclo activo por paciente (uno por paciente)
+    patients_last_cycle = graphene.Field(
+        PaginatedPatientsLastCycle,
+        therapist_id=graphene.ID(),
+        search=graphene.String(description="Busca por nombre o apellido del paciente."),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+        description="Lista paginada de pacientes con la información de su último ciclo y sus sesiones.",
+    )
+
     @module_permission_required('sesiones', action='view')
     def resolve_sessions(self, info, patient_id=None, therapist_id=None,
                          session_type=None, payment_status=None, session_status=None,
@@ -299,3 +310,58 @@ class Query(graphene.ObjectType):
     def resolve_all_patient_cycles(self, info):
         qs = Session.objects.filter(cycle_number__isnull=False)
         return _build_cycles(qs)
+
+    @module_permission_required('sesiones', action='view')
+    def resolve_patients_last_cycle(self, info, therapist_id=None, search=None, page=1, page_size=10):
+        """
+        Para cada paciente, devuelve únicamente su ciclo más reciente
+        (mayor cycle_number) junto con las sesiones que lo componen.
+        Soporta búsqueda por nombre/apellido y paginación.
+        """
+        from django.db.models import Max, Q
+
+        qs = Session.objects.filter(cycle_number__isnull=False)
+        if therapist_id:
+            qs = qs.filter(therapist_id=get_db_id(therapist_id))
+
+        # Filtro de búsqueda por nombre/apellido del paciente
+        if search:
+            qs = qs.filter(
+                Q(patient__first_name__icontains=search) |
+                Q(patient__last_name__icontains=search)
+            )
+
+        # Obtener el cycle_number máximo por paciente en una sola query
+        max_cycles = list(
+            qs.values("patient_id")
+            .annotate(last_cycle=Max("cycle_number"))
+        )
+
+        if not max_cycles:
+            return PaginatedPatientsLastCycle(
+                results=[], total_count=0, total_pages=0, current_page=page
+            )
+
+        # Construir filtro: (patient_id=X AND cycle_number=Y) OR ...
+        query = Q()
+        for row in max_cycles:
+            query |= Q(patient_id=row["patient_id"], cycle_number=row["last_cycle"])
+
+        last_cycle_sessions = Session.objects.filter(query)
+        all_cycles = _build_cycles(last_cycle_sessions)
+
+        # Ordenar alfabéticamente por nombre de paciente
+        all_cycles.sort(key=lambda c: c.patient_name or "")
+
+        # Paginación en memoria (la agrupación ya se hizo sobre los datos filtrados)
+        total_count = len(all_cycles)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        page_results = all_cycles[offset:offset + page_size]
+
+        return PaginatedPatientsLastCycle(
+            results=page_results,
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
