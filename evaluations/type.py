@@ -73,7 +73,7 @@ class FormAssignmentType(DjangoObjectType):
         model = FormAssignment
         fields = (
             "id", "form", "assigned_to", "assigned_by",
-            "patient", "created_at", "responses",
+            "patient", "session", "created_at", "responses",
         )
 
     def resolve_completion_ratio(self, info):

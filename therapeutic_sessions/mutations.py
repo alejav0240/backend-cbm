@@ -48,10 +48,12 @@ class CreateSession(graphene.Mutation):
             therapist_id=db_therapist_id,
             session_date=session_date,
             session_type=session_type,
+            session_status=Session.SessionStatus.AGENDADA,
             session_number=current_session_number,
             cycle_number=calculated_cycle,
             duration_minutes=duration_minutes,
             notes=notes,
+
             group_id=db_group_id,
             video_url=video_url,
         )
@@ -66,11 +68,15 @@ class UpdateSession(graphene.Mutation):
         duration_minutes = graphene.Int()
         video_url = graphene.String()
         session_status = graphene.String()
+        therapist_id = graphene.ID()
+        session_date = graphene.DateTime()
+        session_type = graphene.String()
 
     session = graphene.Field(SessionType)
 
     @module_permission_required('sesiones', action='change')
-    def mutate(self, info, id, notes=None, duration_minutes=None, video_url=None, session_status=None):
+    def mutate(self, info, id, notes=None, duration_minutes=None, video_url=None,
+               session_status=None, therapist_id=None, session_date=None, session_type=None):
         real_id = get_db_id(id)
         try:
             session = Session.objects.get(pk=real_id)
@@ -82,6 +88,12 @@ class UpdateSession(graphene.Mutation):
                 session.video_url = video_url
             if session_status is not None:
                 session.session_status = session_status
+            if therapist_id is not None:
+                session.therapist_id = get_db_id(therapist_id)
+            if session_date is not None:
+                session.session_date = session_date
+            if session_type is not None:
+                session.session_type = session_type
             session.save()
             return UpdateSession(session=session)
         except Session.DoesNotExist:

@@ -194,6 +194,7 @@ class FormAssignmentAdmin(ModelAdmin):
         "assigned_to",
         "assigned_by",
         "patient",
+        "session",
         "display_completion",
         "created_at",
     )
@@ -206,7 +207,7 @@ class FormAssignmentAdmin(ModelAdmin):
     )
     ordering = ("-created_at",)
     readonly_fields = ("created_at",)
-    autocomplete_fields = ("form", "assigned_to", "assigned_by", "patient")
+    autocomplete_fields = ("form", "assigned_to", "assigned_by", "patient", "session")
     inlines = (FormResponseInline,)
 
     fieldsets = (
@@ -216,6 +217,7 @@ class FormAssignmentAdmin(ModelAdmin):
                 "fields": (
                     ("form", "patient"),
                     ("assigned_to", "assigned_by"),
+                    "session",
                     "created_at",
                 )
             },

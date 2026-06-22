@@ -97,7 +97,6 @@ class Session(models.Model):
     cycle_number = models.PositiveIntegerField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     video_url = models.URLField(blank=True, null=True)
-    #audio_url = models.URLField(blank=True, null=True)
     payment_status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
     )

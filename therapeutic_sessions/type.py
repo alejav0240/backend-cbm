@@ -130,6 +130,14 @@ class SessionType(DjangoObjectType):
 # Se construye en el resolver agrupando sesiones, no tiene tabla propia.
 # ─────────────────────────────────────────
 
+class PaginatedPatientsLastCycle(graphene.ObjectType):
+    """Paginación de últimos ciclos por paciente."""
+    results = graphene.List(lambda: CycleType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
 class CyclePaymentSummaryType(graphene.ObjectType):
     """Resumen de estados de pago de las sesiones del ciclo."""
     paid = graphene.Int(description="Sesiones pagadas")

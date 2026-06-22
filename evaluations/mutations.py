@@ -72,22 +72,25 @@ class AssignForm(graphene.Mutation):
         assigned_to_id = graphene.ID(required=True)
         assigned_by_id = graphene.ID(required=True)
         patient_id = graphene.ID()
+        session_id = graphene.ID()
 
     assignment = graphene.Field(FormAssignmentType)
 
     @module_permission_required('formularios', action='add')
-    def mutate(self, info, form_id, assigned_to_id, assigned_by_id, patient_id=None):
+    def mutate(self, info, form_id, assigned_to_id, assigned_by_id, patient_id=None, session_id=None):
         real_form_id = get_db_id(form_id)
         real_to_id = get_db_id(assigned_to_id)
         real_by_id = get_db_id(assigned_by_id)
         real_patient_id = get_db_id(patient_id)
+        real_session_id = get_db_id(session_id)
 
         try:
             assignment = FormAssignment.objects.create(
                 form_id=real_form_id,
                 assigned_to_id=real_to_id,
                 assigned_by_id=real_by_id,
-                patient_id=real_patient_id
+                patient_id=real_patient_id,
+                session_id=real_session_id,
             )
             return AssignForm(assignment=assignment)
         except Exception as e:
