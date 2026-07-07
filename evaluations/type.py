@@ -54,6 +54,13 @@ class ScaleEvaluationValueResponseType(DjangoObjectType):
         fields = ("id", "evaluation", "scale_value")
 
 
+class PaginatedScaleEvaluations(graphene.ObjectType):
+    results = graphene.List(ScaleEvaluationType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
 class FormType(DjangoObjectType):
     class Meta:
         model = Form
