@@ -253,6 +253,7 @@ class Query(graphene.ObjectType):
                 "scale_evaluations__evaluator",
                 "scale_evaluations__subscale_responses__subscale",
                 "scale_evaluations__value_responses__scale_value",
+                "session_plan_steps__plan_step__plan",
             ).get(pk=real_id)
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
