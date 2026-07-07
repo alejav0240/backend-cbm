@@ -6,12 +6,12 @@ from django.views.decorators.csrf import csrf_exempt
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path(
-        "graphql/",
-        csrf_exempt(
-            CBMGraphQLView.as_view(graphiql=True)
-        ),
-    ),
-    # path("graphql/", jwt_cookie(CBMGraphQLView.as_view(graphiql=True))),
+    #path(
+        #   "graphql/",
+        #  csrf_exempt(
+        #     CBMGraphQLView.as_view(graphiql=True)
+        #),
+    #),
+    path("graphql/", jwt_cookie(CBMGraphQLView.as_view(graphiql=True))),
     path("csrf/", csrf_token_view),
 ]
