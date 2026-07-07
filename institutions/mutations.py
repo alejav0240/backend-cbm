@@ -3,6 +3,7 @@ from graphql import GraphQLError
 
 from institutions.models import Institution, InstitutionGroup
 from institutions.type import InstitutionType, InstitutionGroupType
+from config.utils import get_db_id
 
 
 # -----------------------------
@@ -45,11 +46,7 @@ class UpdateInstitution(graphene.Mutation):
         phone = graphene.String() # Recibimos 'phone' desde el front
 
     def mutate(self, info, id, **kwargs):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-            
+        real_id = get_db_id(id)
         try:
             institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
@@ -76,11 +73,7 @@ class DeleteInstitution(graphene.Mutation):
         id = graphene.ID(required=True)
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-
+        real_id = get_db_id(id)
         try:
             institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
@@ -103,11 +96,7 @@ class CreateInstitutionGroup(graphene.Mutation):
         name = graphene.String(required=True)
 
     def mutate(self, info, institution_id, name):
-        try:
-            real_inst_id = int(graphene.relay.Node.from_global_id(institution_id)[1])
-        except:
-            real_inst_id = institution_id
-
+        real_inst_id = get_db_id(institution_id)
         try:
             institution = Institution.objects.get(pk=real_inst_id)
         except Institution.DoesNotExist:
@@ -133,11 +122,7 @@ class UpdateInstitutionGroup(graphene.Mutation):
         name = graphene.String()
 
     def mutate(self, info, id, name=None):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-
+        real_id = get_db_id(id)
         try:
             group = InstitutionGroup.objects.get(pk=real_id)
         except InstitutionGroup.DoesNotExist:
@@ -162,11 +147,7 @@ class DeleteInstitutionGroup(graphene.Mutation):
         id = graphene.ID(required=True)
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-
+        real_id = get_db_id(id)
         try:
             group = InstitutionGroup.objects.get(pk=real_id)
         except InstitutionGroup.DoesNotExist:

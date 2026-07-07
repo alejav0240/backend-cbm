@@ -184,8 +184,9 @@ class UpdatePayment(graphene.Mutation):
     payment = graphene.Field(PaymentType)
 
     def mutate(self, info, id, amount_paid=None, payment_status=None):
+        real_id = get_db_id(id)
         try:
-            payment = Payment.objects.get(pk=id)
+            payment = Payment.objects.get(pk=real_id)
             if amount_paid is not None:
                 payment.amount_paid = amount_paid
             if payment_status is not None:
@@ -219,8 +220,9 @@ class DeletePayment(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            payment = Payment.objects.get(pk=id)
+            payment = Payment.objects.get(pk=real_id)
             payment.delete()
             return DeletePayment(success=True)
         except Payment.DoesNotExist:
@@ -234,8 +236,9 @@ class UpdateExpenseStatus(graphene.Mutation):
     expense = graphene.Field(ExpenseType)
 
     def mutate(self, info, id, status):
+        real_id = get_db_id(id)
         try:
-            expense = Expense.objects.get(pk=id)
+            expense = Expense.objects.get(pk=real_id)
             expense.status = status
             expense.save()
             return UpdateExpenseStatus(expense=expense)
@@ -248,8 +251,9 @@ class DeleteExpense(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            expense = Expense.objects.get(pk=id)
+            expense = Expense.objects.get(pk=real_id)
             expense.delete()
             return DeleteExpense(success=True)
         except Expense.DoesNotExist:
