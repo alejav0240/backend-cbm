@@ -7,6 +7,7 @@ from django.db.models.functions import Coalesce
 from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem, DigitalResource
 from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
 from config.utils import get_db_id, module_permission_required
+from clinical.models import SessionPlanStep
 
 from django.db.models import Max
 
@@ -339,6 +340,73 @@ class DeleteSession(graphene.Mutation):
             return DeleteSession(success=False, message=str(e))
 
 
+class BulkAddSessionResources(graphene.Mutation):
+    """Agrega múltiples recursos digitales a una sesión de una sola vez."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        resource_ids = graphene.List(graphene.ID, required=True)
+
+    added_count = graphene.Int()
+
+    @module_permission_required('sesiones', action='change')
+    def mutate(self, info, session_id, resource_ids):
+        db_session_id = get_db_id(session_id)
+        count = 0
+        for rid in resource_ids:
+            _, created = SessionResource.objects.get_or_create(
+                session_id=db_session_id,
+                resource_id=get_db_id(rid),
+            )
+            if created:
+                count += 1
+        return BulkAddSessionResources(added_count=count)
+
+
+class BulkAddSessionInventoryItems(graphene.Mutation):
+    """Agrega múltiples ítems de inventario a una sesión de una sola vez."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        item_ids = graphene.List(graphene.ID, required=True)
+
+    added_count = graphene.Int()
+
+    @module_permission_required('sesiones', action='change')
+    def mutate(self, info, session_id, item_ids):
+        db_session_id = get_db_id(session_id)
+        count = 0
+        for iid in item_ids:
+            _, created = SessionInventory.objects.get_or_create(
+                session_id=db_session_id,
+                item_id=get_db_id(iid),
+            )
+            if created:
+                count += 1
+        return BulkAddSessionInventoryItems(added_count=count)
+
+
+class BulkAddStepsToSession(graphene.Mutation):
+    """Asocia múltiples pasos del plan a una sesión de una sola vez."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        plan_step_ids = graphene.List(graphene.ID, required=True)
+
+    added_count = graphene.Int()
+
+    @module_permission_required('planes', action='change')
+    def mutate(self, info, session_id, plan_step_ids):
+        db_session_id = get_db_id(session_id)
+        count = 0
+        for sid in plan_step_ids:
+            _, created = SessionPlanStep.objects.get_or_create(
+                session_id=db_session_id,
+                plan_step_id=get_db_id(sid),
+                defaults={"is_completed": False},
+            )
+            if created:
+                count += 1
+        return BulkAddStepsToSession(added_count=count)
+
+
 class Mutation(graphene.ObjectType):
     create_session = CreateSession.Field()
     create_cycle = CreateCycle.Field()
@@ -346,6 +414,9 @@ class Mutation(graphene.ObjectType):
     update_session_payment_status = UpdateSessionPaymentStatus.Field()
     add_session_resource = AddSessionResource.Field()
     add_session_inventory_item = AddSessionInventoryItem.Field()
+    bulk_add_session_resources = BulkAddSessionResources.Field()
+    bulk_add_session_inventory_items = BulkAddSessionInventoryItems.Field()
+    bulk_add_steps_to_session = BulkAddStepsToSession.Field()
     create_inventory_item = CreateInventoryItem.Field()
     update_inventory_item = UpdateInventoryItem.Field()
     delete_inventory_item = DeleteInventoryItem.Field()

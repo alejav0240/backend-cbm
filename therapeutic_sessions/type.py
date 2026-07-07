@@ -91,7 +91,7 @@ class SessionType(DjangoObjectType):
             "payment_status", "created_at", "updated_at",
             "session_resources", "session_inventory",
             "session_status", "session_number",
-            "scale_evaluations",
+            "scale_evaluations", "session_plan_steps",
         )
         interfaces = (graphene.relay.Node,)
 

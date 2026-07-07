@@ -9,6 +9,7 @@ from .models import (
     SessionInventory,
     SessionResource,
 )
+from clinical.models import SessionPlanStep
 
 
 class SessionResourceInline(TabularInline):
@@ -16,6 +17,13 @@ class SessionResourceInline(TabularInline):
     extra = 0
     fields = ("resource",)
     autocomplete_fields = ("resource",)
+
+
+class SessionPlanStepInline(TabularInline):
+    model = SessionPlanStep
+    extra = 0
+    fields = ("plan_step", "is_completed", "actual_duration", "notes")
+    autocomplete_fields = ("plan_step",)
 
 
 class SessionInventoryInline(TabularInline):
@@ -160,7 +168,7 @@ class SessionAdmin(ModelAdmin):
     ordering = ("-session_date",)
     readonly_fields = ("created_at", "updated_at")
     autocomplete_fields = ("patient", "therapist", "group")
-    inlines = (SessionResourceInline, SessionInventoryInline)
+    inlines = (SessionResourceInline, SessionInventoryInline, SessionPlanStepInline)
 
     fieldsets = (
         (
