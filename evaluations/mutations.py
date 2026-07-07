@@ -1,5 +1,6 @@
 import graphene
 from django.db import transaction
+from graphql import GraphQLError
 from clinical.models import Patient
 from users.models import User
 from evaluations.models import (
@@ -69,32 +70,69 @@ class DeleteForm(graphene.Mutation):
 class AssignForm(graphene.Mutation):
     class Arguments:
         form_id = graphene.ID(required=True)
-        assigned_to_id = graphene.ID(required=True)
         assigned_by_id = graphene.ID(required=True)
+        assigned_to_id = graphene.ID()
         patient_id = graphene.ID()
         session_id = graphene.ID()
 
     assignment = graphene.Field(FormAssignmentType)
 
     @module_permission_required('formularios', action='add')
-    def mutate(self, info, form_id, assigned_to_id, assigned_by_id, patient_id=None, session_id=None):
-        real_form_id = get_db_id(form_id)
-        real_to_id = get_db_id(assigned_to_id)
-        real_by_id = get_db_id(assigned_by_id)
-        real_patient_id = get_db_id(patient_id)
-        real_session_id = get_db_id(session_id)
-
+    def mutate(self, info, form_id, assigned_by_id, assigned_to_id=None,
+               patient_id=None, session_id=None):
         try:
             assignment = FormAssignment.objects.create(
-                form_id=real_form_id,
-                assigned_to_id=real_to_id,
-                assigned_by_id=real_by_id,
-                patient_id=real_patient_id,
-                session_id=real_session_id,
+                form_id=get_db_id(form_id),
+                assigned_by_id=get_db_id(assigned_by_id),
+                assigned_to_id=get_db_id(assigned_to_id),
+                patient_id=get_db_id(patient_id),
+                session_id=get_db_id(session_id),
             )
             return AssignForm(assignment=assignment)
         except Exception as e:
             raise GraphQLError(str(e))
+
+
+class UpdateFormAssignment(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+        assigned_to_id = graphene.ID()
+        patient_id = graphene.ID()
+        session_id = graphene.ID()
+
+    assignment = graphene.Field(FormAssignmentType)
+
+    @module_permission_required('formularios', action='change')
+    def mutate(self, info, id, assigned_to_id=None, patient_id=None, session_id=None):
+        real_id = get_db_id(id)
+        try:
+            assignment = FormAssignment.objects.get(pk=real_id)
+            if assigned_to_id is not None:
+                assignment.assigned_to_id = get_db_id(assigned_to_id)
+            if patient_id is not None:
+                assignment.patient_id = get_db_id(patient_id)
+            if session_id is not None:
+                assignment.session_id = get_db_id(session_id)
+            assignment.save()
+            return UpdateFormAssignment(assignment=assignment)
+        except FormAssignment.DoesNotExist:
+            raise GraphQLError("Asignación no encontrada")
+
+
+class DeleteFormAssignment(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+
+    @module_permission_required('formularios', action='delete')
+    def mutate(self, info, id):
+        real_id = get_db_id(id)
+        try:
+            FormAssignment.objects.get(pk=real_id).delete()
+            return DeleteFormAssignment(success=True)
+        except FormAssignment.DoesNotExist:
+            return DeleteFormAssignment(success=False)
 
 class SubscaleInput(graphene.InputObjectType):
     name = graphene.String(required=True)
@@ -276,3 +314,5 @@ class Mutation(graphene.ObjectType):
     create_form = CreateForm.Field()
     delete_form = DeleteForm.Field()
     assign_form = AssignForm.Field()
+    update_form_assignment = UpdateFormAssignment.Field()
+    delete_form_assignment = DeleteFormAssignment.Field()

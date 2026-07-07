@@ -2,7 +2,7 @@ import graphene
 from graphql import GraphQLError
 
 from evaluations.models import Scale, ScaleEvaluation, Form, FormAssignment
-from evaluations.type import ScaleType, ScaleEvaluationType, FormType, FormAssignmentType
+from evaluations.type import ScaleType, ScaleEvaluationType, FormType, FormAssignmentType, PaginatedScaleEvaluations
 from config.utils import module_permission_required, get_db_id
 
 
@@ -10,11 +10,13 @@ class Query(graphene.ObjectType):
     scales = graphene.List(ScaleType, scale_type=graphene.String())
     scale = graphene.Field(ScaleType, id=graphene.ID(required=True))
 
-    scale_evaluations = graphene.List(
-        ScaleEvaluationType,
+    scale_evaluations = graphene.Field(
+        PaginatedScaleEvaluations,
         patient_id=graphene.ID(),
         scale_id=graphene.ID(),
         in_session=graphene.Boolean(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
     scale_evaluation = graphene.Field(ScaleEvaluationType, id=graphene.ID(required=True))
 
@@ -48,21 +50,30 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Escala no encontrada")
 
     @module_permission_required('evaluaciones', action='view')
-    def resolve_scale_evaluations(self, info, patient_id=None, scale_id=None, in_session=None):
+    def resolve_scale_evaluations(self, info, patient_id=None, scale_id=None,
+                                   in_session=None, page=1, page_size=10):
         qs = ScaleEvaluation.objects.select_related(
             "scale", "patient", "evaluator", "session"
         ).prefetch_related("subscale_responses", "value_responses")
         if patient_id:
-            real_patient_id = get_db_id(patient_id)
-            qs = qs.filter(patient_id=real_patient_id)
+            qs = qs.filter(patient_id=get_db_id(patient_id))
         if scale_id:
-            real_scale_id = get_db_id(scale_id)
-            qs = qs.filter(scale_id=real_scale_id)
+            qs = qs.filter(scale_id=get_db_id(scale_id))
         if in_session is True:
             qs = qs.exclude(session=None)
         elif in_session is False:
             qs = qs.filter(session=None)
-        return qs
+
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+
+        return PaginatedScaleEvaluations(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('evaluaciones', action='view')
     def resolve_scale_evaluation(self, info, id):
