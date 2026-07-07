@@ -4,8 +4,8 @@ from datetime import date
 import graphene
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
-from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport
-from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType, TherapyReportType
+from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport, SessionPlanStep
+from clinical.type import PatientType, PatientClinicalNoteType, InterventionPlanType, PlanStepType, TherapyReportType, SessionPlanStepType
 from therapeutic_sessions.models import Session
 from users.models import User
 from django.db.models import Max
@@ -289,6 +289,7 @@ class UpdateClinicalNotes(graphene.Mutation):
     @module_permission_required('pacientes', action='change')
     def mutate(self, info, patient_id, author_id, notes):
         real_patient_id = get_db_id(patient_id)
+        real_author_id = get_db_id(author_id)
         updated_instances = []
 
         for n in notes:
@@ -299,7 +300,7 @@ class UpdateClinicalNotes(graphene.Mutation):
                 category=category_upper,
                 defaults={
                     'content': n.content,
-                    'author_id': author_id
+                    'author_id': real_author_id
                 }
             )
             updated_instances.append(note)
@@ -320,8 +321,8 @@ class CreateInterventionPlan(graphene.Mutation):
     def mutate(self, info, patient_id, created_by_id, main_objective,
                start_date=None, end_date=None):
         plan = InterventionPlan.objects.create(
-            patient_id=patient_id,
-            created_by_id=created_by_id,
+            patient_id=get_db_id(patient_id),
+            created_by_id=get_db_id(created_by_id),
             main_objective=main_objective,
             start_date=start_date,
             end_date=end_date,
@@ -345,15 +346,16 @@ class CreateStepPlan(graphene.Mutation):
 
     @module_permission_required('planes', action='change')
     def mutate(self, info, plan_id, moment, objective, **kwargs):
+        real_plan_id = get_db_id(plan_id)
         order_index = kwargs.get('order_index')
         if order_index is None:
-            last_order = PlanStep.objects.filter(plan_id=plan_id).aggregate(
+            last_order = PlanStep.objects.filter(plan_id=real_plan_id).aggregate(
                 max_order=Coalesce(Max('order_index'), 0)
             )
             order_index = last_order['max_order'] + 1
 
         step = PlanStep.objects.create(
-            plan_id=plan_id,
+            plan_id=real_plan_id,
             moment=moment,
             objective=objective,
             duration_minutes=kwargs.get('duration_minutes'),
@@ -376,37 +378,15 @@ class UpdatePlanProgress(graphene.Mutation):
 
     @module_permission_required('planes', action='change')
     def mutate(self, info, id, progress_percent):
+        real_id = get_db_id(id)
         try:
-            plan = InterventionPlan.objects.get(pk=id)
+            plan = InterventionPlan.objects.get(pk=real_id)
         except InterventionPlan.DoesNotExist:
             raise Exception("Plan de intervención no encontrado")
         
         plan.progress_percent = max(0, min(100, progress_percent))
         plan.save(update_fields=["progress_percent", "updated_at"])
         return UpdatePlanProgress(plan=plan)
-
-
-class UpdateStepProgress(graphene.Mutation):
-    class Arguments:
-        step_id = graphene.ID(required=True)
-        is_completed = graphene.Boolean()
-        actual_duration = graphene.Int()
-
-    step = graphene.Field(PlanStepType)
-    success = graphene.Boolean()
-
-    @module_permission_required('planes', action='change')
-    def mutate(self, info, step_id, is_completed=None, actual_duration=None):
-        try:
-            step = PlanStep.objects.get(pk=step_id)
-            if is_completed is not None:
-                step.is_completed = is_completed
-            if actual_duration is not None:
-                step.actual_duration = actual_duration
-            step.save()
-            return UpdateStepProgress(step=step, success=True)
-        except PlanStep.DoesNotExist:
-            raise Exception("El paso del plan no existe.")
 
 class DeletePatient(graphene.Mutation):
     class Arguments:
@@ -438,8 +418,9 @@ class UpdateInterventionPlan(graphene.Mutation):
 
     @module_permission_required('planes', action='change')
     def mutate(self, info, id, **kwargs):
+        real_id = get_db_id(id)
         try:
-            plan = InterventionPlan.objects.get(pk=id)
+            plan = InterventionPlan.objects.get(pk=real_id)
             for key, value in kwargs.items():
                 setattr(plan, key, value)
             plan.save()
@@ -454,8 +435,9 @@ class DeleteInterventionPlan(graphene.Mutation):
 
     @module_permission_required('planes', action='delete')
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            plan = InterventionPlan.objects.get(pk=id)
+            plan = InterventionPlan.objects.get(pk=real_id)
             plan.delete()
             return DeleteInterventionPlan(success=True)
         except InterventionPlan.DoesNotExist:
@@ -477,14 +459,102 @@ class UpdateStepPlan(graphene.Mutation):
 
     @module_permission_required('planes', action='change')
     def mutate(self, info, id, **kwargs):
+        real_id = get_db_id(id)
         try:
-            step = PlanStep.objects.get(pk=id)
+            step = PlanStep.objects.get(pk=real_id)
             for key, value in kwargs.items():
                 setattr(step, key, value)
             step.save()
             return UpdateStepPlan(step=step)
         except PlanStep.DoesNotExist:
             raise Exception("Paso no encontrado")
+
+
+# ─────────────────────────────────────────
+# SessionPlanStep — control de ejecución por sesión
+# ─────────────────────────────────────────
+
+class AddStepToSession(graphene.Mutation):
+    """Asocia un PlanStep a una sesión, creando el registro de control si no existe."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        plan_step_id = graphene.ID(required=True)
+        is_completed = graphene.Boolean()
+        actual_duration = graphene.Int()
+        notes = graphene.String()
+
+    session_plan_step = graphene.Field(SessionPlanStepType)
+
+    @module_permission_required('planes', action='change')
+    def mutate(self, info, session_id, plan_step_id,
+               is_completed=False, actual_duration=None, notes=None):
+        real_session_id = get_db_id(session_id)
+        real_step_id = get_db_id(plan_step_id)
+
+        sps, _ = SessionPlanStep.objects.get_or_create(
+            session_id=real_session_id,
+            plan_step_id=real_step_id,
+            defaults={
+                "is_completed": is_completed,
+                "actual_duration": actual_duration,
+                "notes": notes,
+            },
+        )
+        return AddStepToSession(session_plan_step=sps)
+
+
+class UpdateSessionPlanStep(graphene.Mutation):
+    """Actualiza el estado de ejecución de un paso dentro de una sesión."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        plan_step_id = graphene.ID(required=True)
+        is_completed = graphene.Boolean()
+        actual_duration = graphene.Int()
+        notes = graphene.String()
+
+    session_plan_step = graphene.Field(SessionPlanStepType)
+
+    @module_permission_required('planes', action='change')
+    def mutate(self, info, session_id, plan_step_id,
+               is_completed=None, actual_duration=None, notes=None):
+        real_session_id = get_db_id(session_id)
+        real_step_id = get_db_id(plan_step_id)
+
+        try:
+            sps = SessionPlanStep.objects.get(
+                session_id=real_session_id,
+                plan_step_id=real_step_id,
+            )
+        except SessionPlanStep.DoesNotExist:
+            raise Exception("No existe ese paso asociado a la sesión. Usa addStepToSession primero.")
+
+        if is_completed is not None:
+            sps.is_completed = is_completed
+        if actual_duration is not None:
+            sps.actual_duration = actual_duration
+        if notes is not None:
+            sps.notes = notes
+        sps.save()
+        return UpdateSessionPlanStep(session_plan_step=sps)
+
+
+class RemoveStepFromSession(graphene.Mutation):
+    """Desasocia un PlanStep de una sesión."""
+    class Arguments:
+        session_id = graphene.ID(required=True)
+        plan_step_id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+
+    @module_permission_required('planes', action='change')
+    def mutate(self, info, session_id, plan_step_id):
+        real_session_id = get_db_id(session_id)
+        real_step_id = get_db_id(plan_step_id)
+        deleted, _ = SessionPlanStep.objects.filter(
+            session_id=real_session_id,
+            plan_step_id=real_step_id,
+        ).delete()
+        return RemoveStepFromSession(success=deleted > 0)
 
 class DeleteStepPlan(graphene.Mutation):
     class Arguments:
@@ -493,8 +563,9 @@ class DeleteStepPlan(graphene.Mutation):
 
     @module_permission_required('planes', action='delete')
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            step = PlanStep.objects.get(pk=id)
+            step = PlanStep.objects.get(pk=real_id)
             step.delete()
             return DeleteStepPlan(success=True)
         except PlanStep.DoesNotExist:
@@ -511,8 +582,8 @@ class CreateTherapyReport(graphene.Mutation):
     @module_permission_required('informes', action='add')
     def mutate(self, info, patient_id, generated_by_id, report_url):
         report = TherapyReport.objects.create(
-            patient_id=patient_id,
-            generated_by_id=generated_by_id,
+            patient_id=get_db_id(patient_id),
+            generated_by_id=get_db_id(generated_by_id),
             report_url=report_url
         )
         return CreateTherapyReport(report=report)
@@ -524,8 +595,9 @@ class DeleteTherapyReport(graphene.Mutation):
 
     @module_permission_required('informes', action='delete')
     def mutate(self, info, id):
+        real_id = get_db_id(id)
         try:
-            report = TherapyReport.objects.get(pk=id)
+            report = TherapyReport.objects.get(pk=real_id)
             report.delete()
             return DeleteTherapyReport(success=True)
         except TherapyReport.DoesNotExist:
@@ -543,7 +615,10 @@ class Mutation(graphene.ObjectType):
     create_step_plan = CreateStepPlan.Field()
     update_step_plan = UpdateStepPlan.Field()
     delete_step_plan = DeleteStepPlan.Field()
-    update_step_progress = UpdateStepProgress.Field()
     create_therapy_report = CreateTherapyReport.Field()
     delete_therapy_report = DeleteTherapyReport.Field()
     delete_patient = DeletePatient.Field()
+    # SessionPlanStep
+    add_step_to_session = AddStepToSession.Field()
+    update_session_plan_step = UpdateSessionPlanStep.Field()
+    remove_step_from_session = RemoveStepFromSession.Field()

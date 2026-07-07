@@ -3,6 +3,7 @@ from decimal import Decimal
 from graphql import GraphQLError
 from marketing.models import MarketingCampaign, Lead, BlogPost
 from marketing.type import MarketingCampaignType, LeadType, BlogPostType
+from config.utils import get_db_id
 
 class CreateBlogPost(graphene.Mutation):
     class Arguments:
@@ -45,11 +46,7 @@ class UpdateBlogPost(graphene.Mutation):
     post = graphene.Field(BlogPostType)
 
     def mutate(self, info, id, **kwargs):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-            
+        real_id = get_db_id(id)
         try:
             post = BlogPost.objects.get(pk=real_id)
             for key, value in kwargs.items():
@@ -65,11 +62,7 @@ class DeleteBlogPost(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-            
+        real_id = get_db_id(id)
         try:
             post = BlogPost.objects.get(pk=real_id)
             post.delete()
@@ -105,13 +98,7 @@ class CreateLead(graphene.Mutation):
     lead = graphene.Field(LeadType)
 
     def mutate(self, info, name, phone=None, email=None, campaign_id=None):
-        real_campaign_id = None
-        if campaign_id:
-            try:
-                real_campaign_id = int(graphene.relay.Node.from_global_id(campaign_id)[1])
-            except:
-                real_campaign_id = campaign_id
-
+        real_campaign_id = get_db_id(campaign_id)
         lead = Lead.objects.create(
             name=name,
             phone=phone,
@@ -128,11 +115,7 @@ class UpdateLeadStatus(graphene.Mutation):
     lead = graphene.Field(LeadType)
 
     def mutate(self, info, id, status):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-
+        real_id = get_db_id(id)
         try:
             lead = Lead.objects.get(pk=real_id)
         except Lead.DoesNotExist:
@@ -150,11 +133,7 @@ class UpdateCampaignSpent(graphene.Mutation):
     campaign = graphene.Field(MarketingCampaignType)
 
     def mutate(self, info, id, spent):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-
+        real_id = get_db_id(id)
         try:
             campaign = MarketingCampaign.objects.get(pk=real_id)
         except MarketingCampaign.DoesNotExist:
@@ -176,11 +155,7 @@ class UpdateCampaign(graphene.Mutation):
     campaign = graphene.Field(MarketingCampaignType)
 
     def mutate(self, info, id, **kwargs):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-        
+        real_id = get_db_id(id)
         try:
             campaign = MarketingCampaign.objects.get(pk=real_id)
             for key, value in kwargs.items():
@@ -199,10 +174,7 @@ class DeleteCampaign(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             campaign = MarketingCampaign.objects.get(pk=real_id)
             campaign.delete()
@@ -216,10 +188,7 @@ class DeleteLead(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             lead = Lead.objects.get(pk=real_id)
             lead.delete()

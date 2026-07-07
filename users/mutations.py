@@ -9,6 +9,7 @@ from django.db import transaction
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
 from .permissions_map import get_permissions_for_modules
+from config.utils import get_db_id
 
 
 class CreateRole(graphene.Mutation):
@@ -42,11 +43,7 @@ class UpdateRole(graphene.Mutation):
     role = graphene.Field(RoleType)
 
     def mutate(self, info, id, **kwargs):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
-            
+        real_id = get_db_id(id)
         try:
             group = Group.objects.get(pk=real_id)
             
@@ -69,10 +66,7 @@ class DeleteRole(graphene.Mutation):
     success = graphene.Boolean()
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            real_id = id
+        real_id = get_db_id(id)
         try:
             group = Group.objects.get(pk=real_id)
             group.delete()
@@ -123,14 +117,7 @@ class UpdateUser(graphene.Mutation):
         if not current_user.is_authenticated:
             raise GraphQLError("No autenticado.")
 
-        # Manejar ID de Relay o ID directo y convertir a int
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            try:
-                real_id = int(id)
-            except:
-                real_id = id
+        real_id = get_db_id(id)
 
         # Solo el propio usuario o un admin puede editar
         if not current_user.is_staff and str(current_user.pk) != str(real_id):
@@ -179,13 +166,7 @@ class MarkNotificationRead(graphene.Mutation):
     notification = graphene.Field(NotificationType)
 
     def mutate(self, info, id):
-        try:
-            real_id = int(graphene.relay.Node.from_global_id(id)[1])
-        except:
-            try:
-                real_id = int(id)
-            except:
-                real_id = id
+        real_id = get_db_id(id)
         notif = Notification.objects.get(pk=real_id)
         notif.is_read = True
         notif.save(update_fields=["is_read"])
