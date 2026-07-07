@@ -6,8 +6,8 @@ from django.db.models import Count
 from django.db.models.functions import TruncMonth
 import base64
 
-from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport
-from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType
+from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport, SessionPlanStep
+from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType, SessionPlanStepType
 from config.utils import login_required, get_db_id, module_permission_required
 
 class PaginatedPatients(graphene.ObjectType):
@@ -51,6 +51,15 @@ class Query(graphene.ObjectType):
     therapy_reports = graphene.List(
         TherapyReportType,
         patient_id=graphene.ID(required=False),
+    )
+
+    session_plan_steps = graphene.List(
+        SessionPlanStepType,
+        session_id=graphene.ID(),
+        plan_step_id=graphene.ID(),
+        plan_id=graphene.ID(),
+        is_completed=graphene.Boolean(),
+        description="Registros de ejecución de pasos del plan por sesión.",
     )
 
     patient_growth = graphene.List(GrowthPointType)
@@ -125,7 +134,9 @@ class Query(graphene.ObjectType):
     def resolve_intervention_plan(self, info, id):
         real_id = get_db_id(id)
         try:
-            return InterventionPlan.objects.prefetch_related("steps").get(pk=real_id)
+            return InterventionPlan.objects.prefetch_related(
+                "steps__session_executions"
+            ).get(pk=real_id)
         except (InterventionPlan.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Plan con ID {real_id} no encontrado")
 
@@ -135,6 +146,25 @@ class Query(graphene.ObjectType):
         if patient_id:
             real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
+        return qs
+
+    @module_permission_required('planes', action='view')
+    def resolve_session_plan_steps(self, info, session_id=None, plan_step_id=None,
+                                   plan_id=None, is_completed=None):
+        qs = SessionPlanStep.objects.select_related(
+            "session__patient",
+            "plan_step__plan",
+        ).all()
+
+        if session_id:
+            qs = qs.filter(session_id=get_db_id(session_id))
+        if plan_step_id:
+            qs = qs.filter(plan_step_id=get_db_id(plan_step_id))
+        if plan_id:
+            qs = qs.filter(plan_step__plan_id=get_db_id(plan_id))
+        if is_completed is not None:
+            qs = qs.filter(is_completed=is_completed)
+
         return qs
 
     @login_required

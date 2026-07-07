@@ -1,7 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 
-from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport
+from clinical.models import Patient, PatientClinicalNote, InterventionPlan, PlanStep, TherapyReport, SessionPlanStep
 
 
 class PatientType(DjangoObjectType):
@@ -59,10 +59,20 @@ class PlanStepType(DjangoObjectType):
     class Meta:
         model = PlanStep
         fields = (
-            "id", "plan", "moment", "duration_minutes", "actual_duration",
+            "id", "plan", "moment", "duration_minutes",
             "objective", "focus", "musical_resources",
             "musical_emphasis", "approach", "mlt_method",
-            "order_index", "is_completed",
+            "order_index", "session_executions",
+        )
+
+
+class SessionPlanStepType(DjangoObjectType):
+    class Meta:
+        model = SessionPlanStep
+        fields = (
+            "id", "session", "plan_step",
+            "is_completed", "actual_duration",
+            "notes", "created_at", "updated_at",
         )
 
 

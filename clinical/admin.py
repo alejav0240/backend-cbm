@@ -7,6 +7,7 @@ from .models import (
     Patient,
     PatientClinicalNote,
     PlanStep,
+    SessionPlanStep,
     TherapyReport,
 )
 
@@ -46,6 +47,13 @@ class PlanStepInline(TabularInline):
         "mlt_method",
     )
     ordering = ("order_index",)
+
+
+class SessionPlanStepInline(TabularInline):
+    model = SessionPlanStep
+    extra = 0
+    fields = ("plan_step", "is_completed", "actual_duration")
+    autocomplete_fields = ("plan_step",)
 
 
 @admin.register(Patient)
@@ -217,6 +225,80 @@ class InterventionPlanAdmin(ModelAdmin):
     @display(description="Progreso")
     def display_progress(self, obj):
         return f"{obj.progress_percent}%"
+
+
+@admin.register(PlanStep)
+class PlanStepAdmin(ModelAdmin):
+    compressed_fields = True
+    list_filter_submit = True
+
+    list_display = ("plan", "order_index", "moment", "objective_preview", "duration_minutes")
+    list_filter = ("moment", "approach")
+    search_fields = ("objective", "plan__patient__first_name", "plan__patient__last_name")
+    ordering = ("plan", "order_index")
+    autocomplete_fields = ("plan",)
+
+    fieldsets = (
+        (
+            "Paso",
+            {
+                "fields": (
+                    "plan",
+                    ("moment", "order_index", "duration_minutes"),
+                    "objective",
+                    ("focus", "approach", "mlt_method"),
+                    ("musical_resources", "musical_emphasis"),
+                )
+            },
+        ),
+    )
+
+    @display(description="Objetivo")
+    def objective_preview(self, obj):
+        return obj.objective[:60] + "..." if len(obj.objective) > 60 else obj.objective
+
+
+@admin.register(SessionPlanStep)
+class SessionPlanStepAdmin(ModelAdmin):
+    compressed_fields = True
+    list_filter_submit = True
+
+    list_display = (
+        "session",
+        "plan_step",
+        "display_completed",
+        "actual_duration",
+        "created_at",
+    )
+    list_filter = ("is_completed",)
+    search_fields = (
+        "session__patient__first_name",
+        "session__patient__last_name",
+        "plan_step__objective",
+    )
+    ordering = ("-session__session_date", "plan_step__order_index")
+    readonly_fields = ("created_at",)
+    autocomplete_fields = ("session", "plan_step")
+
+    fieldsets = (
+        (
+            "Ejecución",
+            {
+                "fields": (
+                    ("session", "plan_step"),
+                    ("is_completed", "actual_duration"),
+                    "created_at",
+                )
+            },
+        ),
+    )
+
+    @display(
+        description="Completado",
+        label={True: "success", False: "warning"},
+    )
+    def display_completed(self, obj):
+        return "Sí" if obj.is_completed else "No"
 
 
 @admin.register(TherapyReport)

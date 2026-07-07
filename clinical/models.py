@@ -90,14 +90,16 @@ class InterventionPlan(models.Model):
         return f"Plan de {self.patient} — {self.start_date}"
 
     def update_progress(self):
-        """Calcula y actualiza el porcentaje de progreso basado en los pasos completados."""
+        """Calcula el progreso basado en steps que tienen al menos una entrada completada."""
         total_steps = self.steps.count()
         if total_steps == 0:
             new_progress = 0
         else:
-            completed_steps = self.steps.filter(is_completed=True).count()
+            completed_steps = self.steps.filter(
+                session_executions__is_completed=True
+            ).distinct().count()
             new_progress = int((completed_steps / total_steps) * 100)
-        
+
         if self.progress_percent != new_progress:
             self.progress_percent = new_progress
             self.save(update_fields=["progress_percent", "updated_at"])
@@ -218,7 +220,6 @@ class PlanStep(models.Model):
     plan = models.ForeignKey(InterventionPlan, on_delete=models.CASCADE, related_name="steps")
     moment = models.CharField(max_length=20, choices=Moment.choices)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
-    actual_duration = models.PositiveIntegerField(blank=True, null=True)
     objective = models.CharField(max_length=255, choices=Objective.choices)
     focus = models.TextField(blank=True, null=True, choices=Focus.choices)
     musical_resources = models.TextField(blank=True, null=True)
@@ -226,7 +227,6 @@ class PlanStep(models.Model):
     approach = models.CharField(max_length=255, blank=True, null=True, choices=Approach.choices)
     mlt_method = models.CharField(max_length=100, blank=True, null=True, choices=MltMethod.choices)
     order_index = models.PositiveSmallIntegerField(default=0)
-    is_completed = models.BooleanField(default=False)
 
     class Meta:
         db_table = "plan_steps"
@@ -242,6 +242,51 @@ class PlanStep(models.Model):
 
     def delete(self, *args, **kwargs):
         plan = self.plan
+        super().delete(*args, **kwargs)
+        if plan:
+            plan.update_progress()
+
+
+class SessionPlanStep(models.Model):
+    """
+    Registro de ejecución de un PlanStep dentro de una sesión concreta.
+    Permite que el mismo paso del plan se trabaje (o no) en múltiples sesiones
+    y lleva el control de completitud y duración real por sesión.
+    """
+    session = models.ForeignKey(
+        "therapeutic_sessions.Session",
+        on_delete=models.CASCADE,
+        related_name="session_plan_steps",
+    )
+    plan_step = models.ForeignKey(
+        PlanStep,
+        on_delete=models.CASCADE,
+        related_name="session_executions",
+    )
+    is_completed = models.BooleanField(default=False)
+    actual_duration = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text="Duración real en minutos durante esta sesión",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "session_plan_steps"
+        unique_together = [("session", "plan_step")]
+        ordering = ["plan_step__order_index"]
+
+    def __str__(self):
+        status = "✓" if self.is_completed else "○"
+        return f"{status} {self.plan_step} — sesión {self.session_id}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Recalcula el progreso del plan cuando cambia el estado
+        if self.plan_step.plan:
+            self.plan_step.plan.update_progress()
+
+    def delete(self, *args, **kwargs):
+        plan = self.plan_step.plan
         super().delete(*args, **kwargs)
         if plan:
             plan.update_progress()
