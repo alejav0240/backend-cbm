@@ -53,6 +53,13 @@ class PaginatedCycles(graphene.ObjectType):
     current_page = graphene.Int()
 
 
+class PaginatedInventoryItems(graphene.ObjectType):
+    results = graphene.List(lambda: InventoryItemType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
 # 2. Inventory Item
 class InventoryItemType(DjangoObjectType):
     class Meta:

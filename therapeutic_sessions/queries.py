@@ -5,7 +5,7 @@ from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import (
     SessionType, DigitalResourceType, InventoryItemType, CycleType,
     PaginatedDigitalResources, PaginatedSessions, PaginatedCycles,
-    PaginatedPatientsLastCycle,
+    PaginatedPatientsLastCycle, PaginatedInventoryItems,
 )
 from config.utils import get_db_id, module_permission_required
 
@@ -140,10 +140,13 @@ class Query(graphene.ObjectType):
     )
     digital_resource = graphene.Field(DigitalResourceType, id=graphene.ID(required=True))
 
-    inventory_items = graphene.List(
-        InventoryItemType,
+    inventory_items = graphene.Field(
+        PaginatedInventoryItems,
         status=graphene.String(),
         type=graphene.String(),
+        search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
     inventory_item = graphene.Field(InventoryItemType, id=graphene.ID(required=True))
 
@@ -287,13 +290,23 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Recurso digital no encontrado")
 
     @module_permission_required('inventario', action='view')
-    def resolve_inventory_items(self, info, status=None, type=None):
+    def resolve_inventory_items(self, info, status=None, type=None, search=None, page=1, page_size=10):
         qs = InventoryItem.objects.all()
         if status:
             qs = qs.filter(status=status)
         if type:
             qs = qs.filter(type=type)
-        return qs
+        if search:
+            qs = qs.filter(name__icontains=search)
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedInventoryItems(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('inventario', action='view')
     def resolve_inventory_item(self, info, id):

@@ -77,26 +77,58 @@ class DeleteRole(graphene.Mutation):
 # ── Registro ────────────────────────────────────────────────────────────────
 class CreateUser(graphene.Mutation):
     user = graphene.Field(UserType)
+    plain_password = graphene.String(description="Contraseña en texto plano, solo disponible al momento de la creación.")
 
     class Arguments:
-        username = graphene.String(required=True)
-        email    = graphene.String(required=True)
-        password = graphene.String(required=True)
-        ci       = graphene.String(required=True)
-        celular  = graphene.String()
+        username   = graphene.String(required=True)
+        password   = graphene.String(required=True)
+        ci         = graphene.String(required=True)
+        email      = graphene.String()
+        first_name = graphene.String()
+        last_name  = graphene.String()
+        celular    = graphene.String()
+        status     = graphene.String()
+        visibility = graphene.String()
+        is_active  = graphene.Boolean()
+        is_staff   = graphene.Boolean()
+        role_id    = graphene.ID(description="ID del grupo/rol a asignar al usuario.")
 
-    def mutate(self, info, username, email, password, ci, celular=""):
+    def mutate(self, info, username, password, ci,
+               email=None, first_name="", last_name="",
+               celular="", status="active", visibility="public",
+               is_active=True, is_staff=False, role_id=None):
+
         if User.objects.filter(username=username).exists():
             raise GraphQLError("El nombre de usuario ya está en uso.")
-        if User.objects.filter(email=email).exists():
+        if email and User.objects.filter(email=email).exists():
             raise GraphQLError("El correo ya está registrado.")
         if User.objects.filter(ci=ci).exists():
             raise GraphQLError("El CI ya está registrado.")
 
-        user = User(username=username, email=email, ci=ci, celular=celular)
+        user = User(
+            username   = username,
+            email      = email,
+            ci         = ci,
+            first_name = first_name,
+            last_name  = last_name,
+            celular    = celular,
+            status     = status,
+            visibility = visibility,
+            is_active  = is_active,
+            is_staff   = is_staff,
+        )
         user.set_password(password)
         user.save()
-        return CreateUser(user=user)
+
+        if role_id:
+            real_role_id = get_db_id(role_id)
+            try:
+                group = Group.objects.get(pk=real_role_id)
+                user.groups.set([group])
+            except Group.DoesNotExist:
+                raise GraphQLError("Rol no encontrado.")
+
+        return CreateUser(user=user, plain_password=password)
 
 # ── Actualización ────────────────────────────────────────────────────────────
 class UpdateUser(graphene.Mutation):
