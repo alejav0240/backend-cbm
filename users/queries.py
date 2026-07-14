@@ -1,6 +1,7 @@
 import graphene
 from graphql import GraphQLError
 from django.contrib.auth.models import Group
+from django.db.models import Q
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
 from config.utils import login_required, staff_member_required, get_db_id, module_permission_required
@@ -11,6 +12,30 @@ class PaginatedUsers(graphene.ObjectType):
     total_count = graphene.Int()
     total_pages = graphene.Int()
     current_page = graphene.Int()
+
+
+class PaginatedRoles(graphene.ObjectType):
+    results = graphene.List(RoleType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class UserPatientSummaryType(graphene.ObjectType):
+    """Paciente resumido para el contexto de un usuario."""
+    id = graphene.ID()
+    database_id = graphene.Int()
+    full_name = graphene.String()
+    diagnosis = graphene.String()
+    status = graphene.String()
+    relation = graphene.String(description="'therapist' | 'tutor'")
+
+
+class UserWithPatientsType(graphene.ObjectType):
+    """Usuario con la lista de pacientes que le están asociados."""
+    user = graphene.Field(UserType)
+    patients = graphene.List(UserPatientSummaryType)
+    patients_count = graphene.Int()
 
 
 class Query(graphene.ObjectType):
@@ -25,7 +50,12 @@ class Query(graphene.ObjectType):
     )
     user = graphene.Field(UserType, id=graphene.ID(required=True))
 
-    roles = graphene.List(RoleType)
+    roles = graphene.Field(
+        PaginatedRoles,
+        search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+    )
     role = graphene.Field(RoleType, id=graphene.ID(required=True))
 
     notifications = graphene.List(
@@ -34,9 +64,26 @@ class Query(graphene.ObjectType):
     )
     unread_notifications_count = graphene.Int()
 
+    user_with_patients = graphene.Field(
+        UserWithPatientsType,
+        id=graphene.ID(required=True),
+        description="Devuelve el usuario con todos los pacientes asociados (como terapeuta o tutor).",
+    )
+
     @module_permission_required('roles', action='view')
-    def resolve_roles(root, info):
-        return Group.objects.all()
+    def resolve_roles(root, info, search=None, page=1, page_size=10):
+        qs = Group.objects.all()
+        if search:
+            qs = qs.filter(name__icontains=search)
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedRoles(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('roles', action='view')
     def resolve_role(root, info, id):
@@ -114,3 +161,66 @@ class Query(graphene.ObjectType):
     def resolve_unread_notifications_count(root, info):
         user = info.context.user
         return Notification.objects.filter(user=user, is_read=False).count()
+
+    # ── usuario con sus pacientes asociados ──────────────────────────────────
+    @module_permission_required('usuarios', action='view')
+    def resolve_user_with_patients(root, info, id):
+        from clinical.models import Patient
+        from therapeutic_sessions.models import Session
+
+        real_id = get_db_id(id)
+        try:
+            user = User.objects.get(pk=real_id)
+        except User.DoesNotExist:
+            raise GraphQLError(f"Usuario {real_id} no encontrado.")
+
+        seen_ids = {}  # patient_id → relation
+
+        # Pacientes donde es terapeuta (via sesiones)
+        therapist_patient_ids = (
+            Session.objects
+            .filter(therapist_id=real_id, patient__isnull=False)
+            .values_list("patient_id", flat=True)
+            .distinct()
+        )
+        for pid in therapist_patient_ids:
+            seen_ids[pid] = "therapist"
+
+        # Pacientes donde es tutor (relación directa)
+        tutor_patient_ids = (
+            Patient.objects
+            .filter(tutor_id=real_id)
+            .values_list("id", flat=True)
+        )
+        for pid in tutor_patient_ids:
+            if pid not in seen_ids:
+                seen_ids[pid] = "tutor"
+
+        if not seen_ids:
+            return UserWithPatientsType(user=user, patients=[], patients_count=0)
+
+        patients_qs = Patient.objects.filter(id__in=seen_ids.keys()).only(
+            "id", "first_name", "last_name", "diagnosis", "status"
+        )
+
+        patient_list = []
+        for p in patients_qs:
+            global_id = graphene.relay.Node.to_global_id("PatientType", p.pk)
+            patient_list.append(
+                UserPatientSummaryType(
+                    id=global_id,
+                    database_id=p.pk,
+                    full_name=f"{p.first_name} {p.last_name}",
+                    diagnosis=p.diagnosis,
+                    status=p.status,
+                    relation=seen_ids[p.pk],
+                )
+            )
+
+        patient_list.sort(key=lambda x: x.full_name)
+
+        return UserWithPatientsType(
+            user=user,
+            patients=patient_list,
+            patients_count=len(patient_list),
+        )
