@@ -21,6 +21,7 @@ class Query(graphene.ObjectType):
         patient_id=graphene.ID(),
         scale_id=graphene.ID(),
         in_session=graphene.Boolean(),
+        search=graphene.String(description="Busca por nombre del paciente o nombre de la escala."),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
     )
@@ -74,7 +75,8 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('evaluaciones', action='view')
     def resolve_scale_evaluations(self, info, patient_id=None, scale_id=None,
-                                   in_session=None, page=1, page_size=10):
+                                   in_session=None, search=None, page=1, page_size=10):
+        from django.db.models import Q
         qs = ScaleEvaluation.objects.select_related(
             "scale", "patient", "evaluator", "session"
         ).prefetch_related("subscale_responses", "value_responses")
@@ -86,6 +88,12 @@ class Query(graphene.ObjectType):
             qs = qs.exclude(session=None)
         elif in_session is False:
             qs = qs.filter(session=None)
+        if search:
+            qs = qs.filter(
+                Q(patient__first_name__icontains=search) |
+                Q(patient__last_name__icontains=search) |
+                Q(scale__name__icontains=search)
+            )
 
         total_count = qs.count()
         total_pages = max(1, (total_count + page_size - 1) // page_size)

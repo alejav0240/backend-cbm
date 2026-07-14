@@ -114,6 +114,7 @@ class Query(graphene.ObjectType):
         session_type=graphene.String(),
         payment_status=graphene.String(),
         session_status=graphene.String(),
+        search=graphene.String(description="Busca por nombre o apellido del paciente."),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
         by_cycles=graphene.Boolean(
@@ -176,7 +177,8 @@ class Query(graphene.ObjectType):
     @module_permission_required('sesiones', action='view')
     def resolve_sessions(self, info, patient_id=None, therapist_id=None,
                          session_type=None, payment_status=None, session_status=None,
-                         page=1, page_size=10, by_cycles=False):
+                         search=None, page=1, page_size=10, by_cycles=False):
+        from django.db.models import Q
         qs = Session.objects.select_related("patient", "therapist", "group").all()
         if patient_id:
             qs = qs.filter(patient_id=get_db_id(patient_id))
@@ -188,6 +190,11 @@ class Query(graphene.ObjectType):
             qs = qs.filter(payment_status=payment_status)
         if session_status:
             qs = qs.filter(session_status=session_status)
+        if search:
+            qs = qs.filter(
+                Q(patient__first_name__icontains=search) |
+                Q(patient__last_name__icontains=search)
+            )
 
         if by_cycles:
             # ── Paginación por ciclos: 1 ciclo por página, página 1 = más reciente ──

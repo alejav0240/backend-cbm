@@ -21,6 +21,7 @@ class Query(graphene.ObjectType):
         PaginatedExpenses,
         status=graphene.String(),
         category=graphene.String(),
+        search=graphene.String(description="Busca por descripción o categoría del gasto."),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
     )
@@ -80,12 +81,17 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Pago no encontrado")
 
     @module_permission_required('gastos', action='view')
-    def resolve_expenses(self, info, status=None, category=None, page=1, page_size=10):
+    def resolve_expenses(self, info, status=None, category=None, search=None, page=1, page_size=10):
         qs = Expense.objects.all()
         if status:
             qs = qs.filter(status=status)
         if category:
             qs = qs.filter(category__icontains=category)
+        if search:
+            qs = qs.filter(
+                Q(description__icontains=search) |
+                Q(category__icontains=search)
+            )
         total_count = qs.count()
         total_pages = max(1, (total_count + page_size - 1) // page_size)
         offset = (page - 1) * page_size
