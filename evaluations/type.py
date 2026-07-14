@@ -61,6 +61,27 @@ class PaginatedScaleEvaluations(graphene.ObjectType):
     current_page = graphene.Int()
 
 
+class PaginatedScales(graphene.ObjectType):
+    results = graphene.List(ScaleType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedForms(graphene.ObjectType):
+    results = graphene.List(lambda: FormType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedFormAssignments(graphene.ObjectType):
+    results = graphene.List(lambda: FormAssignmentType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
 class FormType(DjangoObjectType):
     class Meta:
         model = Form
