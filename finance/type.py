@@ -30,13 +30,6 @@ class PaymentType(DjangoObjectType):
         return float(self.debt)
 
 
-class PaginatedPaymentType(graphene.ObjectType):
-    objects = graphene.List(PaymentType)
-    total_count = graphene.Int()
-    total_pages = graphene.Int()
-    current_page = graphene.Int()
-
-
 class ExpenseType(DjangoObjectType):
     class Meta:
         model = Expense
@@ -78,3 +71,33 @@ class CoursePaymentType(DjangoObjectType):
             "payment_method", "amount",
             "payment_date", "payment_status",
         )
+
+
+# ── Tipos paginados ────────────────────────────────────────────────────────────
+
+class PaginatedPaymentType(graphene.ObjectType):
+    results = graphene.List(PaymentType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedExpenses(graphene.ObjectType):
+    results = graphene.List(ExpenseType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedCourses(graphene.ObjectType):
+    results = graphene.List(CourseType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()
+
+
+class PaginatedCourseEnrollments(graphene.ObjectType):
+    results = graphene.List(CourseEnrollmentType)
+    total_count = graphene.Int()
+    total_pages = graphene.Int()
+    current_page = graphene.Int()

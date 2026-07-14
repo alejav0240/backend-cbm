@@ -2,7 +2,7 @@ from django.db.models import Q
 import graphene
 from graphql import GraphQLError
 from finance.models import Discount, Payment, Expense, Course, CourseEnrollment
-from finance.type import DiscountType, PaymentType, ExpenseType, CourseType, CourseEnrollmentType, PaginatedPaymentType
+from finance.type import DiscountType, PaymentType, ExpenseType, CourseType, CourseEnrollmentType, PaginatedPaymentType, PaginatedExpenses, PaginatedCourses, PaginatedCourseEnrollments
 from config.utils import module_permission_required, get_db_id
 
 class Query(graphene.ObjectType):
@@ -17,18 +17,28 @@ class Query(graphene.ObjectType):
     )
     payment = graphene.Field(PaymentType, id=graphene.ID(required=True))
 
-    expenses = graphene.List(
-        ExpenseType,
+    expenses = graphene.Field(
+        PaginatedExpenses,
         status=graphene.String(),
         category=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
 
-    courses = graphene.List(CourseType, state=graphene.String())
+    courses = graphene.Field(
+        PaginatedCourses,
+        state=graphene.String(),
+        search=graphene.String(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
+    )
     course = graphene.Field(CourseType, id=graphene.ID(required=True))
 
-    course_enrollments = graphene.List(
-        CourseEnrollmentType,
+    course_enrollments = graphene.Field(
+        PaginatedCourseEnrollments,
         course_id=graphene.ID(),
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=10),
     )
 
     @module_permission_required('pagos', action='view')
@@ -55,7 +65,7 @@ class Query(graphene.ObjectType):
         objects = qs[offset:offset + page_size]
 
         return PaginatedPaymentType(
-            objects=objects,
+            results=objects,
             total_count=total_count,
             total_pages=total_pages,
             current_page=page,
@@ -70,20 +80,38 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Pago no encontrado")
 
     @module_permission_required('gastos', action='view')
-    def resolve_expenses(self, info, status=None, category=None):
+    def resolve_expenses(self, info, status=None, category=None, page=1, page_size=10):
         qs = Expense.objects.all()
         if status:
             qs = qs.filter(status=status)
         if category:
             qs = qs.filter(category__icontains=category)
-        return qs
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedExpenses(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('cursos', action='view')
-    def resolve_courses(self, info, state=None):
+    def resolve_courses(self, info, state=None, search=None, page=1, page_size=10):
         qs = Course.objects.prefetch_related("enrollments").all()
         if state:
             qs = qs.filter(state=state)
-        return qs
+        if search:
+            qs = qs.filter(name__icontains=search)
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedCourses(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
 
     @module_permission_required('cursos', action='view')
     def resolve_course(self, info, id):
@@ -94,9 +122,16 @@ class Query(graphene.ObjectType):
             raise GraphQLError("Curso no encontrado")
 
     @module_permission_required('cursos', action='view')
-    def resolve_course_enrollments(self, info, course_id=None):
+    def resolve_course_enrollments(self, info, course_id=None, page=1, page_size=10):
         qs = CourseEnrollment.objects.select_related("course").all()
         if course_id:
-            real_course_id = get_db_id(course_id)
-            qs = qs.filter(course_id=real_course_id)
-        return qs
+            qs = qs.filter(course_id=get_db_id(course_id))
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        return PaginatedCourseEnrollments(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )

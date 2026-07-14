@@ -362,6 +362,24 @@ class UpdateDiscount(graphene.Mutation):
         except Discount.DoesNotExist:
             raise GraphQLError("Descuento no encontrado")
 
+
+class DeleteDiscount(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    def mutate(self, info, id):
+        real_id = get_db_id(id)
+        try:
+            discount = Discount.objects.get(pk=real_id)
+            discount.delete()
+            return DeleteDiscount(success=True, message="Descuento eliminado correctamente")
+        except Discount.DoesNotExist:
+            return DeleteDiscount(success=False, message="Descuento no encontrado")
+
+
 class Mutation(graphene.ObjectType):
     create_payment = CreatePayment.Field()
     update_payment = UpdatePayment.Field()
@@ -375,3 +393,4 @@ class Mutation(graphene.ObjectType):
     delete_course = DeleteCourse.Field()
     create_discount = CreateDiscount.Field()
     update_discount = UpdateDiscount.Field()
+    delete_discount = DeleteDiscount.Field()
