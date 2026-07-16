@@ -24,11 +24,10 @@ django-storages
 # Utils
 django-filter
 django-extensions
-pillow
 
 # Production
-# gunicorn>=21.2
-# whitenoise>=6.6
+gunicorn>=21.2
+whitenoise>=6.6
 
 # Dev
 ipython

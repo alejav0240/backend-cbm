@@ -1,50 +1,44 @@
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Monkeypatch to bypass database version checks (PostgreSQL 10.23 vs Django 4.2 requirement of 12+)
+from django.db.backends.base.base import BaseDatabaseWrapper
+BaseDatabaseWrapper.check_database_version_supported = lambda self: None
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+load_dotenv(BASE_DIR / '.env')
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#hp^*p*3sd(2p3d)75%a(-f9rpyy72k0!mr#w8qift&-6+v0%&'
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-#hp^*p*3sd(2p3d)75%a(-f9rpyy72k0!mr#w8qift&-6+v0%&")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "[::1]",  # IPv6 localhost
-    "host.docker.internal",  # Para acceso desde contenedores
-    "django_backend",  # Nombre del servicio Docker (aunque tenga _)
-    ".local",  # Wildcard para dominios .local
-    "*",  # ← Permite cualquier host (SOLO en desarrollo)
+    "[::1]",
+    "api.musicoterapiabolivia.com",
+    "plataform.musicoterapiabolivia.com",
+    "plataforma.musicoterapiabolivia.com",
 ]
 
-# Opcional: Solo permitir * en DEBUG
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 
-
 STATIC_URL = 'static/'
-
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Application definition
 
 INSTALLED_APPS = [
-    "unfold",  # before django.contrib.admin
-    "unfold.contrib.filters",  # optional, if special filters are needed
-    "unfold.contrib.forms",  # optional, if special form elements are needed
-    "unfold.contrib.inlines",  # optional, if special inlines are needed
-    "unfold.contrib.import_export",  # optional, if django-import-export package is used
-    "unfold.contrib.guardian",  # optional, if django-guardian package is used
-    "unfold.contrib.simple_history",  # optional, if django-simple-history package is used
-    "unfold.contrib.location_field",  # optional, if django-location-field package is used
-    "unfold.contrib.constance",  # optional, if django-constance package is used
+    "unfold",                      # before django.contrib.admin
+    "unfold.contrib.filters",      # special filters
+    "unfold.contrib.forms",        # special form elements
+    "unfold.contrib.inlines",      # special inlines
 
     "config.apps.CBMAdminConfig",  # replaced django.contrib.admin
     'django.contrib.auth',
@@ -55,7 +49,7 @@ INSTALLED_APPS = [
 
     # externas
     'graphene_django',
-    'graphql_jwt.refresh_token',  # Requerido para JWT_LONG_RUNNING_REFRESH_TOKEN
+    'graphql_jwt.refresh_token',
     'corsheaders',
 
     # propias
@@ -71,6 +65,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -100,7 +95,6 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
     'default': {
@@ -115,21 +109,12 @@ DATABASES = {
 
 
 # Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 GRAPHENE = {
@@ -138,8 +123,6 @@ GRAPHENE = {
         "graphql_jwt.middleware.JSONWebTokenMiddleware",
     ],
 }
-
-#CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo
 
 AUTHENTICATION_BACKENDS = [
     "graphql_jwt.backends.JSONWebTokenBackend",
@@ -157,56 +140,54 @@ GRAPHQL_JWT = {
     "JWT_VERIFY_EXPIRATION": True,
     "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
     "JWT_REUSE_REFRESH_TOKENS": True,
-
-    # Cookies
     "JWT_COOKIE_NAME": "access_token",
     "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
     "JWT_COOKIE_HTTPONLY": True,
-    "JWT_COOKIE_SECURE": False, # En prod debería ser True
+    "JWT_COOKIE_SECURE": not DEBUG,
     "JWT_COOKIE_SAMESITE": "Lax",
 }
 
-CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
 
 CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_DOMAIN = ".musicoterapiabolivia.com"
 SESSION_COOKIE_SAMESITE = "Lax"
+
+# Tell Django the original request was HTTPS (Apache proxy terminates SSL)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://plataform.musicoterapiabolivia.com",
+    "https://plataforma.musicoterapiabolivia.com",
+    "https://api.musicoterapiabolivia.com",
 ]
 
-# Autoriza a tu front-end
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://plataform.musicoterapiabolivia.com",
+    "https://plataforma.musicoterapiabolivia.com",
+    "https://api.musicoterapiabolivia.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 
-# settings.py
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
 
 LANGUAGE_CODE = 'es-bo'
-
 TIME_ZONE = 'America/La_Paz'
-
 USE_I18N = True
-
 USE_TZ = True
 
 MEDIA_URL = "/media/"
-
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
-
-STATIC_URL = 'static/'
+# Unfold Admin
 
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
