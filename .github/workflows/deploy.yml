@@ -118,14 +118,28 @@ jobs:
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
 
     steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p 22 ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Test SSH connection
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'echo "SSH connection OK"'
+
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script_stop: true
           script: |
-            set -e
+            set -ex
 
             echo "Pulling latest code..."
             cd ~/cbm-backend
