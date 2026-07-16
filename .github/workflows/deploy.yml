@@ -1,0 +1,150 @@
+name: "CI/CD — Lint, Test, Security Scan & Deploy"
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: "Lint (py_compile)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax check all Python files
+        run: |
+          find . -name "*.py" -not -path "*/venv/*" -not -path "*/.git/*" \
+            -not -path "*/__pycache__/*" -exec python -m py_compile {} \;
+          echo "All Python files compile successfully"
+
+  test:
+    name: "Tests (Django)"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_cbm
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U test_user -d test_cbm"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      SECRET_KEY: ci-test-secret-key-not-for-production
+      DEBUG: "True"
+      POSTGRES_DB: test_cbm
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      FRONTEND_ORIGINS: http://localhost:3000
+      ALLOWED_HOSTS: localhost,127.0.0.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python manage.py test --verbosity=2
+
+  security-scan:
+    name: "Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - name: Scan — JSON
+        run: |
+          trivy fs --format json --output trivy-report.json \
+            --severity CRITICAL,HIGH,MEDIUM,LOW \
+            --scanners vuln,secret,misconfig --exit-code 0 .
+
+      - name: Scan — SARIF
+        run: |
+          trivy fs --format sarif --output trivy-report.sarif \
+            --severity CRITICAL,HIGH,MEDIUM,LOW \
+            --scanners vuln,secret,misconfig --exit-code 0 .
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: trivy-report.sarif
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-backend-reports
+          path: trivy-report.*
+          retention-days: 30
+
+  deploy:
+    name: "Deploy Backend"
+    runs-on: ubuntu-latest
+    needs: [lint, test, security-scan]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+
+            echo "Pulling latest code..."
+            cd ~/cbm-backend
+            git pull origin master
+
+            echo "Activating virtualenv..."
+            source venv/bin/activate
+
+            echo "Installing dependencies..."
+            pip install -r requirements.txt
+
+            echo "Running migrations..."
+            python manage.py migrate --noinput
+
+            echo "Collecting static files..."
+            python manage.py collectstatic --noinput
+
+            echo "Restarting PM2 process..."
+            pm2 restart cbm-backend
+            pm2 save
+
+            echo "Backend deployed successfully!"
