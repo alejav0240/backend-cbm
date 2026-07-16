@@ -131,14 +131,9 @@ jobs:
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'echo "SSH connection OK"'
 
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          script: |
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'DEPLOY_SCRIPT'
             set -ex
 
             echo "Pulling latest code..."
@@ -162,3 +157,4 @@ jobs:
             pm2 save
 
             echo "Backend deployed successfully!"
+          DEPLOY_SCRIPT
