@@ -38,7 +38,6 @@ INSTALLED_APPS = [
     "unfold",                      # before django.contrib.admin
     "unfold.contrib.filters",      # special filters
     "unfold.contrib.forms",        # special form elements
-    "unfold.contrib.inlines",      # special inlines
 
     "config.apps.CBMAdminConfig",  # replaced django.contrib.admin
     'django.contrib.auth',
