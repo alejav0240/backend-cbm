@@ -131,30 +131,19 @@ jobs:
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'echo "SSH connection OK"'
 
       - name: Deploy via SSH
+        env:
+          SSH_KEY: ~/.ssh/deploy_key
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'DEPLOY_SCRIPT'
+          ssh -i ${{ env.SSH_KEY }} -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash -s << 'DEPLOY_EOF'
             set -ex
-
-            echo "Pulling latest code..."
             cd ~/cbm-backend
             git pull origin master
-
-            echo "Activating virtualenv..."
             source venv/bin/activate
-
-            echo "Installing dependencies..."
             pip install -r requirements.txt
-
-            echo "Running migrations..."
             python manage.py migrate --noinput
-
-            echo "Collecting static files..."
             python manage.py collectstatic --noinput
-
-            echo "Restarting PM2 process..."
             pm2 restart cbm-backend
             pm2 save
-
             echo "Backend deployed successfully!"
-          DEPLOY_SCRIPT
+          DEPLOY_EOF
