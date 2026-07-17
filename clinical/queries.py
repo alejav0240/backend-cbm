@@ -69,6 +69,8 @@ class Query(graphene.ObjectType):
         qs = Patient.objects.select_related("tutor").all()
         if status:
             qs = qs.filter(status=status)
+        else:
+            qs = qs.exclude(status=Patient.Status.INACTIVE)
         if search:
             qs = qs.filter(first_name__icontains=search) \
                  | qs.filter(last_name__icontains=search) \
@@ -92,7 +94,9 @@ class Query(graphene.ObjectType):
     def resolve_patient(self, info, id):
         real_id = get_db_id(id)
         try:
-            return Patient.objects.select_related("tutor").get(pk=real_id)
+            return Patient.objects.select_related("tutor").exclude(
+                status=Patient.Status.INACTIVE
+            ).get(pk=real_id)
         except (Patient.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Paciente con ID {real_id} no encontrado")
 
@@ -106,7 +110,9 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('planes', action='view')
     def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
-        qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").all()
+        qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").exclude(
+            patient__status=Patient.Status.INACTIVE
+        )
         if patient_id:
             real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
@@ -142,7 +148,9 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('informes', action='view')
     def resolve_therapy_reports(self, info, patient_id=None):
-        qs = TherapyReport.objects.select_related("patient", "generated_by").all()
+        qs = TherapyReport.objects.select_related("patient", "generated_by").exclude(
+            patient__status=Patient.Status.INACTIVE
+        )
         if patient_id:
             real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
@@ -175,7 +183,9 @@ class Query(graphene.ObjectType):
             last_6_months[month_dt.strftime('%b')] = 0
 
         data = (
-            Patient.objects.filter(created_at__gte=timezone.now() - relativedelta(months=6))
+            Patient.objects.filter(
+                created_at__gte=timezone.now() - relativedelta(months=6)
+            ).exclude(status=Patient.Status.INACTIVE)
             .annotate(month_date=TruncMonth('created_at'))
             .values('month_date')
             .annotate(total=Count('id'))

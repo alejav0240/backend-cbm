@@ -400,8 +400,9 @@ class DeletePatient(graphene.Mutation):
         real_id = get_db_id(id)
         try:
             patient = Patient.objects.get(pk=real_id)
-            patient.delete()
-            return DeletePatient(success=True, message="Paciente eliminado correctamente")
+            patient.status = Patient.Status.INACTIVE
+            patient.save(update_fields=['status'])
+            return DeletePatient(success=True, message="Paciente desactivado correctamente")
         except Patient.DoesNotExist:
             return DeletePatient(success=False, message="El paciente no existe")
         except Exception as e:
