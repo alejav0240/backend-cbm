@@ -73,8 +73,8 @@ class SessionImporter(BaseImporter):
         if not payment:
             return 'no_payment'
 
-        session_date = self._to_date(row[5]) or timezone.now().date()
-        session_datetime = timezone.make_aware(datetime.combine(session_date, time(12, 0)))
+        raw_date = self._to_date(row[5])
+        session_datetime = timezone.make_aware(datetime.combine(raw_date, time(12, 0))) if raw_date else None
         session_number = self._to_int(row[3], 0)
         raw_cycle = self._to_int(row[2])
         cycle_number = raw_cycle if raw_cycle is not None and raw_cycle > 0 else None
@@ -171,10 +171,10 @@ class SessionImporter(BaseImporter):
             return Session.SessionStatus.AGENDADA
         
         mapping = {
-            "REALIZADO": Session.SessionStatus.COMPLETADA,
-            "CONFIRMADO": Session.SessionStatus.CONFIRMADA,
+            "REALIZADO":    Session.SessionStatus.COMPLETADA,
+            "CONFIRMADO":   Session.SessionStatus.CONFIRMADA,
             "REPROGRAMADO": Session.SessionStatus.REPROGRAMA,
-            "CANCELADO": Session.SessionStatus.CANCELADA,
+            "CANCELADO":    Session.SessionStatus.CANCELADA,
         }
         return mapping.get(value, Session.SessionStatus.COMPLETADA)
 

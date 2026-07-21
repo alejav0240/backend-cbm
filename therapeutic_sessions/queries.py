@@ -111,21 +111,29 @@ class Query(graphene.ObjectType):
         PaginatedSessions,
         patient_id=graphene.ID(),
         therapist_id=graphene.ID(),
-        session_type=graphene.String(),
-        payment_status=graphene.String(),
-        session_status=graphene.String(),
+        session_type=graphene.String(description="individual | group"),
+        payment_status=graphene.String(description="paid | pending | exempt"),
+        session_status=graphene.String(description="completa | confirma | agendada | reprograma | cancelada"),
+        date_from=graphene.Date(description="Filtra sesiones con fecha >= date_from (YYYY-MM-DD)."),
+        date_to=graphene.Date(description="Filtra sesiones con fecha <= date_to (YYYY-MM-DD)."),
+        include_no_date=graphene.Boolean(
+            default_value=True,
+            description="Si True incluye sesiones sin fecha (agendadas sin asignar). Solo aplica cuando se usa date_from/date_to.",
+        ),
         search=graphene.String(description="Busca por nombre o apellido del paciente."),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
         by_cycles=graphene.Boolean(
             default_value=False,
-            description="False → paginación normal de sesiones. True → paginación por ciclos (devuelve PaginatedCycles).",
+            description="False → paginación normal de sesiones. True → paginación por ciclos.",
         ),
     )
     paginated_cycles = graphene.Field(
         PaginatedCycles,
         patient_id=graphene.ID(),
         therapist_id=graphene.ID(),
+        date_from=graphene.Date(description="Filtra ciclos con sesiones >= date_from."),
+        date_to=graphene.Date(description="Filtra ciclos con sesiones <= date_to."),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
         description="Paginación por ciclos. Disponible también desde `sessions(byCycles: true)`.",
@@ -177,9 +185,13 @@ class Query(graphene.ObjectType):
     @module_permission_required('sesiones', action='view')
     def resolve_sessions(self, info, patient_id=None, therapist_id=None,
                          session_type=None, payment_status=None, session_status=None,
+                         date_from=None, date_to=None, include_no_date=True,
                          search=None, page=1, page_size=10, by_cycles=False):
         from django.db.models import Q
+        from django.utils import timezone
+
         qs = Session.objects.select_related("patient", "therapist", "group").all()
+
         if patient_id:
             qs = qs.filter(patient_id=get_db_id(patient_id))
         if therapist_id:
@@ -195,6 +207,20 @@ class Query(graphene.ObjectType):
                 Q(patient__first_name__icontains=search) |
                 Q(patient__last_name__icontains=search)
             )
+
+        # ── Filtro de fechas ──────────────────────────────────────────────
+        if date_from or date_to:
+            date_filter = Q()
+            if date_from:
+                date_filter &= Q(session_date__date__gte=date_from)
+            if date_to:
+                date_filter &= Q(session_date__date__lte=date_to)
+
+            if include_no_date:
+                # Incluye también sesiones sin fecha (agendadas sin asignar)
+                qs = qs.filter(date_filter | Q(session_date__isnull=True))
+            else:
+                qs = qs.filter(date_filter)
 
         if by_cycles:
             # ── Paginación por ciclos: 1 ciclo por página, página 1 = más reciente ──
@@ -228,7 +254,10 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('sesiones', action='view')
     def resolve_paginated_cycles(self, info, patient_id=None, therapist_id=None,
+                                 date_from=None, date_to=None,
                                  page=1, page_size=10):
+        from django.db.models import Q
+
         qs = Session.objects.select_related("patient", "therapist", "group").filter(
             cycle_number__isnull=False
         )
@@ -236,11 +265,18 @@ class Query(graphene.ObjectType):
             qs = qs.filter(patient_id=get_db_id(patient_id))
         if therapist_id:
             qs = qs.filter(therapist_id=get_db_id(therapist_id))
+        if date_from or date_to:
+            date_filter = Q()
+            if date_from:
+                date_filter &= Q(session_date__date__gte=date_from)
+            if date_to:
+                date_filter &= Q(session_date__date__lte=date_to)
+            qs = qs.filter(date_filter | Q(session_date__isnull=True))
 
         all_cycles = _build_cycles(qs)
         total_count = len(all_cycles)
-        total_pages = total_count  # cada ciclo es una página
-        offset = page - 1         # page_size=1 fijo
+        total_pages = total_count
+        offset = page - 1
         page_cycles = all_cycles[offset:offset + 1]
 
         return PaginatedCycles(

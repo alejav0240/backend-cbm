@@ -32,3 +32,13 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notificación para {self.user} — {'leída' if self.is_read else 'no leída'}"
+
+
+class Setting(models.Model):
+    class Meta:
+        db_table = "settings"
+        verbose_name = "Ajuste"
+        verbose_name_plural = "Ajustes"
+
+    def __str__(self):
+        return f"Ajuste #{self.pk}"

@@ -89,7 +89,7 @@ class Session(models.Model):
         related_name="therapeutic_sessions",
     )
 
-    session_date = models.DateTimeField()
+    session_date = models.DateTimeField(null=True, blank=True)
     session_type = models.CharField(max_length=20, choices=SessionType.choices)
     session_status = models.CharField(max_length=20, choices=SessionStatus.choices, default=SessionStatus.COMPLETADA)
     session_number = models.IntegerField(default=0)
