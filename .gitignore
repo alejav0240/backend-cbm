@@ -3,6 +3,8 @@ __init__.py
 .env
 __pycache__
 migrations
+!onedrive/migrations/
+!onedrive/migrations/__init__.py
 .venv
 .vscode
 .idea
