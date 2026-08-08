@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     'finance',
     'marketing',
     'evaluations',
+    'onedrive',
 ]
 
 MIDDLEWARE = [
@@ -185,6 +186,10 @@ USE_TZ = True
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+# OneDrive (delegated OAuth a OneDrive personal)
+ONEDRIVE_SERVICE_KEY = os.getenv("ONEDRIVE_SERVICE_KEY", "")
+ONEDRIVE_TOKEN_ENCRYPTION_KEY = os.getenv("ONEDRIVE_TOKEN_ENCRYPTION_KEY", "")
 
 # Unfold Admin
 

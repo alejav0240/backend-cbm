@@ -21,6 +21,9 @@ python-dotenv
 Pillow
 django-storages
 
+# OneDrive token encryption
+cryptography
+
 # Utils
 django-filter
 django-extensions
