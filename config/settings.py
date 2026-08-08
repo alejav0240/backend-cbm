@@ -151,7 +151,7 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 
 CSRF_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_DOMAIN = ".musicoterapiabolivia.com"
+CSRF_COOKIE_DOMAIN = os.getenv("CSRF_COOKIE_DOMAIN", ".musicoterapiabolivia.com") or None
 SESSION_COOKIE_SAMESITE = "Lax"
 
 # Tell Django the original request was HTTPS (Apache proxy terminates SSL)
