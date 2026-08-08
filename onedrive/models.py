@@ -45,14 +45,17 @@ class OneDriveConnection(models.Model):
 
     def save_refresh_token(self, token: str) -> None:
         self.refresh_token_encrypted = encrypt_token(token)
-        self.save(
-            update_fields=[
-                "refresh_token_encrypted",
-                "user_email",
-                "is_active",
-                "updated_at",
-            ]
-        )
+        if self.pk:
+            self.save(
+                update_fields=[
+                    "refresh_token_encrypted",
+                    "user_email",
+                    "is_active",
+                    "updated_at",
+                ]
+            )
+        else:
+            self.save()
 
     @classmethod
     def get_active(cls) -> "OneDriveConnection | None":
