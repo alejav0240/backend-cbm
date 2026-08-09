@@ -86,4 +86,4 @@ class UserType(DjangoObjectType):
 class NotificationType(DjangoObjectType):
     class Meta:
         model = Notification
-        fields = ("id", "user", "message", "is_read", "created_at")
+        fields = ("id", "user", "message", "tipo", "metadatos", "is_read", "created_at")
