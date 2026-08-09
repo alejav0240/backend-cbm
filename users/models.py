@@ -23,6 +23,8 @@ class User(AbstractUser):
 class Notification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     message = models.TextField()
+    tipo = models.CharField(max_length=50, default="info")
+    metadatos = models.JSONField(default=dict, blank=True)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

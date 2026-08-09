@@ -95,6 +95,7 @@ class SessionType(DjangoObjectType):
             "session_date", "session_type",
             "duration_minutes", "cycle_number",
             "notes", "video_url",
+            "video_status",
             "payment_status", "created_at", "updated_at",
             "session_resources", "session_inventory",
             "session_status", "session_number",

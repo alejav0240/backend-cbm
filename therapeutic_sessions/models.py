@@ -74,6 +74,11 @@ class Session(models.Model):
         REPROGRAMA = "reprograma", "Reprograma"
         CANCELADA = "cancelada", "Cancelada"
 
+    class VideoStatus(models.TextChoices):
+        SUBIENDO = "subiendo", "Subiendo"
+        SUBIDO = "subido", "Subido"
+        FALLO = "fallo", "Fallo"
+
     patient = models.ForeignKey(
         Patient,
         on_delete=models.SET_NULL,
@@ -97,6 +102,16 @@ class Session(models.Model):
     cycle_number = models.PositiveIntegerField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     video_url = models.URLField(blank=True, null=True)
+    video_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("subiendo", "Subiendo"),
+            ("subido", "Subido"),
+            ("fallo", "Fallo"),
+        ],
+        blank=True,
+        default="",
+    )
     payment_status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
     )
