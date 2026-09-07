@@ -1,0 +1,35 @@
+# Entornos virtuales (se instalan en la imagen)
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# IDEs
+.idea/
+.vscode/
+.devcontainer/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Base de datos local
+db.sqlite3
+
+# Media y estáticos locales
+media/
+staticfiles/
+
+# Logs y temporales
+*.log
+cookies.txt
+
+# Docs (no necesarias en la imagen)
+docs/
+
+# Antigravity CLI
+.antigravitycli/

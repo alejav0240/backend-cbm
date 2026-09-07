@@ -15,10 +15,11 @@ class CreateBlogPost(graphene.Mutation):
         image_url = graphene.String()
         read_time = graphene.String()
         status = graphene.String()
+        type = graphene.String()
 
     post = graphene.Field(BlogPostType)
 
-    def mutate(self, info, title, content, category, author, excerpt=None, image_url=None, read_time=None, status="draft"):
+    def mutate(self, info, title, content, category, author, excerpt=None, image_url=None, read_time=None, status="draft", type="MARKDOWN"):
         post = BlogPost.objects.create(
             title=title,
             excerpt=excerpt,
@@ -27,7 +28,8 @@ class CreateBlogPost(graphene.Mutation):
             author=author,
             image_url=image_url,
             read_time=read_time,
-            status=status
+            status=status,
+            type=(type or "MARKDOWN").upper()
         )
         return CreateBlogPost(post=post)
 
@@ -42,6 +44,7 @@ class UpdateBlogPost(graphene.Mutation):
         image_url = graphene.String()
         read_time = graphene.String()
         status = graphene.String()
+        type = graphene.String()
 
     post = graphene.Field(BlogPostType)
 
@@ -49,6 +52,8 @@ class UpdateBlogPost(graphene.Mutation):
         real_id = get_db_id(id)
         try:
             post = BlogPost.objects.get(pk=real_id)
+            if "type" in kwargs and kwargs["type"]:
+                kwargs["type"] = kwargs["type"].upper()
             for key, value in kwargs.items():
                 setattr(post, key, value)
             post.save()

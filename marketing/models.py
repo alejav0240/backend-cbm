@@ -6,6 +6,10 @@ class BlogPost(models.Model):
         DRAFT = "draft", "Borrador"
         PUBLISHED = "published", "Publicado"
 
+    class PostType(models.TextChoices):
+        MARKDOWN = "MARKDOWN", "Markdown"
+        LATEX = "LATEX", "LaTeX"
+
     title = models.CharField(max_length=255)
     excerpt = models.TextField(blank=True, null=True)
     content = models.TextField()
@@ -14,6 +18,7 @@ class BlogPost(models.Model):
     image_url = models.CharField(max_length=500, blank=True, null=True)
     read_time = models.CharField(max_length=50, blank=True, null=True)
     status = models.CharField(max_length=20, choices=PostStatus.choices, default=PostStatus.PUBLISHED)
+    type = models.CharField(max_length=20, choices=PostType.choices, default=PostType.MARKDOWN)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
