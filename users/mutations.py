@@ -9,6 +9,8 @@ from django.db import transaction
 from .models import User, Notification
 from .types import UserType, NotificationType, RoleType
 from .permissions_map import get_permissions_for_modules
+from .emails import send_welcome_credentials_email
+from .utils import generate_unique_username
 from config.utils import get_db_id
 
 
@@ -77,13 +79,13 @@ class DeleteRole(graphene.Mutation):
 # ── Registro ────────────────────────────────────────────────────────────────
 class CreateUser(graphene.Mutation):
     user = graphene.Field(UserType)
-    plain_password = graphene.String(description="Contraseña en texto plano, solo disponible al momento de la creación.")
+    email_sent = graphene.Boolean(description="Indica si el correo con las credenciales fue enviado exitosamente.")
 
     class Arguments:
-        username   = graphene.String(required=True)
+        username   = graphene.String(required=False, description="Nombre de usuario. Si se omite o está vacío, se genera automáticamente.")
         password   = graphene.String(required=True)
         ci         = graphene.String(required=True)
-        email      = graphene.String()
+        email      = graphene.String(required=True)
         first_name = graphene.String()
         last_name  = graphene.String()
         celular    = graphene.String()
@@ -93,14 +95,22 @@ class CreateUser(graphene.Mutation):
         is_staff   = graphene.Boolean()
         role_id    = graphene.ID(description="ID del grupo/rol a asignar al usuario.")
 
-    def mutate(self, info, username, password, ci,
-               email=None, first_name="", last_name="",
+    def mutate(self, info, password, ci, email, username=None,
+               first_name="", last_name="",
                celular="", status="active", visibility="public",
                is_active=True, is_staff=False, role_id=None):
 
-        if User.objects.filter(username=username).exists():
+        username = (username or "").strip()
+        email = (email or "").strip().lower()
+
+        if not email:
+            raise GraphQLError("El correo electrónico es requerido.")
+
+        if not username:
+            username = generate_unique_username(first_name, last_name)
+        elif User.objects.filter(username=username).exists():
             raise GraphQLError("El nombre de usuario ya está en uso.")
-        if email and User.objects.filter(email=email).exists():
+        if User.objects.filter(email=email).exists():
             raise GraphQLError("El correo ya está registrado.")
         if User.objects.filter(ci=ci).exists():
             raise GraphQLError("El CI ya está registrado.")
@@ -128,7 +138,9 @@ class CreateUser(graphene.Mutation):
             except Group.DoesNotExist:
                 raise GraphQLError("Rol no encontrado.")
 
-        return CreateUser(user=user, plain_password=password)
+        email_sent = send_welcome_credentials_email(user, plain_password=password)
+
+        return CreateUser(user=user, email_sent=email_sent)
 
 # ── Actualización ────────────────────────────────────────────────────────────
 class UpdateUser(graphene.Mutation):
@@ -163,6 +175,15 @@ class UpdateUser(graphene.Mutation):
         # Solo staff puede cambiar is_active
         if "is_active" in kwargs and not current_user.is_staff:
             raise GraphQLError("No autorizado para cambiar el estado activo.")
+
+        if "email" in kwargs:
+            new_email = (kwargs["email"] or "").strip().lower()
+            if new_email:
+                if User.objects.filter(email=new_email).exclude(pk=user.pk).exists():
+                    raise GraphQLError("El correo ya está registrado por otro usuario.")
+                kwargs["email"] = new_email
+            else:
+                kwargs["email"] = None
 
         for field, value in kwargs.items():
             setattr(user, field, value)

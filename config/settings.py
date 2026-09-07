@@ -162,6 +162,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
     "https://plataform.musicoterapiabolivia.com",
     "https://plataforma.musicoterapiabolivia.com",
     "https://api.musicoterapiabolivia.com",
@@ -170,6 +172,8 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
     "https://plataform.musicoterapiabolivia.com",
     "https://plataforma.musicoterapiabolivia.com",
     "https://api.musicoterapiabolivia.com",
@@ -374,3 +378,24 @@ UNFOLD = {
         ],
     },
 }
+
+# -----------------------------------------------------------------------------
+# EMAIL CONFIGURATION (SMTP)
+# -----------------------------------------------------------------------------
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "mailpit" if DEBUG else "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 1025 if DEBUG else 587))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "False" if DEBUG else "True").lower() in ("true", "1")
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ("true", "1")
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", 10))
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "Centro Boliviano de Musicoterapia <soporte@musicoterapiabolivia.com>"
+)
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL",
+    "http://localhost:3000" if DEBUG else "https://plataform.musicoterapiabolivia.com"
+)
+

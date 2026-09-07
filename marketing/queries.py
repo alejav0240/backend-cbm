@@ -11,6 +11,7 @@ class Query(graphene.ObjectType):
         PaginatedBlogPosts,
         status=graphene.String(),
         search=graphene.String(),
+        type=graphene.String(),
         page=graphene.Int(default_value=1),
         page_size=graphene.Int(default_value=10),
     )
@@ -36,12 +37,14 @@ class Query(graphene.ObjectType):
     lead = graphene.Field(LeadType, id=graphene.ID(required=True))
 
     @module_permission_required('blog', action='view')
-    def resolve_blog_posts(self, info, status=None, search=None, page=1, page_size=10):
+    def resolve_blog_posts(self, info, status=None, search=None, type=None, page=1, page_size=10):
         qs = BlogPost.objects.all()
         if status:
             qs = qs.filter(status=status)
         if search:
             qs = qs.filter(title__icontains=search)
+        if type:
+            qs = qs.filter(type__iexact=type)
         total_count = qs.count()
         total_pages = max(1, (total_count + page_size - 1) // page_size)
         offset = (page - 1) * page_size

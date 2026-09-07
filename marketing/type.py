@@ -9,7 +9,7 @@ class BlogPostType(DjangoObjectType):
         model = BlogPost
         fields = (
             "id", "title", "excerpt", "content", "category",
-            "author", "image_url", "read_time", "status",
+            "author", "image_url", "read_time", "status", "type",
             "created_at", "updated_at"
         )
 
