@@ -190,7 +190,7 @@ class Query(graphene.ObjectType):
         from django.db.models import Q
         from django.utils import timezone
 
-        qs = Session.objects.select_related("patient", "therapist", "group").all()
+        qs = Session.objects.select_related("patient", "therapist", "group").order_by("-pk")
 
         if patient_id:
             qs = qs.filter(patient_id=get_db_id(patient_id))
@@ -201,11 +201,14 @@ class Query(graphene.ObjectType):
         if payment_status:
             qs = qs.filter(payment_status=payment_status)
         if session_status:
-            qs = qs.filter(session_status=session_status)
+            # Acepta registros antiguos guardados en mayúsculas.
+            qs = qs.filter(session_status__iexact=session_status)
         if search:
             qs = qs.filter(
                 Q(patient__first_name__icontains=search) |
-                Q(patient__last_name__icontains=search)
+                Q(patient__last_name__icontains=search) |
+                Q(therapist__first_name__icontains=search) |
+                Q(therapist__last_name__icontains=search)
             )
 
         # ── Filtro de fechas ──────────────────────────────────────────────
