@@ -1,5 +1,7 @@
 import json
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from graphene_django.utils.testing import GraphQLTestCase
 from config.schema import schema
 from institutions.models import Institution, InstitutionGroup
@@ -7,6 +9,20 @@ from institutions.models import Institution, InstitutionGroup
 class InstitutionTests(GraphQLTestCase):
     GRAPHQL_SCHEMA = schema
     GRAPHQL_URL = "/graphql/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="institution_user",
+            email="institution@cbm.com",
+            password="pass",
+            ci="44444444",
+        )
+        self.user.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="institutions",
+            content_type__model="institution",
+            codename__in=("add_institution", "view_institution"),
+        ))
+        self.client.force_login(self.user)
 
     def test_create_institution(self):
         """Prueba la creación de una institución y el mapeo del campo phone"""
@@ -63,11 +79,11 @@ class InstitutionTests(GraphQLTestCase):
         query = """
             query {
                 institutions {
-                    name
+                    results { name }
                 }
             }
         """
         response = self.query(query)
         self.assertResponseNoErrors(response)
         content = json.loads(response.content)
-        self.assertTrue(len(content["data"]["institutions"]) >= 1)
+        self.assertTrue(len(content["data"]["institutions"]["results"]) >= 1)

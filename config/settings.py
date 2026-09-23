@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
 
 # Monkeypatch to bypass database version checks (PostgreSQL 10.23 vs Django 4.2 requirement of 12+)
@@ -62,6 +63,26 @@ INSTALLED_APPS = [
     'onedrive',
     'uploads',
 ]
+
+# Algunas apps de dominio todavía no tienen migraciones propias. Durante los
+# tests deben sincronizarse junto con `users` para que sus FK se creen después
+# de la tabla de usuarios y no fallen al construir la base de pruebas.
+if "test" in sys.argv:
+    MIGRATION_MODULES = {
+        app: None
+        for app in (
+            "contenttypes",
+            "auth",
+            "users",
+            "institutions",
+            "clinical",
+            "evaluations",
+            "finance",
+            "marketing",
+            "uploads",
+            "therapeutic_sessions",
+        )
+    }
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -398,4 +419,3 @@ FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
     "http://localhost:3000" if DEBUG else "https://plataform.musicoterapiabolivia.com"
 )
-

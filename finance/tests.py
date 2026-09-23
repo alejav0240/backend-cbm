@@ -1,17 +1,42 @@
 import json
 from decimal import Decimal
+from django.utils import timezone
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from graphene_django.utils.testing import GraphQLTestCase
 from config.schema import schema
 from clinical.models import Patient
 from finance.models import Discount, Payment
+from therapeutic_sessions.models import Session
 
 class FinanceMutationTests(GraphQLTestCase):
     GRAPHQL_SCHEMA = schema
     GRAPHQL_URL = "/graphql/"
 
     def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="finance_user",
+            email="finance@cbm.com",
+            password="pass",
+            ci="66666666",
+        )
+        self.user.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="finance",
+            content_type__model="payment",
+            codename__in=("add_payment", "view_payment"),
+        ))
+        self.client.force_login(self.user)
         self.patient = Patient.objects.create(first_name="Leo", last_name="Finance")
+        Session.objects.create(
+            patient=self.patient,
+            therapist=self.user,
+            session_type="individual",
+            session_date=timezone.now(),
+            session_number=1,
+            cycle_number=1,
+            payment_status="pending",
+        )
         self.discount_pct = Discount.objects.create(
             name="Promo 10%",
             type="percentage",
@@ -79,8 +104,10 @@ class FinanceMutationTests(GraphQLTestCase):
         query = """
             query {
                 payments {
-                    paymentStatus
-                    patient { firstName }
+                    results {
+                        paymentStatus
+                        patient { firstName }
+                    }
                 }
             }
         """
@@ -88,5 +115,5 @@ class FinanceMutationTests(GraphQLTestCase):
         self.assertResponseNoErrors(response)
         
         content = json.loads(response.content)
-        self.assertTrue(len(content["data"]["payments"]) > 0)
-        self.assertEqual(content["data"]["payments"][0]["patient"]["firstName"], "Leo")
+        self.assertTrue(len(content["data"]["payments"]["results"]) > 0)
+        self.assertEqual(content["data"]["payments"]["results"][0]["patient"]["firstName"], "Leo")

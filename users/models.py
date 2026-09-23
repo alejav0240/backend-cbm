@@ -36,6 +36,31 @@ class Notification(models.Model):
         return f"Notificación para {self.user} — {'leída' if self.is_read else 'no leída'}"
 
 
+class OnboardingView(models.Model):
+    """Registro persistente de vistas de onboarding completadas por usuario."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="onboarding_views",
+    )
+    view_key = models.CharField(max_length=255)
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "onboarding_views"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "view_key"],
+                name="unique_user_onboarding_view",
+            ),
+        ]
+        ordering = ["view_key"]
+
+    def __str__(self):
+        return f"{self.user_id} — {self.view_key}"
+
+
 class Setting(models.Model):
     class Meta:
         db_table = "settings"

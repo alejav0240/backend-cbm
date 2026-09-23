@@ -1,6 +1,8 @@
 import json
 from decimal import Decimal
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from graphene_django.utils.testing import GraphQLTestCase
 from config.schema import schema
 from marketing.models import MarketingCampaign, Lead
@@ -10,6 +12,18 @@ class MarketingTests(GraphQLTestCase):
     GRAPHQL_URL = "/graphql/"
 
     def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="marketing_user",
+            email="marketing@cbm.com",
+            password="pass",
+            ci="55555555",
+        )
+        self.user.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="marketing",
+            content_type__model="marketingcampaign",
+            codename="view_marketingcampaign",
+        ))
+        self.client.force_login(self.user)
         self.campaign = MarketingCampaign.objects.create(
             name="Facebook Ads Q1",
             platform="Facebook",

@@ -83,3 +83,32 @@ def module_permission_required(module_name, action='view'):
             raise GraphQLError(f"No tienes permiso para realizar la acción '{action}' en el módulo {module_name}.")
         return wrapper
     return decorator
+
+
+def user_can_access_patient(user, patient_id):
+    """Return whether a non-admin user is linked to a patient clinically."""
+    if user.is_staff or user.is_superuser:
+        return True
+
+    from clinical.models import PatientClinicalNote
+    from therapeutic_sessions.models import Session
+
+    return Session.objects.filter(
+        patient_id=patient_id,
+        therapist_id=user.pk,
+    ).exists() or PatientClinicalNote.objects.filter(
+        patient_id=patient_id,
+        author_id=user.pk,
+    ).exists()
+
+
+def user_can_access_session(user, session_id):
+    if user.is_staff or user.is_superuser:
+        return True
+
+    from therapeutic_sessions.models import Session
+
+    return Session.objects.filter(
+        pk=session_id,
+        therapist_id=user.pk,
+    ).exists()

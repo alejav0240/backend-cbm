@@ -3,7 +3,11 @@ from graphql import GraphQLError
 
 from evaluations.models import Scale, ScaleEvaluation, Form, FormAssignment
 from evaluations.type import ScaleType, ScaleEvaluationType, FormType, FormAssignmentType, PaginatedScaleEvaluations, PaginatedScales, PaginatedForms, PaginatedFormAssignments
-from config.utils import module_permission_required, get_db_id
+from config.utils import (
+    module_permission_required,
+    get_db_id,
+    user_can_access_patient,
+)
 
 
 class Query(graphene.ObjectType):
@@ -80,6 +84,12 @@ class Query(graphene.ObjectType):
         qs = ScaleEvaluation.objects.select_related(
             "scale", "patient", "evaluator", "session"
         ).prefetch_related("subscale_responses", "value_responses")
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(
+                Q(evaluator=info.context.user)
+                | Q(session__therapist=info.context.user)
+                | Q(patient__clinical_notes__author=info.context.user)
+            ).distinct()
         if patient_id:
             qs = qs.filter(patient_id=get_db_id(patient_id))
         if scale_id:
@@ -148,6 +158,13 @@ class Query(graphene.ObjectType):
         qs = FormAssignment.objects.select_related(
             "form", "assigned_to", "assigned_by", "patient", "session"
         ).prefetch_related("responses")
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(
+                Q(assigned_by=info.context.user)
+                | Q(assigned_to=info.context.user)
+                | Q(session__therapist=info.context.user)
+                | Q(patient__clinical_notes__author=info.context.user)
+            ).distinct()
         if assigned_to_id:
             qs = qs.filter(assigned_to_id=get_db_id(assigned_to_id))
         if patient_id:
@@ -170,6 +187,22 @@ class Query(graphene.ObjectType):
     def resolve_form_assignment(self, info, id):
         real_id = get_db_id(id)
         try:
-            return FormAssignment.objects.prefetch_related("responses__question").get(pk=real_id)
+            assignment = FormAssignment.objects.prefetch_related("responses__question").get(pk=real_id)
+            if not (
+                info.context.user.is_staff
+                or info.context.user.is_superuser
+                or assignment.assigned_by_id == info.context.user.pk
+                or assignment.assigned_to_id == info.context.user.pk
+                or (
+                    assignment.session_id
+                    and assignment.session.therapist_id == info.context.user.pk
+                )
+                or (
+                    assignment.patient_id
+                    and user_can_access_patient(info.context.user, assignment.patient_id)
+                )
+            ):
+                raise GraphQLError("No autorizado.")
+            return assignment
         except FormAssignment.DoesNotExist:
             raise GraphQLError("Asignación de formulario no encontrada")
