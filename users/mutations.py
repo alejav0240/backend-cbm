@@ -6,8 +6,8 @@ from graphql import GraphQLError
 from django.contrib.auth.models import Group
 from django.db import transaction
 
-from .models import User, Notification
-from .types import UserType, NotificationType, RoleType
+from .models import User, Notification, OnboardingView
+from .types import UserType, NotificationType, RoleType, OnboardingViewType
 from .permissions_map import get_permissions_for_modules
 from .emails import send_welcome_credentials_email
 from .utils import generate_unique_username
@@ -226,6 +226,26 @@ class MarkNotificationRead(graphene.Mutation):
         return MarkNotificationRead(notification=notif)
 
 
+class MarkOnboardingViewSeen(graphene.Mutation):
+    """Marca de forma idempotente una vista como presentada al usuario."""
+
+    onboarding_view = graphene.Field(OnboardingViewType)
+
+    class Arguments:
+        view_key = graphene.String(required=True)
+
+    def mutate(self, info, view_key):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("No autenticado.")
+
+        onboarding_view, _ = OnboardingView.objects.get_or_create(
+            user=user,
+            view_key=view_key,
+        )
+        return MarkOnboardingViewSeen(onboarding_view=onboarding_view)
+
+
 # ── Auth (JWT Nativo con Cookies) ─────────────────────────────────────────────
 
 class ObtainToken(graphql_jwt.JSONWebTokenMutation):
@@ -252,6 +272,7 @@ class Mutation(graphene.ObjectType):
     update_user = UpdateUser.Field()
     change_password = ChangePassword.Field()
     mark_notification_read = MarkNotificationRead.Field()
+    mark_onboarding_view_seen = MarkOnboardingViewSeen.Field()
     
     create_role = CreateRole.Field()
     update_role = UpdateRole.Field()

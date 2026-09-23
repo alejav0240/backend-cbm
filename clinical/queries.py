@@ -2,13 +2,18 @@ from django.utils import timezone
 import graphene
 from graphql import GraphQLError
 from dateutil.relativedelta import relativedelta
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db.models.functions import TruncMonth
 import base64
 
 from .models import Patient, PatientClinicalNote, InterventionPlan, TherapyReport, SessionPlanStep
 from .type import PatientType, PatientClinicalNoteType, InterventionPlanType, TherapyReportType, GrowthPointType, SessionPlanStepType
-from config.utils import login_required, get_db_id, module_permission_required
+from config.utils import (
+    login_required,
+    get_db_id,
+    module_permission_required,
+    user_can_access_patient,
+)
 
 class PaginatedPatients(graphene.ObjectType):
     results = graphene.List(PatientType)
@@ -21,6 +26,15 @@ class PaginatedInterventionPlans(graphene.ObjectType):
     total_count = graphene.Int()
     total_pages = graphene.Int()
     current_page = graphene.Int()
+
+
+def _patient_scope(user, queryset):
+    if user.is_staff or user.is_superuser:
+        return queryset
+    return queryset.filter(
+        Q(therapeutic_sessions__therapist=user) |
+        Q(clinical_notes__author=user)
+    ).distinct()
 
 class Query(graphene.ObjectType):
     patients = graphene.Field(
@@ -66,7 +80,10 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('pacientes', action='view')
     def resolve_patients(self, info, status=None, search=None, page=1, page_size=10):
-        qs = Patient.objects.select_related("tutor").all()
+        qs = _patient_scope(
+            info.context.user,
+            Patient.objects.select_related("tutor").all(),
+        )
         if status:
             qs = qs.filter(status=status)
         else:
@@ -94,8 +111,11 @@ class Query(graphene.ObjectType):
     def resolve_patient(self, info, id):
         real_id = get_db_id(id)
         try:
-            return Patient.objects.select_related("tutor").exclude(
-                status=Patient.Status.INACTIVE
+            return _patient_scope(
+                info.context.user,
+                Patient.objects.select_related("tutor").exclude(
+                    status=Patient.Status.INACTIVE
+                ),
             ).get(pk=real_id)
         except (Patient.DoesNotExist, ValueError, TypeError):
             raise GraphQLError(f"Paciente con ID {real_id} no encontrado")
@@ -103,6 +123,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_clinical_notes(self, info, patient_id, category=None):
         real_patient_id = get_db_id(patient_id)
+        if not _patient_scope(info.context.user, Patient.objects.all()).filter(
+            pk=real_patient_id
+        ).exists():
+            raise GraphQLError("No autorizado.")
         qs = PatientClinicalNote.objects.filter(patient_id=real_patient_id).select_related("author")
         if category:
             qs = qs.filter(category=category)
@@ -110,7 +134,10 @@ class Query(graphene.ObjectType):
 
     @module_permission_required('planes', action='view')
     def resolve_intervention_plans(self, info, patient_id=None, search=None, page=1, page_size=10):
-        qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps").exclude(
+        qs = InterventionPlan.objects.select_related("patient").prefetch_related("steps")
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(patient__therapeutic_sessions__therapist=info.context.user)
+        qs = qs.exclude(
             patient__status=Patient.Status.INACTIVE
         )
         if patient_id:
@@ -151,6 +178,8 @@ class Query(graphene.ObjectType):
         qs = TherapyReport.objects.select_related("patient", "generated_by").exclude(
             patient__status=Patient.Status.INACTIVE
         )
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(patient__therapeutic_sessions__therapist=info.context.user)
         if patient_id:
             real_patient_id = get_db_id(patient_id)
             qs = qs.filter(patient_id=real_patient_id)
@@ -183,9 +212,9 @@ class Query(graphene.ObjectType):
             last_6_months[month_dt.strftime('%b')] = 0
 
         data = (
-            Patient.objects.filter(
+            _patient_scope(info.context.user, Patient.objects.filter(
                 created_at__gte=timezone.now() - relativedelta(months=6)
-            ).exclude(status=Patient.Status.INACTIVE)
+            )).exclude(status=Patient.Status.INACTIVE)
             .annotate(month_date=TruncMonth('created_at'))
             .values('month_date')
             .annotate(total=Count('id'))

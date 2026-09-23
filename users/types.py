@@ -2,7 +2,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth.models import Group
-from users.models import User, Notification
+from users.models import User, Notification, OnboardingView
 from users.permissions_map import get_modules_for_group
 
 
@@ -87,3 +87,9 @@ class NotificationType(DjangoObjectType):
     class Meta:
         model = Notification
         fields = ("id", "user", "message", "tipo", "metadatos", "is_read", "created_at")
+
+
+class OnboardingViewType(DjangoObjectType):
+    class Meta:
+        model = OnboardingView
+        fields = ("view_key", "completed_at")

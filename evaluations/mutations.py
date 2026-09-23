@@ -22,7 +22,12 @@ from evaluations.type import (
     ScaleType,
     FormType
 )
-from config.utils import module_permission_required, get_db_id
+from config.utils import (
+    module_permission_required,
+    get_db_id,
+    user_can_access_patient,
+    user_can_access_session,
+)
 
 class QuestionInput(graphene.InputObjectType):
     question = graphene.String(required=True)
@@ -80,6 +85,17 @@ class AssignForm(graphene.Mutation):
     @module_permission_required('formularios', action='add')
     def mutate(self, info, form_id, assigned_by_id, assigned_to_id=None,
                patient_id=None, session_id=None):
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            if get_db_id(assigned_by_id) != info.context.user.pk:
+                raise GraphQLError("No autorizado.")
+            if patient_id and not user_can_access_patient(
+                info.context.user, get_db_id(patient_id)
+            ):
+                raise GraphQLError("No autorizado.")
+            if session_id and not user_can_access_session(
+                info.context.user, get_db_id(session_id)
+            ):
+                raise GraphQLError("No autorizado.")
         try:
             assignment = FormAssignment.objects.create(
                 form_id=get_db_id(form_id),
@@ -107,6 +123,12 @@ class UpdateFormAssignment(graphene.Mutation):
         real_id = get_db_id(id)
         try:
             assignment = FormAssignment.objects.get(pk=real_id)
+            if not (
+                info.context.user.is_staff
+                or info.context.user.is_superuser
+                or assignment.assigned_by_id == info.context.user.pk
+            ):
+                raise GraphQLError("No autorizado.")
             if assigned_to_id is not None:
                 assignment.assigned_to_id = get_db_id(assigned_to_id)
             if patient_id is not None:
@@ -129,7 +151,14 @@ class DeleteFormAssignment(graphene.Mutation):
     def mutate(self, info, id):
         real_id = get_db_id(id)
         try:
-            FormAssignment.objects.get(pk=real_id).delete()
+            assignment = FormAssignment.objects.get(pk=real_id)
+            if not (
+                info.context.user.is_staff
+                or info.context.user.is_superuser
+                or assignment.assigned_by_id == info.context.user.pk
+            ):
+                raise GraphQLError("No autorizado.")
+            assignment.delete()
             return DeleteFormAssignment(success=True)
         except FormAssignment.DoesNotExist:
             return DeleteFormAssignment(success=False)
@@ -208,6 +237,14 @@ class SubmitFormResponse(graphene.Mutation):
         real_question_id = get_db_id(question_id)
 
         try:
+            assignment = FormAssignment.objects.get(pk=real_assignment_id)
+            if not (
+                info.context.user.is_staff
+                or info.context.user.is_superuser
+                or assignment.assigned_by_id == info.context.user.pk
+                or assignment.assigned_to_id == info.context.user.pk
+            ):
+                raise GraphQLError("No autorizado.")
             response, created = FormResponse.objects.update_or_create(
                 assignment_id=real_assignment_id,
                 question_id=real_question_id,
@@ -235,6 +272,13 @@ class SubmitFullForm(graphene.Mutation):
 
         try:
             assignment = FormAssignment.objects.get(pk=real_assignment_id)
+            if not (
+                info.context.user.is_staff
+                or info.context.user.is_superuser
+                or assignment.assigned_by_id == info.context.user.pk
+                or assignment.assigned_to_id == info.context.user.pk
+            ):
+                raise GraphQLError("No autorizado.")
             
             with transaction.atomic():
                 for resp in responses:
@@ -287,6 +331,11 @@ class AddScaleResponse(graphene.Mutation):
                 if subscales:
                     for sub in subscales:
                         real_sub_id = get_db_id(sub.subscale_id)
+                        if not Subscale.objects.filter(
+                            pk=real_sub_id,
+                            scale_id=real_scale_id,
+                        ).exists():
+                            raise ValueError("La subescala no pertenece a la escala seleccionada.")
                         ScaleEvaluationSubscaleResponse.objects.create(
                             evaluation=evaluation,
                             subscale_id=real_sub_id,

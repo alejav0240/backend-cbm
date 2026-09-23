@@ -1,6 +1,7 @@
 import json
 from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group, Permission
 from graphene_django.utils.testing import GraphQLTestCase
 from config.schema import schema
 
@@ -138,3 +139,146 @@ class UsersMutationTests(GraphQLTestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.first_name, "Pepe")
 
+    def test_onboarding_view_is_persisted_per_user_and_view(self):
+        self.client.force_login(self.user)
+        query = """
+            query OnboardingView($viewKey: String!) {
+                onboardingView(viewKey: $viewKey) {
+                    viewKey
+                    completedAt
+                }
+            }
+        """
+        mutation = """
+            mutation MarkOnboardingViewSeen($viewKey: String!) {
+                markOnboardingViewSeen(viewKey: $viewKey) {
+                    onboardingView {
+                        viewKey
+                    }
+                }
+            }
+        """
+        variables = {"viewKey": "/dashboard/pacientes"}
+
+        initial = self._execute_query(query, variables=variables)
+        self.assertIsNone(initial["data"]["onboardingView"])
+
+        marked = self._execute_query(mutation, variables=variables)
+        self.assertEqual(
+            marked["data"]["markOnboardingViewSeen"]["onboardingView"]["viewKey"],
+            variables["viewKey"],
+        )
+
+        persisted = self._execute_query(query, variables=variables)
+        self.assertEqual(
+            persisted["data"]["onboardingView"]["viewKey"],
+            variables["viewKey"],
+        )
+
+        self._execute_query(mutation, variables=variables)
+        self.assertEqual(self.user.onboarding_views.count(), 1)
+
+    def test_me_requires_authentication(self):
+        query = """
+            query {
+                me { username }
+            }
+        """
+
+        content = self._execute_query(query)
+
+        self.assertIsNone(content["data"]["me"])
+        self.assertEqual(content["errors"][0]["message"], "No autenticado.")
+
+    def test_me_returns_role_and_modules_for_user_permissions(self):
+        role = Group.objects.create(name="Terapeuta")
+        permission = Permission.objects.get(
+            content_type__app_label="users",
+            content_type__model="user",
+            codename="view_user",
+        )
+        role.permissions.add(permission)
+        self.user.groups.add(role)
+        self.client.force_login(self.user)
+
+        query = """
+            query {
+                me {
+                    username
+                    role { name }
+                    modules
+                }
+            }
+        """
+
+        content = self._execute_query(query)
+
+        self.assertEqual(content["data"]["me"]["role"]["name"], "Terapeuta")
+        self.assertIn("usuarios:view", content["data"]["me"]["modules"])
+
+    def test_token_auth_sets_http_only_access_and_refresh_cookies(self):
+        mutation = """
+            mutation TokenAuth($username: String!, $password: String!) {
+                tokenAuth(username: $username, password: $password) {
+                    user { username }
+                }
+            }
+        """
+
+        response = self.query(
+            mutation,
+            variables={
+                "username": "testuser",
+                "password": "old_password_123",
+            },
+        )
+
+        self.assertResponseNoErrors(response)
+        self.assertEqual(response.cookies["access_token"].get("httponly"), True)
+        self.assertEqual(response.cookies["refresh_token"].get("httponly"), True)
+
+    def test_users_query_requires_module_permission(self):
+        self.client.force_login(self.user)
+        query = """
+            query {
+                users { results { username } }
+            }
+        """
+
+        content = self._execute_query(query)
+
+        self.assertIsNone(content["data"]["users"])
+        self.assertIn("No tienes permiso", content["errors"][0]["message"])
+
+    def test_refresh_and_logout_use_jwt_cookies(self):
+        login = self.query(
+            """
+            mutation {
+                tokenAuth(username: "testuser", password: "old_password_123") {
+                    user { username }
+                }
+            }
+            """
+        )
+        self.assertResponseNoErrors(login)
+        self.client.cookies.update(login.cookies)
+
+        refreshed = self.query(
+            """
+            mutation { refreshToken { token } }
+            """
+        )
+        self.assertResponseNoErrors(refreshed)
+        self.assertTrue(refreshed.json()["data"]["refreshToken"]["token"])
+
+        logged_out = self.query(
+            """
+            mutation {
+                deleteTokenCookie { deleted }
+                deleteRefreshTokenCookie { deleted }
+            }
+            """
+        )
+        self.assertResponseNoErrors(logged_out)
+        self.assertTrue(logged_out.json()["data"]["deleteTokenCookie"]["deleted"])
+        self.assertTrue(logged_out.json()["data"]["deleteRefreshTokenCookie"]["deleted"])

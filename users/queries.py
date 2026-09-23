@@ -2,8 +2,8 @@ import graphene
 from graphql import GraphQLError
 from django.contrib.auth.models import Group
 from django.db.models import Q
-from .models import User, Notification
-from .types import UserType, NotificationType, RoleType
+from .models import User, Notification, OnboardingView
+from .types import UserType, NotificationType, RoleType, OnboardingViewType
 from config.utils import login_required, staff_member_required, get_db_id, module_permission_required
 
 
@@ -63,6 +63,11 @@ class Query(graphene.ObjectType):
         is_read=graphene.Boolean(),
     )
     unread_notifications_count = graphene.Int()
+
+    onboarding_view = graphene.Field(
+        OnboardingViewType,
+        view_key=graphene.String(required=True),
+    )
 
     user_with_patients = graphene.Field(
         UserWithPatientsType,
@@ -161,6 +166,13 @@ class Query(graphene.ObjectType):
     def resolve_unread_notifications_count(root, info):
         user = info.context.user
         return Notification.objects.filter(user=user, is_read=False).count()
+
+    @login_required
+    def resolve_onboarding_view(root, info, view_key):
+        return OnboardingView.objects.filter(
+            user=info.context.user,
+            view_key=view_key,
+        ).first()
 
     # ── usuario con sus pacientes asociados ──────────────────────────────────
     @module_permission_required('usuarios', action='view')

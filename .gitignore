@@ -3,6 +3,9 @@ __init__.py
 .env
 __pycache__
 migrations
+!users/migrations/
+users/migrations/*
+!users/migrations/0003_onboardingview.py
 !onedrive/migrations/
 !onedrive/migrations/__init__.py
 .venv

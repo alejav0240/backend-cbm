@@ -190,6 +190,12 @@ class Query(graphene.ObjectType):
         from django.db.models import Q
         from django.utils import timezone
 
+        user = info.context.user
+        if not (user.is_staff or user.is_superuser):
+            if therapist_id and get_db_id(therapist_id) != user.pk:
+                raise GraphQLError("No autorizado.")
+            therapist_id = str(user.pk)
+
         qs = Session.objects.select_related("patient", "therapist", "group").order_by("-pk")
 
         if patient_id:
@@ -261,6 +267,12 @@ class Query(graphene.ObjectType):
                                  page=1, page_size=10):
         from django.db.models import Q
 
+        user = info.context.user
+        if not (user.is_staff or user.is_superuser):
+            if therapist_id and get_db_id(therapist_id) != user.pk:
+                raise GraphQLError("No autorizado.")
+            therapist_id = str(user.pk)
+
         qs = Session.objects.select_related("patient", "therapist", "group").filter(
             cycle_number__isnull=False
         )
@@ -293,7 +305,7 @@ class Query(graphene.ObjectType):
     def resolve_session(self, info, id):
         real_id = get_db_id(id)
         try:
-            return Session.objects.select_related(
+            session = Session.objects.select_related(
                 "patient", "therapist", "group"
             ).prefetch_related(
                 "session_resources__resource",
@@ -304,6 +316,10 @@ class Query(graphene.ObjectType):
                 "scale_evaluations__value_responses__scale_value",
                 "session_plan_steps__plan_step__plan",
             ).get(pk=real_id)
+            if not (info.context.user.is_staff or info.context.user.is_superuser) \
+                    and session.therapist_id != info.context.user.pk:
+                raise GraphQLError("No autorizado.")
+            return session
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
 
@@ -362,13 +378,19 @@ class Query(graphene.ObjectType):
         except InventoryItem.DoesNotExist:
             raise GraphQLError("Item de inventario no encontrado")
 
+    @module_permission_required('sesiones', action='view')
     def resolve_patient_cycles(self, info, patient_id):
         real_patient_id = get_db_id(patient_id)
         qs = Session.objects.filter(patient_id=real_patient_id, cycle_number__isnull=False)
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(therapist_id=info.context.user.pk)
         return _build_cycles(qs)
 
+    @module_permission_required('sesiones', action='view')
     def resolve_all_patient_cycles(self, info):
         qs = Session.objects.filter(cycle_number__isnull=False)
+        if not (info.context.user.is_staff or info.context.user.is_superuser):
+            qs = qs.filter(therapist_id=info.context.user.pk)
         return _build_cycles(qs)
 
     @module_permission_required('sesiones', action='view')
@@ -379,6 +401,12 @@ class Query(graphene.ObjectType):
         Soporta búsqueda por nombre/apellido y paginación.
         """
         from django.db.models import Max, Q
+
+        user = info.context.user
+        if not (user.is_staff or user.is_superuser):
+            if therapist_id and get_db_id(therapist_id) != user.pk:
+                raise GraphQLError("No autorizado.")
+            therapist_id = str(user.pk)
 
         qs = Session.objects.filter(cycle_number__isnull=False)
         if therapist_id:
