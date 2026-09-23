@@ -10,7 +10,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.forms import UserChangeForm, UserCreationForm
 from unfold.decorators import display
 
-from .models import Notification, User
+from .models import Notification, OnboardingView, User
 
 admin.site.unregister(Group)
 
@@ -262,3 +262,18 @@ class NotificationAdmin(ModelAdmin):
     def mark_as_unread(self, request, queryset):
         updated = queryset.update(is_read=False)
         self.message_user(request, f"{updated} notificaciones marcadas como no leídas")
+
+
+# ==============================
+# ONBOARDING ADMIN
+# ==============================
+@admin.register(OnboardingView)
+class OnboardingViewAdmin(ModelAdmin):
+    compressed_fields = True
+    list_filter_submit = True
+
+    list_display = ("user", "view_key", "completed_at")
+    search_fields = ("user__username", "user__email", "view_key")
+    ordering = ("-completed_at",)
+    autocomplete_fields = ("user",)
+    readonly_fields = ("completed_at",)
