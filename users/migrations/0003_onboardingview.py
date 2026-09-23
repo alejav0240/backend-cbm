@@ -5,7 +5,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("users", "0002_notification_metadatos_notification_tipo"),
+        ("users", "0002_setting_notification_metadatos_notification_tipo"),
     ]
 
     operations = [
