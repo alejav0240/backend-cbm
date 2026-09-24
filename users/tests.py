@@ -262,14 +262,17 @@ class UsersMutationTests(GraphQLTestCase):
         )
         self.assertResponseNoErrors(login)
         self.client.cookies.update(login.cookies)
+        # Refresh must use its valid refresh cookie even if access has expired.
+        self.client.cookies["access_token"] = "expired-access-token"
 
         refreshed = self.query(
             """
-            mutation { refreshToken { token } }
+            mutation { refreshToken { token refreshToken } }
             """
         )
         self.assertResponseNoErrors(refreshed)
         self.assertTrue(refreshed.json()["data"]["refreshToken"]["token"])
+        self.assertTrue(refreshed.json()["data"]["refreshToken"]["refreshToken"])
 
         logged_out = self.query(
             """

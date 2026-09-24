@@ -163,6 +163,7 @@ GRAPHQL_JWT = {
     "JWT_VERIFY_EXPIRATION": True,
     "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
     "JWT_REUSE_REFRESH_TOKENS": True,
+    "JWT_ALLOW_ANY_HANDLER": "config.jwt.allow_refresh_token",
     "JWT_COOKIE_NAME": "access_token",
     "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
     "JWT_COOKIE_HTTPONLY": True,
