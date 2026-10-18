@@ -4,7 +4,7 @@ __init__.py
 __pycache__
 migrations
 !users/migrations/
-users/migrations/*
+users/migrations/__pycache__/
 !users/migrations/0003_onboardingview.py
 !onedrive/migrations/
 !onedrive/migrations/__init__.py
@@ -13,3 +13,4 @@ users/migrations/*
 .idea
 .codegraph
 media
+staticfiles
