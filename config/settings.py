@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'onedrive',
     'uploads',
     'multimodal',
+    'pipeline_multimodal',
 ]
 
 # Algunas apps de dominio todavía no tienen migraciones propias. Durante los
@@ -82,6 +83,7 @@ if "test" in sys.argv:
             "marketing",
             "uploads",
             "therapeutic_sessions",
+            "pipeline_multimodal",
         )
     }
 
