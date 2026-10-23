@@ -9,7 +9,7 @@ import uuid
 
 from django.conf import settings
 from django.http import JsonResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .servicios import ErrorPipelineMultimodal, ServicioPipelineMultimodal
 from .models import ResultadoAnalisis
@@ -64,3 +64,14 @@ def analizar_video(request):
             return _respuesta({"status": "failed", "error": str(error)}, 502, request_id)
     estado = 422 if cuerpo.get("status") == "failed" else 200
     return _respuesta(cuerpo, estado, request_id)
+
+
+@require_GET
+def obtener_resultado(request, session_id: str):
+    request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
+    if not _autorizado(request):
+        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+    resultado = ResultadoAnalisis.objects.filter(session_id=session_id).first()
+    if resultado is None:
+        return _respuesta({"status": "pending", "session_id": session_id}, 202, request_id)
+    return _respuesta(resultado.resultado, 200, request_id)
