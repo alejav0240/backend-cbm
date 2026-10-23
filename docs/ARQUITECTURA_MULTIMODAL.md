@@ -36,3 +36,7 @@ backend ejecuta el proceso sin shell y limita las extensiones aceptadas.
 
 El helper `frontend/shared/api/multimodal.ts` expone `analizarVideoMultimodal(file, sessionId?)`.
 Usa `NEXT_PUBLIC_API_URL`, conserva la respuesta JSON y propaga `statusCode` y `X-Request-ID` mediante `ErrorAnalisisMultimodal`.
+
+## Módulo backend
+
+El pipeline HTTP vive en `pipeline_multimodal/`, con separación entre vista, servicio de aplicación y configuración del proceso ML. La ruta nueva es `/api/pipeline-multimodal/analizar-video/`; se conserva `/api/multimodal/analizar-video/` para compatibilidad.
