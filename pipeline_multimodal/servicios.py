@@ -22,7 +22,7 @@ class ServicioPipelineMultimodal:
 
     @classmethod
     def configurado(cls) -> "ServicioPipelineMultimodal":
-        raiz = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+        raiz = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
         interprete = Path(os.environ.get("MULTIMODAL_PYTHON", raiz / "dataset" / ".venv" / "bin" / "python")).resolve()
         timeout = int(os.environ.get("MULTIMODAL_TIMEOUT_SECONDS", "1800"))
         return cls(raiz, interprete, timeout)
