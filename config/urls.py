@@ -15,4 +15,5 @@ urlpatterns = [
     path("graphql/", jwt_cookie(CBMGraphQLView.as_view(graphiql=True))),
     path("csrf/", csrf_token_view),
     path("api/onedrive/", include("onedrive.urls")),
+    path("api/multimodal/", include("multimodal.urls")),
 ]
