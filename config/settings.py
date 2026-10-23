@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'evaluations',
     'onedrive',
     'uploads',
+    'multimodal',
 ]
 
 # Algunas apps de dominio todavía no tienen migraciones propias. Durante los
