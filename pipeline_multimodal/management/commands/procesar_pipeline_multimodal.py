@@ -36,6 +36,10 @@ class Command(BaseCommand):
                 trabajo.error = str(error)
                 trabajo.estado = TrabajoAnalisis.Estado.FALLIDO
             trabajo.save(update_fields=["resultado", "error", "estado", "actualizado_en"])
+            try:
+                Path(trabajo.archivo_path).unlink(missing_ok=True)
+            except OSError:
+                self.stderr.write(f"No se pudo eliminar el archivo temporal del trabajo {trabajo.job_id}")
             procesados += 1
             if options["once"]:
                 break
