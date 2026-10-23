@@ -40,3 +40,11 @@ Usa `NEXT_PUBLIC_API_URL`, conserva la respuesta JSON y propaga `statusCode` y `
 ## Módulo backend
 
 El pipeline HTTP vive en `pipeline_multimodal/`, con separación entre vista, servicio de aplicación y configuración del proceso ML. La ruta nueva es `/api/pipeline-multimodal/analizar-video/`; se conserva `/api/multimodal/analizar-video/` para compatibilidad.
+
+## Consulta de resultados
+
+```http
+GET /api/pipeline-multimodal/resultados/{session_id}/
+```
+
+Devuelve el último JSON persistido o `202` con `status = "pending"` si todavía no existe.
