@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
 from .servicios import ErrorPipelineMultimodal, ServicioPipelineMultimodal
+from .models import ResultadoAnalisis
 
 EXTENSIONES_VIDEO = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
@@ -53,6 +54,12 @@ def analizar_video(request):
                 destino.write(bloque)
         try:
             cuerpo = servicio.ejecutar(entrada, session_id)
+            ResultadoAnalisis.objects.create(
+                session_id=session_id,
+                estado=str(cuerpo.get("status", "completed")),
+                resultado=cuerpo,
+                request_id=request_id,
+            )
         except ErrorPipelineMultimodal as error:
             return _respuesta({"status": "failed", "error": str(error)}, 502, request_id)
     estado = 422 if cuerpo.get("status") == "failed" else 200

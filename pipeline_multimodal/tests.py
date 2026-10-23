@@ -12,7 +12,10 @@ class PipelineMultimodalTests(SimpleTestCase):
     def test_publica_resultado_del_servicio(self):
         archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
         cuerpo = {"status": "completed", "session_id": "PIPE-001"}
-        with patch("pipeline_multimodal.views.ServicioPipelineMultimodal.ejecutar", return_value=cuerpo) as ejecutar:
+        with (
+            patch("pipeline_multimodal.views.ServicioPipelineMultimodal.ejecutar", return_value=cuerpo) as ejecutar,
+            patch("pipeline_multimodal.views.ResultadoAnalisis.objects.create"),
+        ):
             respuesta = self.client.post(
                 "/api/pipeline-multimodal/analizar-video/",
                 {"video": archivo, "session_id": "PIPE-001"},
