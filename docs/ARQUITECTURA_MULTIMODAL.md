@@ -24,3 +24,10 @@ resultados DEMUCA no se fabrican: un video sin evaluación registrada devuelve
 
 El archivo se guarda en un directorio temporal y se elimina al terminar. El
 backend ejecuta el proceso sin shell y limita las extensiones aceptadas.
+
+## Seguridad y operación
+
+- En producción se requiere `MULTIMODAL_SERVICE_KEY` mediante el header
+  `X-Service-Key`; en desarrollo (`DEBUG=true`) puede omitirse.
+- `MULTIMODAL_MAX_UPLOAD_BYTES` limita el tamaño de entrada (por defecto 2 GiB).
+- Cada respuesta incluye `X-Request-ID` para correlacionar logs y fallos.
