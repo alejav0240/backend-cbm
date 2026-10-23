@@ -41,15 +41,14 @@ class ServicioPipelineMultimodal:
             )
         except subprocess.TimeoutExpired as error:
             raise ErrorPipelineMultimodal("El análisis excedió el tiempo límite.") from error
-        if resultado.returncode != 0:
-            try:
-                return json.loads(resultado.stdout or "{}")
-            except json.JSONDecodeError as error:
-                raise ErrorPipelineMultimodal(resultado.stderr.strip() or "Falló el análisis multimodal.") from error
         try:
-            cuerpo = json.loads(resultado.stdout)
+            cuerpo = json.loads(resultado.stdout or "{}")
         except json.JSONDecodeError as error:
-            raise ErrorPipelineMultimodal("El analizador no devolvió JSON válido.") from error
+            raise ErrorPipelineMultimodal(
+                resultado.stderr.strip() or "El analizador no devolvió JSON válido."
+            ) from error
         if not isinstance(cuerpo, dict) or cuerpo.get("status") not in {"completed", "failed", "blocked"}:
             raise ErrorPipelineMultimodal("El analizador devolvió un contrato inválido.")
+        if resultado.returncode != 0:
+            raise ErrorPipelineMultimodal(str(cuerpo.get("error") or resultado.stderr.strip() or "Falló el análisis multimodal."))
         return cuerpo
