@@ -47,6 +47,9 @@ class ServicioPipelineMultimodal:
             except json.JSONDecodeError as error:
                 raise ErrorPipelineMultimodal(resultado.stderr.strip() or "Falló el análisis multimodal.") from error
         try:
-            return json.loads(resultado.stdout)
+            cuerpo = json.loads(resultado.stdout)
         except json.JSONDecodeError as error:
             raise ErrorPipelineMultimodal("El analizador no devolvió JSON válido.") from error
+        if not isinstance(cuerpo, dict) or cuerpo.get("status") not in {"completed", "failed", "blocked"}:
+            raise ErrorPipelineMultimodal("El analizador devolvió un contrato inválido.")
+        return cuerpo
