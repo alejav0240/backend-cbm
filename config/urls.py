@@ -16,4 +16,5 @@ urlpatterns = [
     path("csrf/", csrf_token_view),
     path("api/onedrive/", include("onedrive.urls")),
     path("api/multimodal/", include("multimodal.urls")),
+    path("api/pipeline-multimodal/", include("pipeline_multimodal.urls")),
 ]
