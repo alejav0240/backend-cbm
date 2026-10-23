@@ -31,3 +31,8 @@ backend ejecuta el proceso sin shell y limita las extensiones aceptadas.
   `X-Service-Key`; en desarrollo (`DEBUG=true`) puede omitirse.
 - `MULTIMODAL_MAX_UPLOAD_BYTES` limita el tamaño de entrada (por defecto 2 GiB).
 - Cada respuesta incluye `X-Request-ID` para correlacionar logs y fallos.
+
+## Cliente frontend
+
+El helper `frontend/shared/api/multimodal.ts` expone `analizarVideoMultimodal(file, sessionId?)`.
+Usa `NEXT_PUBLIC_API_URL`, conserva la respuesta JSON y propaga `statusCode` y `X-Request-ID` mediante `ErrorAnalisisMultimodal`.
