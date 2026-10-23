@@ -17,11 +17,10 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
     """
 
     def process_request(self, request):
-        service_key = getattr(settings, "ONEDRIVE_SERVICE_KEY", None) or os.getenv(
-            "ONEDRIVE_SERVICE_KEY"
-        )
-        if not service_key:
-            return
+        service_keys = {
+            getattr(settings, "ONEDRIVE_SERVICE_KEY", None) or os.getenv("ONEDRIVE_SERVICE_KEY"),
+            os.getenv("MULTIMODAL_SERVICE_KEY"),
+        }
         provided = request.headers.get("X-Service-Key", "")
-        if provided and provided == service_key:
+        if provided and provided in service_keys:
             request._dont_enforce_csrf_checks = True
