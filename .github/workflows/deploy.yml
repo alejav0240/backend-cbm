@@ -86,6 +86,11 @@ jobs:
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin
 
+      - name: Block secrets and misconfiguration findings
+        run: |
+          trivy fs --scanners secret,misconfig \
+            --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 1 .
+
       - name: Scan — JSON
         run: |
           trivy fs --format json --output trivy-report.json \
