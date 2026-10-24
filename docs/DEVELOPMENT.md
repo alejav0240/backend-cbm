@@ -6,8 +6,8 @@ El proyecto usa **Docker Compose** para levantar PostgreSQL, Django y Mailpit.
 Ejecutá los comandos desde la raíz del workspace (`cbm-front`):
 
 ```bash
-cp backend/.env.example backend/.env  # solo la primera vez; nunca lo subas
-cp .env.example .env                  # si la raíz todavía no tiene configuración local
+cp backend/.env.example backend/.env  # solo para ejecutar Django fuera de Docker; nunca lo subas
+# Para Docker Compose, configurá el `.env` de la raíz con valores locales.
 
 docker compose up -d db mailpit
 # Para levantar toda la plataforma:
