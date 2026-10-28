@@ -20,6 +20,11 @@ python-dotenv
 # Media
 Pillow
 django-storages
+numpy
+scikit-learn
+mediapipe
+opencv-python-headless
+mlflow>=3.1,<4
 
 # OneDrive token encryption
 cryptography

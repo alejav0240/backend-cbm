@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:1-3.11-bullseye
+FROM mcr.microsoft.com/devcontainers/python:1-3.11-bookworm
 
 ENV PYTHONUNBUFFERED 1
 
@@ -9,7 +9,11 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
     build-essential \
     libpq-dev \
     postgresql-client \
+    ffmpeg \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # [Optional] Set the default user to vscode
 USER vscode

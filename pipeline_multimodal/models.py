@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 
 class ResultadoAnalisis(models.Model):
@@ -26,6 +27,7 @@ class TrabajoAnalisis(models.Model):
 
     job_id = models.UUIDField(default=__import__("uuid").uuid4, unique=True, editable=False)
     session_id = models.CharField(max_length=255, db_index=True)
+    request_id = models.CharField(max_length=128, blank=True, null=True, unique=True)
     archivo_path = models.CharField(max_length=1024)
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.ENCOLADO)
     resultado = models.JSONField(null=True, blank=True)
@@ -36,3 +38,10 @@ class TrabajoAnalisis(models.Model):
     class Meta:
         ordering = ["creado_en"]
         indexes = [models.Index(fields=["estado", "creado_en"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session_id"],
+                condition=Q(estado__in=["queued", "processing"]),
+                name="pipeline_active_session_unique",
+            )
+        ]

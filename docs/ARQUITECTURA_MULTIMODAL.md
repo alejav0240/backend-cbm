@@ -48,3 +48,30 @@ GET /api/pipeline-multimodal/resultados/{session_id}/
 ```
 
 Devuelve el último JSON persistido o `202` con `status = "pending"` si todavía no existe.
+
+## Procesamiento asíncrono de sesiones
+
+El worker de subida del frontend envía la grabación a:
+
+```http
+POST /api/pipeline-multimodal/trabajos/
+```
+
+con `video` y `session_id`. La respuesta `202` entrega `job_id`; un trabajo
+activo para la misma sesión se reutiliza para que los reintentos no dupliquen
+el análisis. El estado se consulta en:
+
+```http
+GET /api/pipeline-multimodal/trabajos/{job_id}/
+```
+
+En producción debe ejecutarse un worker persistente, por ejemplo:
+
+```bash
+python manage.py procesar_pipeline_multimodal --poll-seconds 5
+```
+
+El worker toma un trabajo con bloqueo transaccional, ejecuta `ml/analyze_video.py`,
+persiste el resultado y elimina el archivo temporal. `MULTIMODAL_SERVICE_KEY`
+debe estar configurada tanto en backend como en el proceso servidor de Next.js;
+no se expone al navegador.

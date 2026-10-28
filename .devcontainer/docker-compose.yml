@@ -1,17 +1,41 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
     env_file:
-      - ../../.env
+      - ../.env
+    environment:
+      DB_HOST: db
+      MULTIMODAL_PROJECT_ROOT: /app
+      MULTIMODAL_PYTHON: /usr/local/bin/python
+      MULTIMODAL_DEMO_MODE: "true"
     volumes:
       - ..:/app:cached
-    # Overrides default command so things don't shut down after the process ends.
-    command: sleep infinity
+    ports:
+      - "8000:8000"
+    command: python manage.py runserver 0.0.0.0:8000
     # Ensure it uses the same network as the root compose
+    networks:
+      - cbm-network
+    depends_on:
+      - db
+
+  worker:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DB_HOST: db
+      MULTIMODAL_PROJECT_ROOT: /app
+      MULTIMODAL_PYTHON: /usr/local/bin/python
+      MULTIMODAL_DEMO_MODE: "true"
+    working_dir: /app
+    volumes:
+      - ..:/app:cached
+    command: sh -c "python manage.py migrate pipeline_multimodal --noinput && python manage.py procesar_pipeline_multimodal --poll-seconds 5"
     networks:
       - cbm-network
     depends_on:
@@ -22,7 +46,7 @@ services:
     image: postgres:15
     restart: unless-stopped
     env_file:
-      - ../../.env
+      - ../.env
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

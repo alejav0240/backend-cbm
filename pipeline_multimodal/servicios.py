@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 class ErrorPipelineMultimodal(Exception):
@@ -22,8 +23,8 @@ class ServicioPipelineMultimodal:
 
     @classmethod
     def configurado(cls) -> "ServicioPipelineMultimodal":
-        raiz = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-        interprete = Path(os.environ.get("MULTIMODAL_PYTHON", raiz / "dataset" / ".venv" / "bin" / "python")).resolve()
+        raiz = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+        interprete = Path(os.environ.get("MULTIMODAL_PYTHON", sys.executable)).resolve()
         timeout = int(os.environ.get("MULTIMODAL_TIMEOUT_SECONDS", "1800"))
         return cls(raiz, interprete, timeout)
 
@@ -34,6 +35,17 @@ class ServicioPipelineMultimodal:
             str(self.interprete), str(self.raiz / "ml" / "analyze_video.py"), str(entrada),
             "--session-id", session_id, "--project-root", str(self.raiz),
         ]
+        if os.environ.get("MULTIMODAL_DEMO_MODE", "false").lower() == "true":
+            demo_model = Path(
+                os.environ.get(
+                    "MULTIMODAL_DEMO_MODEL",
+                    str(self.raiz / "ml" / "artifacts" / "demo_mvp" / "models" / "gradient_boosting_late_fusion.joblib"),
+                )
+            )
+            comando.extend([
+                "--prediction-model", str(demo_model),
+                "--allow-experimental-demo",
+            ])
         try:
             resultado = subprocess.run(
                 comando, cwd=self.raiz, check=False, capture_output=True,

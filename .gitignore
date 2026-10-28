@@ -3,6 +3,9 @@ __init__.py
 .env
 __pycache__
 migrations
+!pipeline_multimodal/migrations/
+!pipeline_multimodal/migrations/__init__.py
+!pipeline_multimodal/migrations/*.py
 !users/migrations/
 users/migrations/__pycache__/
 !users/migrations/0003_onboardingview.py
