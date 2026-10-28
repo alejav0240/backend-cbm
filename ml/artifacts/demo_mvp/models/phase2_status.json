@@ -1,0 +1,46 @@
+{
+  "status": "demo_completed",
+  "demo_only": true,
+  "training_authorized": false,
+  "ground_truth": false,
+  "rows": 2123,
+  "patients": 11,
+  "features": [
+    "audio_rms_mean",
+    "audio_zcr_mean",
+    "visual_motion_mean",
+    "visual_motion_max"
+  ],
+  "labels": [
+    "visual__MOVIMIENTO",
+    "visual__MOVIMIENTO_REPETITIVO",
+    "visual__CONTACTO_VISUAL",
+    "visual__INTERACCION_OBJETO",
+    "visual__ORIENTACION_CORPORAL",
+    "audio__VOCALIZACION",
+    "audio__HABLA",
+    "audio__RISA",
+    "audio__LLANTO",
+    "audio__GRITO",
+    "audio__SILENCIO",
+    "audio__ACTIVIDAD_MUSICAL",
+    "interaction__MIRADA",
+    "interaction__GESTO",
+    "interaction__TACTO",
+    "interaction__IMITACION",
+    "interaction__RESPUESTA",
+    "interaction__ACTIVIDAD_CONJUNTA",
+    "interaction__INTERACCION_MUSICAL",
+    "interaction__INTERACCION_VERBAL"
+  ],
+  "models": [
+    "logistic_regression",
+    "random_forest",
+    "random_forest_late_fusion",
+    "gradient_boosting",
+    "gradient_boosting_late_fusion"
+  ],
+  "validation": "not_run_demo_training_on_all_real_windows",
+  "dataset_sha256": "e1eb5ded49b63b61ed933603278c1304e1a9d5c30dedeb21276d5ff2224ba7f3",
+  "notice": "Real video-derived demo only; therapist review is required and clinical use is disabled."
+}

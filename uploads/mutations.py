@@ -66,11 +66,12 @@ class CompletarSubidaSesion(graphene.Mutation):
         ok = graphene.Boolean(required=True)
         message = graphene.String()
         job_id = graphene.String()
+        pipeline_job_id = graphene.String()
 
     success = graphene.Boolean()
 
     def mutate(
-        self, info, session_id, ok, video_url=None, storage=None, message=None, job_id=None
+        self, info, session_id, ok, video_url=None, storage=None, message=None, job_id=None, pipeline_job_id=None
     ):
         if not _is_authorized(info):
             raise GraphQLError("No autorizado.")
@@ -95,6 +96,8 @@ class CompletarSubidaSesion(graphene.Mutation):
         metadatos = {"sessionId": session_id}
         if job_id:
             metadatos["jobId"] = job_id
+        if pipeline_job_id:
+            metadatos["pipelineJobId"] = pipeline_job_id
 
         if ok:
             destino = "OneDrive"
