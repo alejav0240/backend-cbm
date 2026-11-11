@@ -18,3 +18,6 @@ users/migrations/__pycache__/
 .codegraph
 media
 staticfiles
+
+# Local browser/session exports
+cookies.txt
