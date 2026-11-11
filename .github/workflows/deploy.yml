@@ -20,7 +20,7 @@ env:
 jobs:
   fast-checks:
     name: "Phase 1 - Quality and secrets"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -51,7 +51,7 @@ jobs:
 
   sast:
     name: "Phase 2 - CodeQL SAST"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -72,7 +72,7 @@ jobs:
 
   dependency-security:
     name: "Phase 3 - Dependency security"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -122,7 +122,7 @@ jobs:
 
   tests:
     name: "Phase 4 - Django tests and coverage"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: fast-checks
     timeout-minutes: 30
     services:
@@ -189,7 +189,7 @@ jobs:
 
   sonar:
     name: "Phase 5 - SonarQube"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: tests
     timeout-minutes: 20
     env:
@@ -226,7 +226,7 @@ jobs:
 
   docker:
     name: "Phase 6 - Build and scan Docker image"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [fast-checks, dependency-security, tests, sast]
     timeout-minutes: 40
     permissions:
@@ -294,7 +294,7 @@ jobs:
 
   deploy:
     name: "Phase 7 - Deploy backend"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [tests, sast, dependency-security, docker, sonar]
     if: >-
       ${{
@@ -360,7 +360,7 @@ jobs:
 
   dast:
     name: "Phase 8 - OWASP ZAP staging scan"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: deploy
     if: >-
       ${{
@@ -385,7 +385,7 @@ jobs:
 
   load-test:
     name: "Phase 9 - k6 staging load test"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: dast
     if: >-
       ${{
