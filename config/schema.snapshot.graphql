@@ -1,0 +1,2017 @@
+type Query {
+  dashboardStats: DashboardStatsType
+  patients(status: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedPatients
+  patient(id: ID!): PatientType
+  clinicalNotes(patientId: ID!, category: String): [PatientClinicalNoteType]
+  interventionPlans(patientId: ID, search: String, page: Int = 1, pageSize: Int = 10): PaginatedInterventionPlans
+  interventionPlan(id: ID!): InterventionPlanType
+  therapyReports(patientId: ID): [TherapyReportType]
+
+  """Registros de ejecución de pasos del plan por sesión."""
+  sessionPlanSteps(sessionId: ID, planStepId: ID, planId: ID, isCompleted: Boolean): [SessionPlanStepType]
+  patientGrowth: [GrowthPointType]
+  scales(scaleType: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedScales
+  scale(id: ID!): ScaleType
+  scaleEvaluations(
+    patientId: ID
+    scaleId: ID
+    inSession: Boolean
+
+    """Busca por nombre del paciente o nombre de la escala."""
+    search: String
+    page: Int = 1
+    pageSize: Int = 10
+  ): PaginatedScaleEvaluations
+  scaleEvaluation(id: ID!): ScaleEvaluationType
+  forms(search: String, page: Int = 1, pageSize: Int = 10): PaginatedForms
+  form(id: ID!): FormType
+  formAssignments(assignedToId: ID, patientId: ID, formId: ID, sessionId: ID, page: Int = 1, pageSize: Int = 10): PaginatedFormAssignments
+  formAssignment(id: ID!): FormAssignmentType
+  discounts: [DiscountType]
+  payments(patientId: ID, paymentStatus: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedPaymentType
+  payment(id: ID!): PaymentType
+  expenses(
+    status: String
+    category: String
+
+    """Busca por descripción o categoría del gasto."""
+    search: String
+    page: Int = 1
+    pageSize: Int = 10
+  ): PaginatedExpenses
+  courses(state: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedCourses
+  course(id: ID!): CourseType
+  courseEnrollments(courseId: ID, page: Int = 1, pageSize: Int = 10): PaginatedCourseEnrollments
+  institutions(search: String, page: Int = 1, pageSize: Int = 10): PaginatedInstitutions
+  institution(id: ID!): InstitutionType
+  institutionGroup(id: ID!): InstitutionGroupType
+  institutionGroups(institutionId: ID!, page: Int = 1, pageSize: Int = 10): PaginatedInstitutionGroups
+  blogPosts(status: String, search: String, type: String, page: Int = 1, pageSize: Int = 10): PaginatedBlogPosts
+  blogPost(id: ID!): BlogPostType
+  marketingCampaigns(status: String, platform: String, page: Int = 1, pageSize: Int = 10): PaginatedCampaigns
+  marketingCampaign(id: ID!): MarketingCampaignType
+  leads(campaignId: ID, status: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedLeads
+  lead(id: ID!): LeadType
+  sessions(
+    patientId: ID
+    therapistId: ID
+
+    """individual | group"""
+    sessionType: String
+
+    """paid | pending | exempt"""
+    paymentStatus: String
+
+    """completa | confirma | agendada | reprograma | cancelada"""
+    sessionStatus: String
+
+    """Filtra sesiones con fecha >= date_from (YYYY-MM-DD)."""
+    dateFrom: Date
+
+    """Filtra sesiones con fecha <= date_to (YYYY-MM-DD)."""
+    dateTo: Date
+
+    """
+    Si True incluye sesiones sin fecha (agendadas sin asignar). Solo aplica cuando se usa date_from/date_to.
+    """
+    includeNoDate: Boolean = true
+
+    """Busca por nombre o apellido del paciente."""
+    search: String
+    page: Int = 1
+    pageSize: Int = 10
+
+    """False → paginación normal de sesiones. True → paginación por ciclos."""
+    byCycles: Boolean = false
+  ): PaginatedSessions
+
+  """
+  Paginación por ciclos. Disponible también desde `sessions(byCycles: true)`.
+  """
+  paginatedCycles(
+    patientId: ID
+    therapistId: ID
+
+    """Filtra ciclos con sesiones >= date_from."""
+    dateFrom: Date
+
+    """Filtra ciclos con sesiones <= date_to."""
+    dateTo: Date
+    page: Int = 1
+    pageSize: Int = 10
+  ): PaginatedCycles
+  session(id: ID!): SessionType
+  digitalResources(type: String, search: String, page: Int, pageSize: Int): PaginatedDigitalResources
+  digitalResource(id: ID!): DigitalResourceType
+  inventoryItems(status: String, type: String, search: String, page: Int = 1, pageSize: Int = 10): PaginatedInventoryItems
+  inventoryItem(id: ID!): InventoryItemType
+
+  """Ciclos de sesiones de un paciente, agrupados por cycle_number."""
+  patientCycles(patientId: ID!): [CycleType]
+
+  """Ciclos de todos los pacientes, ordenados por paciente y cycle_number."""
+  allPatientCycles: [CycleType]
+
+  """
+  Lista paginada de pacientes con la información de su último ciclo y sus sesiones.
+  """
+  patientsLastCycle(
+    therapistId: ID
+
+    """Busca por nombre o apellido del paciente."""
+    search: String
+    page: Int = 1
+    pageSize: Int = 10
+  ): PaginatedPatientsLastCycle
+  me: UserType
+  users(search: String, roleName: String, excludeRole: String, page: Int = 1, pageSize: Int = 10): PaginatedUsers
+  user(id: ID!): UserType
+  roles(search: String, page: Int = 1, pageSize: Int = 10): PaginatedRoles
+  role(id: ID!): RoleType
+  notifications(isRead: Boolean): [NotificationType]
+  unreadNotificationsCount: Int
+  onboardingView(viewKey: String!): OnboardingViewType
+
+  """
+  Devuelve el usuario con todos los pacientes asociados (como terapeuta o tutor).
+  """
+  userWithPatients(id: ID!): UserWithPatientsType
+}
+
+type DashboardStatsType {
+  activePatientsCount: Int
+  activeCyclesCount: Int
+  todaySessionsCount: Int
+  monthlyIncome: Float
+  monthlyExpenses: Float
+}
+
+type PaginatedPatients {
+  results: [PatientType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PatientType implements Node {
+  """The ID of the object"""
+  id: ID!
+  tutor: UserType
+  firstName: String!
+  lastName: String!
+  ci: String
+  birthDate: Date
+  imageUrl: String
+  notes: String
+  status: ClinicalPatientStatusChoices!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  registrationComplete: Boolean!
+  diagnosis: String!
+  residence: String
+  clinicalNotes: [PatientClinicalNoteType!]!
+  interventionPlans: [InterventionPlanType!]!
+  therapyReports: [TherapyReportType!]!
+  therapeuticSessions(offset: Int, before: String, after: String, first: Int, last: Int): SessionTypeConnection!
+  payments: [PaymentType!]!
+  scaleEvaluations: [ScaleEvaluationType!]!
+  fullName: String
+  databaseId: Int
+}
+
+"""An object with an ID"""
+interface Node {
+  """The ID of the object"""
+  id: ID!
+}
+
+type UserType {
+  id: ID!
+
+  """
+  Los grupos a los que pertenece este usuario. Un usuario tendrá todos los permisos asignados a cada uno de sus grupos.
+  """
+  groups: [RoleType!]!
+
+  """
+  Requerido. 150 carácteres como máximo. Únicamente letras, dígitos y @/./+/-/_ 
+  """
+  username: String!
+  firstName: String!
+  lastName: String!
+
+  """Indica si el usuario puede entrar en este sitio de administración."""
+  isStaff: Boolean!
+
+  """
+  Indica si el usuario debe ser tratado como activo. Desmarque esta opción en lugar de borrar la cuenta.
+  """
+  isActive: Boolean!
+  dateJoined: DateTime!
+  ci: String!
+  celular: String!
+  status: String!
+  visibility: String!
+  foto: String
+  cv: String
+  email: String
+  databaseId: Int
+  fullName: String
+  modules: [String]
+  role: RoleType
+}
+
+type RoleType {
+  id: ID!
+  name: String!
+  usersCount: Int
+  permissions: [String]
+}
+
+"""
+The `DateTime` scalar type represents a DateTime
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar DateTime
+
+"""
+The `Date` scalar type represents a Date
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar Date
+
+"""An enumeration."""
+enum ClinicalPatientStatusChoices {
+  """Activo"""
+  ACTIVE
+
+  """Inactivo"""
+  INACTIVE
+
+  """Alta"""
+  DISCHARGED
+
+  """Pendiente"""
+  PENDING
+}
+
+type PatientClinicalNoteType {
+  id: ID!
+  patient: PatientType!
+  author: UserType!
+  category: ClinicalPatientClinicalNoteCategoryChoices!
+  content: String!
+  createdAt: DateTime!
+}
+
+"""An enumeration."""
+enum ClinicalPatientClinicalNoteCategoryChoices {
+  """Diagnóstico"""
+  DIAGNOSIS
+
+  """Objetivo general"""
+  GENERAL_OBJECTIVE
+
+  """Observación"""
+  OBSERVATION
+
+  """Área Física"""
+  PHYSICAL_AREA
+
+  """Área Emocional"""
+  EMOTIONAL_AREA
+
+  """Área Cognitiva"""
+  COGNITIVE_AREA
+
+  """Área Social"""
+  SOCIAL_AREA
+
+  """Métodos"""
+  METHODS
+
+  """Notas Adicionales"""
+  ADDITIONAL_NOTES
+}
+
+type InterventionPlanType {
+  id: ID!
+  patient: PatientType!
+  createdBy: UserType!
+  mainObjective: String!
+  startDate: Date!
+  endDate: Date
+  progressPercent: Int!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  steps: [PlanStepType!]!
+  status: String
+}
+
+type PlanStepType {
+  id: ID!
+  plan: InterventionPlanType!
+  moment: ClinicalPlanStepMomentChoices!
+  durationMinutes: Int
+  objective: ClinicalPlanStepObjectiveChoices!
+  focus: ClinicalPlanStepFocusChoices
+  musicalResources: String
+  musicalEmphasis: String
+  approach: ClinicalPlanStepApproachChoices
+  mltMethod: ClinicalPlanStepMltMethodChoices
+  orderIndex: Int!
+  sessionExecutions: [SessionPlanStepType!]!
+}
+
+"""An enumeration."""
+enum ClinicalPlanStepMomentChoices {
+  """ABSTRACCIÓN"""
+  ABSTRACCION
+
+  """ARMÓNICO"""
+  ARMONICO
+
+  """BIENVENIDA"""
+  BIENVENIDA
+
+  """DANZA LIBRE"""
+  DANZA_LIBRE
+
+  """DESPEDIDA"""
+  DESPEDIDA
+
+  """EXPRESIÓN CORPORAL"""
+  EXPRESION_CORPORAL
+
+  """ISO"""
+  ISO
+
+  """MELÓDICO"""
+  MELODICO
+
+  """RELAJACIÓN"""
+  RELAJACION
+
+  """RITMICO"""
+  RITMICO
+
+  """RITMO Y ESPACIO"""
+  RITMO_Y_ESPACIO
+}
+
+"""An enumeration."""
+enum ClinicalPlanStepObjectiveChoices {
+  """COMPORTAMIENTOS RESTRICTIVOS"""
+  COMPORTAMIENTOS_RESTRICTIVOS
+
+  """EXPLORACIÓN VOCAL"""
+  EXPLORACION_VOCAL
+
+  """INTERACCIÓN SOCIAL COGNITIVA"""
+  INTERACCION_SOCIAL_COGNITIVA
+
+  """MOVIMIENTO CORPORAL CON MÚSICA"""
+  MOVIMIENTO_CORPORAL_CON_MUSICA
+
+  """PERCEPCIÓN EXPLORACIÓN RITMICA"""
+  PERCEPCION_EXPLORACION_RITMICA
+
+  """PERCEPCIÓN EXPLORACIÓN SONORA"""
+  PERCEPCION_EXPLORACION_SONORA
+}
+
+"""An enumeration."""
+enum ClinicalPlanStepFocusChoices {
+  """BERRINCHE"""
+  BERRINCHE
+
+  """RESISTENCIA"""
+  RESISTENCIA
+
+  """AISLAMIENTO"""
+  AISLAMIENTO
+
+  """PASIVIDAD"""
+  PASIVIDAD
+
+  """DESINTERES"""
+  DESINTERES
+
+  """AGRESIVIDAD"""
+  AGRESIVIDAD
+
+  """ESTEREOTIPIAS"""
+  ESTEREOTIPIAS
+
+  """VOCALIZACIONES"""
+  VOCALIZACIONES
+
+  """BALBUCEOS"""
+  BALBUCEOS
+
+  """SILABAS CANÓNICAS"""
+  SILABAS_CANONICAS
+
+  """IMITACIÓN DE CANCIONES"""
+  IMITACION_DE_CANCIONES
+
+  """CREACIÓN VOCAL"""
+  CREACION_VOCAL
+
+  """CONTACTO VISUAL"""
+  CONTACTO_VISUAL
+
+  """COMUNICACIÓN VERBAL"""
+  COMUNICACION_VERBAL
+
+  """INTERACCIÓN CON OBJETOS"""
+  INTERACCION_CON_OBJETOS
+
+  """INTERACCIÓN CON INSTRUMENTOS MUSICALES"""
+  INTERACCION_CON_INSTRUMENTOS_MUSICALES
+
+  """INTERACCIÓN CON EL MUSICOTERAPEUTA"""
+  INTERACCION_CON_EL_MUSICOTERAPEUTA
+
+  """INTERACCIÓN CON LOS PADRES"""
+  INTERACCION_CON_LOS_PADRES
+
+  """INTERACCIÓN CON LOS PARES"""
+  INTERACCION_CON_LOS_PARES
+
+  """ATENCIÓN"""
+  ATENCION
+
+  """IMITACIÓN"""
+  IMITACION
+
+  """ANDAR"""
+  ANDAR
+
+  """CORRER"""
+  CORRER
+
+  """PARAR"""
+  PARAR
+
+  """GESTICULAR"""
+  GESTICULAR
+
+  """DANZAR"""
+  DANZAR
+
+  """MOVIMIENTO EN SU LUGAR"""
+  MOVIMIENTO_EN_SU_LUGAR
+
+  """SALTAR"""
+  SALTAR
+
+  """PULSO INTERNO"""
+  PULSO_INTERNO
+
+  """REGULACIÓN TEMPORAL"""
+  REGULACION_TEMPORAL
+
+  """RITMO REAL"""
+  RITMO_REAL
+
+  """APOYO"""
+  APOYO
+
+  """CONTRASTES DE TEMPO"""
+  CONTRASTES_DE_TEMPO
+
+  """SONIDO / SILENCIO"""
+  SONIDO_SILENCIO
+
+  """TIMBRE"""
+  TIMBRE
+
+  """PLANOS DE ALTURA"""
+  PLANOS_DE_ALTURA
+
+  """MOVIMIENTO SONORO"""
+  MOVIMIENTO_SONORO
+
+  """CONTRASTES DE INTENSIDAD"""
+  CONTRASTES_DE_INTENSIDAD
+
+  """REPETICIÓN DE IDEAS RITMICAS/MELODICAS"""
+  REPETICION_DE_IDEAS_RITMICAS_MELODICAS
+
+  """SENSACIÓN DE CONCLUSIÓN"""
+  SENSACION_DE_CONCLUSION
+}
+
+"""An enumeration."""
+enum ClinicalPlanStepApproachChoices {
+  """ACUL-E1: ABSORCIÓN"""
+  ACUL_E1_ABSORCION
+
+  """ACUL-E2: RESPUESTA SIN INTENCIÓN"""
+  ACUL_E2_RESPUESTA_SIN_INTENCION
+
+  """ACUL-E3: RESPUESTA INTENCIONADA"""
+  ACUL_E3_RESPUESTA_INTENCIONADA
+
+  """ASI-E6: INTROSPECCIÓN"""
+  ASI_E6_INTROSPECCION
+
+  """ASI-E7: COORDINACIÓN"""
+  ASI_E7_COORDINACION
+
+  """DALCROZE"""
+  DALCROZE
+
+  """GIM"""
+  GIM
+
+  """IMI-E4: SALIENDO DEL EGOCENTRISMO"""
+  IMI_E4_SALIENDO_DEL_EGOCENTRISMO
+
+  """IMI-E5: CAPTANDO EL SENTIDO"""
+  IMI_E5_CAPTANDO_EL_SENTIDO
+
+  """MLT GORDON"""
+  MLT_GORDON
+
+  """MT CONDUCTUAL"""
+  MT_CONDUCTUAL
+
+  """MT CREATIVA"""
+  MT_CREATIVA
+
+  """WILLIEMS"""
+  WILLIEMS
+}
+
+"""An enumeration."""
+enum ClinicalPlanStepMltMethodChoices {
+  """ACUL-E1: ABSORCIÓN"""
+  ACUL_E1_ABSORCION
+
+  """ACUL-E2: RESPUESTA SIN INTENCIÓN"""
+  ACUL_E2_RESPUESTA_SIN_INTENCION
+
+  """ACUL-E3: RESPUESTA INTENCIONADA"""
+  ACUL_E3_RESPUESTA_INTENCIONADA
+
+  """ASI-E6: INTROSPECCIÓN"""
+  ASI_E6_INTROSPECCION
+
+  """ASI-E7: COORDINACIÓN"""
+  ASI_E7_COORDINACION
+
+  """DALCROZE"""
+  DALCROZE
+
+  """GIM"""
+  GIM
+
+  """IMI-E4: SALIENDO DEL EGOCENTRISMO"""
+  IMI_E4_SALIENDO_DEL_EGOCENTRISMO
+
+  """IMI-E5: CAPTANDO EL SENTIDO"""
+  IMI_E5_CAPTANDO_EL_SENTIDO
+
+  """MLT GORDON"""
+  MLT_GORDON
+
+  """MT CONDUCTUAL"""
+  MT_CONDUCTUAL
+
+  """MT CREATIVA"""
+  MT_CREATIVA
+
+  """WILLIEMS"""
+  WILLIEMS
+}
+
+type SessionPlanStepType {
+  id: ID!
+  session: SessionType!
+  planStep: PlanStepType!
+  isCompleted: Boolean!
+
+  """Duración real en minutos durante esta sesión"""
+  actualDuration: Int
+  createdAt: DateTime!
+}
+
+type SessionType implements Node {
+  """The ID of the object"""
+  id: ID!
+  patient: PatientType
+  therapist: UserType!
+  group: InstitutionGroupType
+  sessionDate: DateTime
+  sessionType: TherapeuticSessionsSessionSessionTypeChoices!
+  sessionStatus: TherapeuticSessionsSessionSessionStatusChoices!
+  sessionNumber: Int!
+  durationMinutes: Int
+  cycleNumber: Int
+  notes: String
+  videoUrl: String
+  videoStatus: TherapeuticSessionsSessionVideoStatusChoices
+  paymentStatus: TherapeuticSessionsSessionPaymentStatusChoices!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  sessionPlanSteps: [SessionPlanStepType!]!
+  sessionResources: [SessionResourceType!]!
+  sessionInventory: [SessionInventoryType!]!
+  scaleEvaluations: [ScaleEvaluationType!]!
+  databaseId: Int
+  sessionTypeDisplay: String
+  paymentStatusDisplay: String
+
+  """Asignaciones de formularios del paciente vinculado a esta sesión."""
+  formAssignments: [FormAssignmentType]
+}
+
+type InstitutionGroupType implements Node {
+  """The ID of the object"""
+  id: ID!
+  institution: InstitutionType!
+  name: String!
+  description: String
+  therapeuticSessions: [SessionType]
+}
+
+type InstitutionType implements Node {
+  """The ID of the object"""
+  id: ID!
+  name: String!
+  address: String
+  contactName: String!
+  contactEmail: String
+  contactPhone: String
+  groups: [InstitutionGroupType]
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsSessionSessionTypeChoices {
+  """Individual"""
+  INDIVIDUAL
+
+  """Grupal"""
+  GROUP
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsSessionSessionStatusChoices {
+  """Completa"""
+  COMPLETA
+
+  """Confirma"""
+  CONFIRMA
+
+  """Agendada"""
+  AGENDADA
+
+  """Reprograma"""
+  REPROGRAMA
+
+  """Cancelada"""
+  CANCELADA
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsSessionVideoStatusChoices {
+  """Subiendo"""
+  SUBIENDO
+
+  """Subido"""
+  SUBIDO
+
+  """Fallo"""
+  FALLO
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsSessionPaymentStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Pagada"""
+  PAID
+
+  """Exenta"""
+  EXEMPT
+}
+
+type SessionResourceType {
+  id: ID!
+  session: SessionType!
+  resource: DigitalResourceType!
+}
+
+type DigitalResourceType {
+  id: ID!
+  title: String!
+  type: TherapeuticSessionsDigitalResourceTypeChoices!
+  category: String
+  url: String!
+  typeDisplay: String
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsDigitalResourceTypeChoices {
+  """Audio"""
+  AUDIO
+
+  """Video"""
+  VIDEO
+
+  """Imagen"""
+  IMAGE
+
+  """Partitura"""
+  SHEET_MUSIC
+
+  """Documento"""
+  DOCUMENT
+
+  """Enlace web"""
+  WEB_LINK
+}
+
+type SessionInventoryType {
+  id: ID!
+  session: SessionType!
+  item: InventoryItemType!
+}
+
+type InventoryItemType {
+  id: ID!
+  name: String!
+  type: TherapeuticSessionsInventoryItemTypeChoices!
+  condition: TherapeuticSessionsInventoryItemConditionChoices!
+  status: TherapeuticSessionsInventoryItemStatusChoices!
+  room: String!
+  statusDisplay: String
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsInventoryItemTypeChoices {
+  """Instrumento"""
+  INSTRUMENT
+
+  """Equipo"""
+  EQUIPMENT
+
+  """Material"""
+  MATERIAL
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsInventoryItemConditionChoices {
+  """Bueno"""
+  GOOD
+
+  """Regular"""
+  FAIR
+
+  """Dañado"""
+  DAMAGED
+}
+
+"""An enumeration."""
+enum TherapeuticSessionsInventoryItemStatusChoices {
+  """Disponible"""
+  AVAILABLE
+
+  """En uso"""
+  IN_USE
+
+  """En mantenimiento"""
+  MAINTENANCE
+}
+
+type ScaleEvaluationType {
+  id: ID!
+  scale: ScaleType!
+  patient: PatientType!
+  evaluator: UserType!
+  session: SessionType
+  evaluatedAt: DateTime!
+  subscaleResponses: [ScaleEvaluationSubscaleResponseType!]!
+  valueResponses: [ScaleEvaluationValueResponseType!]!
+  inSession: Boolean
+  totalScore: Int
+}
+
+type ScaleType {
+  id: ID!
+  name: String!
+  description: String
+  scaleType: EvaluationsScaleScaleTypeChoices!
+  subscales: [SubscaleType!]!
+  values: [ScaleValueType!]!
+}
+
+"""An enumeration."""
+enum EvaluationsScaleScaleTypeChoices {
+  """Por subescalas"""
+  SUBSCALE
+
+  """Por lista de valores"""
+  VALUE_LIST
+}
+
+type SubscaleType {
+  id: ID!
+  scale: ScaleType!
+  name: String!
+  description: String
+  category: String
+  maxValue: Int!
+}
+
+type ScaleValueType {
+  id: ID!
+  scale: ScaleType!
+  label: String!
+  value: Int!
+}
+
+type ScaleEvaluationSubscaleResponseType {
+  id: ID!
+  evaluation: ScaleEvaluationType!
+  subscale: SubscaleType!
+  score: Int!
+}
+
+type ScaleEvaluationValueResponseType {
+  id: ID!
+  evaluation: ScaleEvaluationType!
+  scaleValue: ScaleValueType!
+}
+
+type FormAssignmentType {
+  id: ID!
+  form: FormType!
+  assignedTo: UserType
+  assignedBy: UserType!
+  session: SessionType
+  patient: PatientType
+  createdAt: DateTime!
+  responses: [FormResponseType!]!
+  completionRatio: String
+}
+
+type FormType {
+  id: ID!
+  name: String!
+  description: String
+  questions: [FormQuestionType!]!
+  assignments: [FormAssignmentType!]!
+}
+
+type FormQuestionType {
+  id: ID!
+  form: FormType!
+  question: String!
+  questionType: EvaluationsFormQuestionQuestionTypeChoices!
+  isRequired: Boolean!
+  orderIndex: Int!
+}
+
+"""An enumeration."""
+enum EvaluationsFormQuestionQuestionTypeChoices {
+  """Texto libre"""
+  TEXT_LONG
+
+  """Texto corto"""
+  TEXT
+
+  """Número"""
+  NUMBER
+
+  """Fecha"""
+  DATE
+
+  """Sí / No"""
+  BOOLEAN
+
+  """Escala"""
+  SCALE
+
+  """Opción múltiple"""
+  MULTIPLE_CHOICE
+}
+
+type FormResponseType {
+  id: ID!
+  assignment: FormAssignmentType!
+  question: FormQuestionType!
+  response: String!
+  respondedAt: DateTime!
+}
+
+type TherapyReportType {
+  id: ID!
+  patient: PatientType!
+  generatedBy: UserType!
+  reportUrl: String!
+  createdAt: DateTime!
+}
+
+type SessionTypeConnection {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+
+  """Contains the nodes in this connection."""
+  edges: [SessionTypeEdge]!
+}
+
+"""
+The Relay compliant `PageInfo` type, containing data necessary to paginate this connection.
+"""
+type PageInfo {
+  """When paginating forwards, are there more items?"""
+  hasNextPage: Boolean!
+
+  """When paginating backwards, are there more items?"""
+  hasPreviousPage: Boolean!
+
+  """When paginating backwards, the cursor to continue."""
+  startCursor: String
+
+  """When paginating forwards, the cursor to continue."""
+  endCursor: String
+}
+
+"""A Relay edge containing a `SessionType` and its cursor."""
+type SessionTypeEdge {
+  """The item at the end of the edge"""
+  node: SessionType
+
+  """A cursor for use in pagination"""
+  cursor: String!
+}
+
+type PaymentType {
+  id: ID!
+  patient: PatientType!
+  discount: DiscountType
+  sessionsCount: Int!
+  pricePerSession: Decimal!
+  amountPaid: Decimal!
+  paymentMethod: FinancePaymentPaymentMethodChoices!
+  paymentDate: DateTime!
+  paymentStatus: FinancePaymentPaymentStatusChoices!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  totalAmount: Float
+  debt: Float
+}
+
+type DiscountType {
+  id: ID!
+  name: String!
+  type: FinanceDiscountTypeChoices!
+  value: Decimal!
+  description: String
+}
+
+"""An enumeration."""
+enum FinanceDiscountTypeChoices {
+  """Porcentaje"""
+  PERCENTAGE
+
+  """Monto fijo"""
+  FIXED
+}
+
+"""The `Decimal` scalar type represents a python Decimal."""
+scalar Decimal
+
+"""An enumeration."""
+enum FinancePaymentPaymentMethodChoices {
+  """Efectivo"""
+  EFECTIVO
+
+  """Transferencia"""
+  TRANSFERENCIA
+
+  """Tarjeta"""
+  TARJETA
+
+  """QR"""
+  QR
+}
+
+"""An enumeration."""
+enum FinancePaymentPaymentStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Parcial"""
+  PARTIAL
+
+  """Completado"""
+  COMPLETED
+}
+
+type PaginatedInterventionPlans {
+  results: [InterventionPlanType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type GrowthPointType {
+  month: String
+  total: Int
+}
+
+type PaginatedScales {
+  results: [ScaleType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedScaleEvaluations {
+  results: [ScaleEvaluationType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedForms {
+  results: [FormType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedFormAssignments {
+  results: [FormAssignmentType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedPaymentType {
+  results: [PaymentType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedExpenses {
+  results: [ExpenseType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type ExpenseType {
+  id: ID!
+  description: String!
+  category: String!
+  amount: Decimal!
+  expenseDate: DateTime!
+  status: FinanceExpenseStatusChoices!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""An enumeration."""
+enum FinanceExpenseStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Pagado"""
+  PAID
+
+  """Cancelado"""
+  CANCELLED
+}
+
+type PaginatedCourses {
+  results: [CourseType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type CourseType {
+  id: ID!
+  name: String!
+  description: String
+  price: Decimal!
+  state: FinanceCourseStateChoices!
+  enrollments: [CourseEnrollmentType!]!
+  studentsCount: Int
+  totalIncome: Float
+}
+
+"""An enumeration."""
+enum FinanceCourseStateChoices {
+  """Borrador"""
+  DRAFT
+
+  """Activo"""
+  ACTIVE
+
+  """Archivado"""
+  ARCHIVED
+}
+
+type CourseEnrollmentType {
+  id: ID!
+  course: CourseType!
+  fullName: String!
+  carnet: String
+  enrolledAt: DateTime!
+  payment: CoursePaymentType
+}
+
+type CoursePaymentType {
+  id: ID!
+  enrollment: CourseEnrollmentType!
+  paymentMethod: FinanceCoursePaymentPaymentMethodChoices!
+  amount: Decimal!
+  paymentDate: DateTime!
+  paymentStatus: FinanceCoursePaymentPaymentStatusChoices!
+}
+
+"""An enumeration."""
+enum FinanceCoursePaymentPaymentMethodChoices {
+  """Efectivo"""
+  EFECTIVO
+
+  """Transferencia"""
+  TRANSFERENCIA
+
+  """Tarjeta"""
+  TARJETA
+
+  """QR"""
+  QR
+}
+
+"""An enumeration."""
+enum FinanceCoursePaymentPaymentStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Completado"""
+  COMPLETED
+
+  """Reembolsado"""
+  REFUNDED
+}
+
+type PaginatedCourseEnrollments {
+  results: [CourseEnrollmentType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedInstitutions {
+  results: [InstitutionType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedInstitutionGroups {
+  results: [InstitutionGroupType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedBlogPosts {
+  results: [BlogPostType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type BlogPostType {
+  id: ID!
+  title: String!
+  excerpt: String
+  content: String!
+  category: String!
+  author: String!
+  imageUrl: String
+  readTime: String
+  status: MarketingBlogPostStatusChoices!
+  type: MarketingBlogPostTypeChoices!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""An enumeration."""
+enum MarketingBlogPostStatusChoices {
+  """Borrador"""
+  DRAFT
+
+  """Publicado"""
+  PUBLISHED
+}
+
+"""An enumeration."""
+enum MarketingBlogPostTypeChoices {
+  """Markdown"""
+  MARKDOWN
+
+  """LaTeX"""
+  LATEX
+}
+
+type PaginatedCampaigns {
+  results: [MarketingCampaignType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type MarketingCampaignType {
+  id: ID!
+  name: String!
+  platform: String!
+  status: MarketingMarketingCampaignStatusChoices!
+  budget: Decimal!
+  spent: Decimal!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  leads: [LeadType!]!
+  remainingBudget: Float
+}
+
+"""An enumeration."""
+enum MarketingMarketingCampaignStatusChoices {
+  """Borrador"""
+  DRAFT
+
+  """Activa"""
+  ACTIVE
+
+  """Pausada"""
+  PAUSED
+
+  """Finalizada"""
+  FINISHED
+}
+
+type LeadType {
+  id: ID!
+  name: String!
+  phone: String
+  email: String
+  status: MarketingLeadStatusChoices!
+  campaign: MarketingCampaignType
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""An enumeration."""
+enum MarketingLeadStatusChoices {
+  """Nuevo"""
+  NEW
+
+  """Contactado"""
+  CONTACTED
+
+  """Calificado"""
+  QUALIFIED
+
+  """Perdido"""
+  LOST
+}
+
+type PaginatedLeads {
+  results: [LeadType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+"""
+Resultado paginado de sesiones.
+- Paginación normal (by_cycles=False): `sessions` contiene los datos.
+- Paginación por ciclos (by_cycles=True): `cycles` contiene los datos y `sessions` es null.
+"""
+type PaginatedSessions {
+  sessions: [SessionType]
+  cycles: [CycleType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+
+  """Indica si la respuesta está paginada por ciclos."""
+  byCycles: Boolean
+}
+
+type CycleType {
+  """ID único virtual del ciclo"""
+  id: ID
+  patientId: ID
+  patientDbId: Int
+  patient: PatientType
+  patientName: String
+  cycleNumber: Int
+
+  """Total de sesiones en el ciclo"""
+  sessionCount: Int
+
+  """Sesiones completadas en el ciclo"""
+  completedCount: Int
+
+  """Estado del ciclo (Activo/Finalizado)"""
+  status: String
+
+  """Sesiones que pertenecen a este ciclo"""
+  sessions: [SessionType]
+
+  """Fecha de la primera sesión del ciclo"""
+  firstSessionDate: DateTime
+
+  """Fecha de la última sesión del ciclo"""
+  lastSessionDate: DateTime
+
+  """Terapeutas que atendieron en este ciclo"""
+  therapists: [UserType]
+  paymentSummary: CyclePaymentSummaryType
+}
+
+"""Resumen de estados de pago de las sesiones del ciclo."""
+type CyclePaymentSummaryType {
+  """Sesiones pagadas"""
+  paid: Int
+
+  """Sesiones pendientes de pago"""
+  pending: Int
+
+  """Sesiones exentas de pago"""
+  exempt: Int
+}
+
+"""Paginación por ciclos: cada página contiene ciclos completos."""
+type PaginatedCycles {
+  results: [CycleType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedDigitalResources {
+  results: [DigitalResourceType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedInventoryItems {
+  results: [InventoryItemType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+"""Paginación de últimos ciclos por paciente."""
+type PaginatedPatientsLastCycle {
+  results: [CycleType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedUsers {
+  results: [UserType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type PaginatedRoles {
+  results: [RoleType]
+  totalCount: Int
+  totalPages: Int
+  currentPage: Int
+}
+
+type NotificationType {
+  id: ID!
+  user: UserType!
+  message: String!
+  tipo: String!
+  metadatos: JSONString!
+  isRead: Boolean!
+  createdAt: DateTime!
+}
+
+"""
+Allows use of a JSON String for input / output from the GraphQL schema.
+
+Use of this type is *not recommended* as you lose the benefits of having a defined, static
+schema (one of the key benefits of GraphQL).
+"""
+scalar JSONString
+
+type OnboardingViewType {
+  viewKey: String!
+  completedAt: DateTime!
+}
+
+"""Usuario con la lista de pacientes que le están asociados."""
+type UserWithPatientsType {
+  user: UserType
+  patients: [UserPatientSummaryType]
+  patientsCount: Int
+}
+
+"""Paciente resumido para el contexto de un usuario."""
+type UserPatientSummaryType {
+  id: ID
+  databaseId: Int
+  fullName: String
+  diagnosis: String
+  status: String
+
+  """'therapist' | 'tutor'"""
+  relation: String
+}
+
+type Mutation {
+  """
+  Marca una sesión como subida (o con fallo) desde el worker de Next.js.
+  
+  Autenticación entre servicios mediante el header `X-Service-Key`.
+  Actualiza `Session.video_url` / `Session.video_status` y crea la
+  notificación para el terapeuta con tipo y metadatos (para acciones
+  como "Reintentar" desde la campana).
+  """
+  completarSubidaSesion(jobId: String, message: String, ok: Boolean!, pipelineJobId: String, sessionId: ID!, storage: String, videoUrl: String): CompletarSubidaSesion
+
+  """
+  Marca una sesión con `video_status = subiendo`.
+  
+  Se invoca desde el worker de Next.js apenas comienza a subir la grabación.
+  No crea notificaciones.
+  """
+  marcarSubidaEnProgreso(sessionId: ID!): MarcarSubidaEnProgreso
+  createPatient(authorId: ID!, birthDate: Date, ci: String, diagnosis: String, firstName: String!, imageUrl: String, lastName: String!, notes: String, residence: String, selectedDay: String, selectedTime: String, tutorCelular: String, tutorCi: String, tutorEmail: String, tutorName: String): CreatePatient
+  updatePatientStatus(id: ID!, status: String!): UpdatePatientStatus
+  createInterventionPlan(createdById: ID!, endDate: Date, mainObjective: String!, patientId: ID!, startDate: Date): CreateInterventionPlan
+  updateInterventionPlan(endDate: Date, id: ID!, mainObjective: String, startDate: Date): UpdateInterventionPlan
+  deleteInterventionPlan(id: ID!): DeleteInterventionPlan
+  updatePlanProgress(id: ID!, progressPercent: Int!): UpdatePlanProgress
+  updatePatient(diagnosis: String, id: ID!, imageUrl: String, registrationComplete: Boolean, residence: String): UpdatePatient
+  updateClinicalNotes(authorId: ID!, notes: [BasicNote]!, patientId: ID!): UpdateClinicalNotes
+  createStepPlan(approach: String, durationMinutes: Int, focus: String, mltMethod: String, moment: String!, musicalEmphasis: String, musicalResources: String, objective: String!, orderIndex: Int, planId: ID!): CreateStepPlan
+  updateStepPlan(approach: String, durationMinutes: Int, focus: String, id: ID!, mltMethod: String, moment: String, musicalEmphasis: String, musicalResources: String, objective: String): UpdateStepPlan
+  deleteStepPlan(id: ID!): DeleteStepPlan
+  createTherapyReport(generatedById: ID!, patientId: ID!, reportUrl: String!): CreateTherapyReport
+  deleteTherapyReport(id: ID!): DeleteTherapyReport
+  deletePatient(id: ID!): DeletePatient
+
+  """
+  Asocia un PlanStep a una sesión, creando el registro de control si no existe.
+  """
+  addStepToSession(actualDuration: Int, isCompleted: Boolean, notes: String, planStepId: ID!, sessionId: ID!): AddStepToSession
+
+  """Actualiza el estado de ejecución de un paso dentro de una sesión."""
+  updateSessionPlanStep(actualDuration: Int, isCompleted: Boolean, notes: String, planStepId: ID!, sessionId: ID!): UpdateSessionPlanStep
+
+  """Desasocia un PlanStep de una sesión."""
+  removeStepFromSession(planStepId: ID!, sessionId: ID!): RemoveStepFromSession
+  submitFormResponse(assignmentId: ID!, questionId: ID!, responseText: String!): SubmitFormResponse
+  submitFullForm(assignmentId: ID!, responses: [ResponseInput]!): SubmitFullForm
+  addScaleResponse(evaluatorId: ID!, patientId: ID!, scaleId: ID!, sessionId: ID, subscales: [ResponseSubScale], valueId: ID): AddScaleResponse
+  createScale(description: String, name: String!, scaleType: String!, subscales: [SubscaleInput], values: [ScaleValueInput]): CreateScale
+  deleteScale(id: ID!): DeleteScale
+  createForm(description: String, name: String!, questions: [QuestionInput]!): CreateForm
+  deleteForm(id: ID!): DeleteForm
+  assignForm(assignedById: ID!, assignedToId: ID, formId: ID!, patientId: ID, sessionId: ID): AssignForm
+  updateFormAssignment(assignedToId: ID, id: ID!, patientId: ID, sessionId: ID): UpdateFormAssignment
+  deleteFormAssignment(id: ID!): DeleteFormAssignment
+  createPayment(amountPaid: Float!, discountId: ID, patientId: ID!, paymentMethod: String!, pricePerSession: Float!, sessionsCount: Int!): CreatePayment
+  updatePayment(amountPaid: Float, id: ID!, paymentStatus: String): UpdatePayment
+  deletePayment(id: ID!): DeletePayment
+  createExpense(amount: Float!, category: String!, description: String!, expenseDate: DateTime!): CreateExpense
+  updateExpenseStatus(id: ID!, status: String!): UpdateExpenseStatus
+  deleteExpense(id: ID!): DeleteExpense
+  enrollInCourse(amount: Float!, carnet: String, courseId: ID!, fullName: String!, paymentMethod: String!): EnrollInCourse
+  createCourse(description: String, name: String!, price: Float!, state: String): CreateCourse
+  updateCourse(description: String, id: ID!, name: String, price: Float, state: String): UpdateCourse
+  deleteCourse(id: ID!): DeleteCourse
+  createDiscount(description: String, name: String!, type: String!, value: Float!): CreateDiscount
+  updateDiscount(description: String, id: ID!, name: String, type: String, value: Float): UpdateDiscount
+  deleteDiscount(id: ID!): DeleteDiscount
+  createInstitution(contactEmail: String, name: String!, phone: String): CreateInstitution
+  updateInstitution(contactEmail: String, id: ID!, name: String, phone: String): UpdateInstitution
+  deleteInstitution(id: ID!): DeleteInstitution
+  createInstitutionGroup(institutionId: ID!, name: String!): CreateInstitutionGroup
+  updateInstitutionGroup(id: ID!, name: String): UpdateInstitutionGroup
+  deleteInstitutionGroup(id: ID!): DeleteInstitutionGroup
+  createCampaign(budget: Float!, name: String!, platform: String!, status: String): CreateCampaign
+  updateCampaign(budget: Float, id: ID!, name: String, platform: String, status: String): UpdateCampaign
+  deleteCampaign(id: ID!): DeleteCampaign
+  updateCampaignSpent(id: ID!, spent: Float!): UpdateCampaignSpent
+  createLead(campaignId: ID, email: String, name: String!, phone: String): CreateLead
+  updateLeadStatus(id: ID!, status: String!): UpdateLeadStatus
+  deleteLead(id: ID!): DeleteLead
+  createBlogPost(author: String!, category: String!, content: String!, excerpt: String, imageUrl: String, readTime: String, status: String, title: String!, type: String): CreateBlogPost
+  updateBlogPost(author: String, category: String, content: String, excerpt: String, id: ID!, imageUrl: String, readTime: String, status: String, title: String, type: String): UpdateBlogPost
+  deleteBlogPost(id: ID!): DeleteBlogPost
+  createSession(durationMinutes: Int, groupId: ID, notes: String, patientId: ID, sessionDate: DateTime!, sessionType: String!, therapistId: ID!, videoUrl: String): CreateSession
+  createCycle(numSessions: Int = 4, patientId: ID!, startDate: Date!, therapistId: ID!): CreateCycle
+  updateSession(durationMinutes: Int, id: ID!, notes: String, sessionDate: DateTime, sessionStatus: String, sessionType: String, therapistId: ID, videoUrl: String): UpdateSession
+  updateSessionPaymentStatus(id: ID!, paymentStatus: String!): UpdateSessionPaymentStatus
+  addSessionResource(resourceId: ID!, sessionId: ID!): AddSessionResource
+  addSessionInventoryItem(itemId: ID!, sessionId: ID!): AddSessionInventoryItem
+
+  """Agrega múltiples recursos digitales a una sesión de una sola vez."""
+  bulkAddSessionResources(resourceIds: [ID]!, sessionId: ID!): BulkAddSessionResources
+
+  """Agrega múltiples ítems de inventario a una sesión de una sola vez."""
+  bulkAddSessionInventoryItems(itemIds: [ID]!, sessionId: ID!): BulkAddSessionInventoryItems
+
+  """Asocia múltiples pasos del plan a una sesión de una sola vez."""
+  bulkAddStepsToSession(planStepIds: [ID]!, sessionId: ID!): BulkAddStepsToSession
+  createInventoryItem(condition: String!, name: String!, room: String!, status: String, type: String!): CreateInventoryItem
+  updateInventoryItem(condition: String, id: ID!, name: String, room: String, status: String, type: String): UpdateInventoryItem
+  deleteInventoryItem(id: ID!): DeleteInventoryItem
+  createDigitalResource(category: String, title: String!, type: String!, url: String!): CreateDigitalResource
+  updateDigitalResource(category: String, id: ID!, title: String, type: String, url: String): UpdateDigitalResource
+  deleteDigitalResource(id: ID!): DeleteDigitalResource
+  deleteSession(id: ID!): DeleteSession
+  createUser(
+    celular: String
+    ci: String!
+    email: String!
+    firstName: String
+    isActive: Boolean
+    isStaff: Boolean
+    lastName: String
+    password: String!
+
+    """ID del grupo/rol a asignar al usuario."""
+    roleId: ID
+    status: String
+
+    """
+    Nombre de usuario. Si se omite o está vacío, se genera automáticamente.
+    """
+    username: String
+    visibility: String
+  ): CreateUser
+  updateUser(celular: String, ci: String, email: String, firstName: String, id: ID!, isActive: Boolean, lastName: String, visibility: String): UpdateUser
+  changePassword(newPassword: String!, oldPassword: String!): ChangePassword
+  markNotificationRead(id: ID!): MarkNotificationRead
+
+  """Marca de forma idempotente una vista como presentada al usuario."""
+  markOnboardingViewSeen(viewKey: String!): MarkOnboardingViewSeen
+  createRole(name: String!, permissions: [String]): CreateRole
+  updateRole(id: ID!, name: String, permissions: [String]): UpdateRole
+  deleteRole(id: ID!): DeleteRole
+  tokenAuth(username: String!, password: String!): ObtainToken
+  refreshToken(refreshToken: String): RefreshToken
+  revokeToken(refreshToken: String): RevokeToken
+  deleteTokenCookie: DeleteJSONWebTokenCookie
+
+  """Delete the browser cookie and revoke its server-side token record."""
+  deleteRefreshTokenCookie: DeleteRefreshTokenCookieAndRevoke
+}
+
+"""
+Marca una sesión como subida (o con fallo) desde el worker de Next.js.
+
+Autenticación entre servicios mediante el header `X-Service-Key`.
+Actualiza `Session.video_url` / `Session.video_status` y crea la
+notificación para el terapeuta con tipo y metadatos (para acciones
+como "Reintentar" desde la campana).
+"""
+type CompletarSubidaSesion {
+  success: Boolean
+}
+
+"""
+Marca una sesión con `video_status = subiendo`.
+
+Se invoca desde el worker de Next.js apenas comienza a subir la grabación.
+No crea notificaciones.
+"""
+type MarcarSubidaEnProgreso {
+  success: Boolean
+}
+
+type CreatePatient {
+  patient: PatientType
+  tutorUsername: String
+  tutorPassword: String
+  tutorCreated: Boolean
+}
+
+type UpdatePatientStatus {
+  patient: PatientType
+}
+
+type CreateInterventionPlan {
+  plan: InterventionPlanType
+}
+
+type UpdateInterventionPlan {
+  plan: InterventionPlanType
+}
+
+type DeleteInterventionPlan {
+  success: Boolean
+}
+
+type UpdatePlanProgress {
+  plan: InterventionPlanType
+}
+
+type UpdatePatient {
+  patient: PatientType
+}
+
+type UpdateClinicalNotes {
+  notesUpdated: [PatientClinicalNoteType]
+}
+
+input BasicNote {
+  category: String
+  content: String
+}
+
+type CreateStepPlan {
+  step: PlanStepType
+}
+
+type UpdateStepPlan {
+  step: PlanStepType
+}
+
+type DeleteStepPlan {
+  success: Boolean
+}
+
+type CreateTherapyReport {
+  report: TherapyReportType
+}
+
+type DeleteTherapyReport {
+  success: Boolean
+}
+
+type DeletePatient {
+  success: Boolean
+  message: String
+}
+
+"""
+Asocia un PlanStep a una sesión, creando el registro de control si no existe.
+"""
+type AddStepToSession {
+  sessionPlanStep: SessionPlanStepType
+}
+
+"""Actualiza el estado de ejecución de un paso dentro de una sesión."""
+type UpdateSessionPlanStep {
+  sessionPlanStep: SessionPlanStepType
+}
+
+"""Desasocia un PlanStep de una sesión."""
+type RemoveStepFromSession {
+  success: Boolean
+}
+
+type SubmitFormResponse {
+  success: Boolean
+  response: FormResponseType
+}
+
+type SubmitFullForm {
+  success: Boolean
+  assignment: FormAssignmentType
+}
+
+input ResponseInput {
+  questionId: ID!
+  responseText: String!
+}
+
+type AddScaleResponse {
+  success: Boolean
+  message: String
+}
+
+input ResponseSubScale {
+  subscaleId: ID!
+  score: Int!
+}
+
+type CreateScale {
+  scale: ScaleType
+}
+
+input SubscaleInput {
+  name: String!
+  description: String
+  maxValue: Int!
+}
+
+input ScaleValueInput {
+  label: String!
+  value: Int!
+}
+
+type DeleteScale {
+  success: Boolean
+}
+
+type CreateForm {
+  form: FormType
+}
+
+input QuestionInput {
+  question: String!
+  questionType: String!
+  isRequired: Boolean
+  orderIndex: Int
+}
+
+type DeleteForm {
+  success: Boolean
+}
+
+type AssignForm {
+  assignment: FormAssignmentType
+}
+
+type UpdateFormAssignment {
+  assignment: FormAssignmentType
+}
+
+type DeleteFormAssignment {
+  success: Boolean
+}
+
+type CreatePayment {
+  payment: PaymentType
+}
+
+type UpdatePayment {
+  payment: PaymentType
+}
+
+type DeletePayment {
+  success: Boolean
+}
+
+type CreateExpense {
+  expense: ExpenseType
+}
+
+type UpdateExpenseStatus {
+  expense: ExpenseType
+}
+
+type DeleteExpense {
+  success: Boolean
+}
+
+type EnrollInCourse {
+  enrollment: CourseEnrollmentType
+}
+
+type CreateCourse {
+  course: CourseType
+}
+
+type UpdateCourse {
+  course: CourseType
+}
+
+type DeleteCourse {
+  success: Boolean
+}
+
+type CreateDiscount {
+  discount: DiscountType
+}
+
+type UpdateDiscount {
+  discount: DiscountType
+}
+
+type DeleteDiscount {
+  success: Boolean
+  message: String
+}
+
+type CreateInstitution {
+  institution: InstitutionType
+}
+
+type UpdateInstitution {
+  institution: InstitutionType
+}
+
+type DeleteInstitution {
+  success: Boolean
+}
+
+type CreateInstitutionGroup {
+  group: InstitutionGroupType
+}
+
+type UpdateInstitutionGroup {
+  group: InstitutionGroupType
+}
+
+type DeleteInstitutionGroup {
+  success: Boolean
+}
+
+type CreateCampaign {
+  campaign: MarketingCampaignType
+}
+
+type UpdateCampaign {
+  campaign: MarketingCampaignType
+}
+
+type DeleteCampaign {
+  success: Boolean
+}
+
+type UpdateCampaignSpent {
+  campaign: MarketingCampaignType
+}
+
+type CreateLead {
+  lead: LeadType
+}
+
+type UpdateLeadStatus {
+  lead: LeadType
+}
+
+type DeleteLead {
+  success: Boolean
+}
+
+type CreateBlogPost {
+  post: BlogPostType
+}
+
+type UpdateBlogPost {
+  post: BlogPostType
+}
+
+type DeleteBlogPost {
+  success: Boolean
+}
+
+type CreateSession {
+  session: SessionType
+}
+
+type CreateCycle {
+  success: Boolean
+  message: String
+}
+
+type UpdateSession {
+  session: SessionType
+}
+
+type UpdateSessionPaymentStatus {
+  session: SessionType
+}
+
+type AddSessionResource {
+  sessionResource: Boolean
+}
+
+type AddSessionInventoryItem {
+  sessionInventory: SessionType
+}
+
+"""Agrega múltiples recursos digitales a una sesión de una sola vez."""
+type BulkAddSessionResources {
+  addedCount: Int
+}
+
+"""Agrega múltiples ítems de inventario a una sesión de una sola vez."""
+type BulkAddSessionInventoryItems {
+  addedCount: Int
+}
+
+"""Asocia múltiples pasos del plan a una sesión de una sola vez."""
+type BulkAddStepsToSession {
+  addedCount: Int
+}
+
+type CreateInventoryItem {
+  item: InventoryItemType
+}
+
+type UpdateInventoryItem {
+  item: InventoryItemType
+}
+
+type DeleteInventoryItem {
+  success: Boolean
+}
+
+type CreateDigitalResource {
+  resource: DigitalResourceType
+}
+
+type UpdateDigitalResource {
+  resource: DigitalResourceType
+}
+
+type DeleteDigitalResource {
+  success: Boolean
+}
+
+type DeleteSession {
+  success: Boolean
+  message: String
+}
+
+type CreateUser {
+  user: UserType
+
+  """Indica si el correo con las credenciales fue enviado exitosamente."""
+  emailSent: Boolean
+}
+
+type UpdateUser {
+  user: UserType
+}
+
+type ChangePassword {
+  success: Boolean
+}
+
+type MarkNotificationRead {
+  notification: NotificationType
+}
+
+"""Marca de forma idempotente una vista como presentada al usuario."""
+type MarkOnboardingViewSeen {
+  onboardingView: OnboardingViewType
+}
+
+type CreateRole {
+  role: RoleType
+}
+
+type UpdateRole {
+  role: RoleType
+}
+
+type DeleteRole {
+  success: Boolean
+}
+
+type ObtainToken {
+  payload: GenericScalar!
+  refreshExpiresIn: Int!
+  user: UserType
+  token: String!
+  refreshToken: String!
+}
+
+"""
+The `GenericScalar` scalar type represents a generic
+GraphQL scalar value that could be:
+String, Boolean, Int, Float, List or Object.
+"""
+scalar GenericScalar
+
+type RefreshToken {
+  payload: GenericScalar!
+  refreshExpiresIn: Int!
+  token: String!
+  refreshToken: String!
+}
+
+type RevokeToken {
+  revoked: Int!
+}
+
+type DeleteJSONWebTokenCookie {
+  deleted: Boolean!
+}
+
+"""Delete the browser cookie and revoke its server-side token record."""
+type DeleteRefreshTokenCookieAndRevoke {
+  deleted: Boolean!
+}
