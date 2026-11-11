@@ -1,40 +1,130 @@
-name: "CI/CD — Lint, Test, Security Scan & Deploy"
+name: Backend DevSecOps
 
 on:
-  push:
-    branches: ["master"]
   pull_request:
-    branches: ["master"]
+    branches: [master]
+  push:
+    branches: [master]
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: backend-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.12"
+  DJANGO_SETTINGS_MODULE: config.settings
+
 jobs:
-  lint:
-    name: "Lint (py_compile)"
+  fast-checks:
+    name: "Phase 1 - Quality and secrets"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          python-version: "3.12"
+          fetch-depth: 0
 
-      - name: Syntax check all Python files
+      - name: Detect secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install development dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+      - name: Compile Python sources
         run: |
-          find . -name "*.py" -not -path "*/venv/*" -not -path "*/.git/*" \
-            -not -path "*/__pycache__/*" -exec python -m py_compile {} \;
-          echo "All Python files compile successfully"
+          python -m compileall -q .
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
 
-  test:
-    name: "Tests (Django)"
+  sast:
+    name: "Phase 2 - CodeQL SAST"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:python
+
+  dependency-security:
+    name: "Phase 3 - Dependency security"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt --strict
+
+      - name: Scan source tree with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-filesystem.sarif
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy filesystem report
+        if: ${{ always() && hashFiles('trivy-filesystem.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-filesystem.sarif
+
+      - name: Upload security artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-trivy-filesystem
+          path: trivy-filesystem.sarif
+          if-no-files-found: ignore
+          retention-days: 30
+
+  tests:
+    name: "Phase 4 - Django tests and coverage"
+    runs-on: ubuntu-latest
+    needs: fast-checks
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:15
@@ -49,107 +139,205 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
     env:
       SECRET_KEY: ci-test-secret-key-not-for-production
-      DEBUG: "True"
+      DEBUG: "False"
       POSTGRES_DB: test_cbm
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_password
       DB_HOST: localhost
       DB_PORT: "5432"
-      FRONTEND_ORIGINS: http://localhost:3000
       ALLOWED_HOSTS: localhost,127.0.0.1
-
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      APP_ENCRYPTION_KEY_ID: ci-test-key
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run tests
-        run: python manage.py test --verbosity=2
-
-  security-scan:
-    name: "Security Scan"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt coverage
 
-      - name: Block secrets and misconfiguration findings
+      - name: Run Django checks
         run: |
-          trivy fs --scanners secret,misconfig \
-            --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 1 .
+          python manage.py check --deploy
+          python manage.py makemigrations --check --dry-run
 
-      - name: Scan — JSON
+      - name: Run tests with coverage
         run: |
-          trivy fs --format json --output trivy-report.json \
-            --severity CRITICAL,HIGH,MEDIUM,LOW \
-            --scanners vuln,secret,misconfig --exit-code 0 .
+          coverage run --branch manage.py test --verbosity=2
+          coverage xml -o coverage.xml
+          coverage report --fail-under=0
 
-      - name: Scan — SARIF
-        run: |
-          trivy fs --format sarif --output trivy-report.sarif \
-            --severity CRITICAL,HIGH,MEDIUM,LOW \
-            --scanners vuln,secret,misconfig --exit-code 0 .
-
-      - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true
-        with:
-          sarif_file: trivy-report.sarif
-
-      - name: Upload reports
+      - name: Upload coverage
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-backend-reports
-          path: trivy-report.*
+          name: backend-coverage
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  sonar:
+    name: "Phase 5 - SonarQube"
+    runs-on: ubuntu-latest
+    needs: tests
+    timeout-minutes: 20
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+    steps:
+      - name: SonarQube not configured
+        if: ${{ env.SONAR_TOKEN == '' || env.SONAR_HOST_URL == '' }}
+        run: echo "SonarQube is not configured; continuing without the optional quality gate."
+
+      - name: Checkout
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: .
+
+      - name: Run SonarQube quality gate
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
+        uses: SonarSource/sonarqube-scan-action@v7
+        with:
+          args: >-
+            -Dsonar.projectKey=cbm-backend
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/migrations/**,**/tests/**,**/.venv/**,**/venv/**
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.qualitygate.wait=true
+
+  docker:
+    name: "Phase 6 - Build and scan Docker image"
+    runs-on: ubuntu-latest
+    needs: [fast-checks, dependency-security, tests, sast]
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE: cbm-backend:${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload image report
+        if: ${{ always() && hashFiles('trivy-image.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+
+      - name: Upload image artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-trivy-image
+          path: trivy-image.sarif
+          if-no-files-found: ignore
           retention-days: 30
 
   deploy:
-    name: "Deploy Backend"
+    name: "Phase 7 - Deploy backend"
     runs-on: ubuntu-latest
-    needs: [lint, test, security-scan]
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
+    needs: [tests, sast, dependency-security, docker, sonar]
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/master' &&
+        needs.tests.result == 'success' &&
+        needs.sast.result == 'success' &&
+        needs.dependency-security.result == 'success' &&
+        needs.docker.result == 'success' &&
+        (needs.sonar.result == 'success' || needs.sonar.result == 'skipped')
+      }}
+    environment: production
+    timeout-minutes: 20
     steps:
-      - name: Setup SSH
+      - name: Prepare SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p 22 ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
 
-      - name: Test SSH connection
+      - name: Verify SSH connection
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'echo "SSH connection OK"'
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'echo SSH connection OK'
 
       - name: Deploy via SSH
         env:
-          SSH_KEY: ~/.ssh/deploy_key
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          ssh -i ${{ env.SSH_KEY }} -o StrictHostKeyChecking=yes \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash -s << 'DEPLOY_EOF'
-            set -ex
-            cd ~/cbm-backend
-            git fetch origin master
-            git reset --hard origin/master
-            source venv/bin/activate
-            pip install -r requirements.txt
-            python manage.py migrate --noinput
-            python manage.py collectstatic --noinput
-            pm2 restart cbm-backend
-            pm2 save
-            echo "Backend deployed successfully!"
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" bash -s <<'DEPLOY_EOF'
+          set -euo pipefail
+          cd ~/cbm-backend
+          git fetch origin master
+          git reset --hard origin/master
+          source venv/bin/activate
+          pip install -r requirements.txt
+          python manage.py migrate --noinput
+          python manage.py collectstatic --noinput
+          pm2 restart cbm-backend
+          pm2 save
           DEPLOY_EOF
+
+      - name: Verify deployed health endpoint
+        if: ${{ vars.BACKEND_HEALTHCHECK_URL != '' }}
+        env:
+          HEALTHCHECK_URL: ${{ vars.BACKEND_HEALTHCHECK_URL }}
+        run: curl --fail --show-error --silent --retry 10 --retry-delay 5 "$HEALTHCHECK_URL"
