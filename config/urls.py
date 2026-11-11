@@ -1,10 +1,11 @@
 from django.contrib import admin
 from django.urls import include, path
 from graphql_jwt.decorators import jwt_cookie
-from config.views import CBMGraphQLView, application_encryption_key_view, csrf_token_view
+from config.views import CBMGraphQLView, application_encryption_key_view, csrf_token_view, health_view
 from django.views.decorators.csrf import csrf_exempt
 
 urlpatterns = [
+    path("health/", health_view, name="health"),
     path('admin/', admin.site.urls),
     # path(
     #        "graphql/",

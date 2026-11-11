@@ -6,6 +6,11 @@ from django.views.decorators.http import require_GET
 from .application_encryption import public_jwk
 
 @require_GET
+def health_view(request):
+    return JsonResponse({"status": "ok"})
+
+
+@require_GET
 def csrf_token_view(request):
     return JsonResponse({"csrfToken": get_token(request)})
 
