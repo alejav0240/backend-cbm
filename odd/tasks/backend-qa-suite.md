@@ -25,11 +25,11 @@ Acceptance: "Guardar una copia de la estructura del esquema actual y comparar el
 Checks: deterministic schema snapshot and breaking-change test with an explicit update command.
 
 ## Tasks
-- T1 [S1] inline — Add shared test factories/helpers and model/service unit coverage. Status: complete. Commit: pending.
-- T2 [S2] inline — Add GraphQL query, mutation, auth, RBAC, and validation integration coverage. Status: complete. Commit: pending.
-- T3 [S3] inline — Add query-count assertions and load-test scaffold/documentation. Status: complete. Commit: pending.
-- T4 [S4] inline — Add schema snapshot and contract regression coverage. Status: pending. Commit: TBD.
-- T5 [S1-S4] inline — Expand test runner/CI discovery and execute available verification. Status: pending. Commit: TBD.
+- T1 [S1] inline — Add shared test factories/helpers and model/service unit coverage. Status: complete. Commit: 68f4fcc.
+- T2 [S2] inline — Add GraphQL query, mutation, auth, RBAC, and validation integration coverage. Status: complete. Commit: 68f4fcc.
+- T3 [S3] inline — Add query-count assertions and load-test scaffold/documentation. Status: complete. Commit: 68f4fcc and 4900d1d.
+- T4 [S4] inline — Add schema snapshot and contract regression coverage. Status: complete. Commit: 4900d1d.
+- T5 [S1-S4] inline — Expand test runner/CI discovery and execute available verification. Status: complete. Commit: 68f4fcc and 4900d1d.
 
 ## Log
 
