@@ -40,6 +40,7 @@ WORKDIR /app
 
 # Runtime libraries only. SSH clients and compilers are intentionally excluded.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libgomp1 \

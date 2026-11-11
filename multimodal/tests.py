@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sys
 import tempfile
 from unittest.mock import patch
 
@@ -21,7 +22,7 @@ class AnalisisVideoHttpTests(SimpleTestCase):
         cuerpo = {"status": "completed", "session_id": "HTTP-001", "demuca": {"status": "not_available"}}
         archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
         with (
-            patch("multimodal.views._python_ml", return_value=Path("/usr/bin/python")),
+            patch("multimodal.views._python_ml", return_value=Path(sys.executable)),
             patch("multimodal.views.subprocess.run") as ejecutar,
         ):
             ejecutar.return_value.returncode = 0

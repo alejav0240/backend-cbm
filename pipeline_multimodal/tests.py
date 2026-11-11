@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sys
 import tempfile
 from unittest.mock import patch
 
@@ -53,7 +54,7 @@ class PipelineMultimodalTests(SimpleTestCase):
 
     def test_servicio_construye_comando_cli(self):
         servicio = __import__("pipeline_multimodal.servicios", fromlist=["ServicioPipelineMultimodal"]).ServicioPipelineMultimodal(
-            Path("/proyecto"), Path("/usr/bin/python"), timeout=3
+            Path("/proyecto"), Path(sys.executable), timeout=3
         )
         with patch("pipeline_multimodal.servicios.subprocess.run") as ejecutar:
             ejecutar.return_value.returncode = 0
