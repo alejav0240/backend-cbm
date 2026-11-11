@@ -11,6 +11,9 @@ apps=(
   evaluations
   onedrive
   uploads
+  config
+  multimodal
+  pipeline_multimodal
 )
 
 failed=0
