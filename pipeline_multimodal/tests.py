@@ -8,8 +8,9 @@ from django.core.management import call_command
 from django.conf import settings
 from django.db import IntegrityError
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.contrib.auth import get_user_model
 
-from pipeline_multimodal.models import ResultadoAnalisis, TrabajoAnalisis
+from pipeline_multimodal.models import ResultadoAnalisis, TherapistDataset, TherapistDatasetSample, TrabajoAnalisis
 from pipeline_multimodal.servicios import ErrorPipelineMultimodal
 from pipeline_multimodal.demuca_review import merge_demuca_data
 
@@ -65,6 +66,26 @@ class PipelineMultimodalTests(SimpleTestCase):
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="pipeline-multimodal-async-test-"), DEBUG=True)
 class PipelineMultimodalAsyncTests(TestCase):
+    def test_lineage_endpoint_exposes_only_read_only_tracking_metadata(self):
+        user = get_user_model().objects.create_user(username="lineage-user", password="secret")
+        self.client.force_login(user)
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-LINEAGE",
+            resultado={"status": "completed"},
+            mlflow_run_id="run-lineage",
+            mlflow_experiment="cbm-video-pipeline",
+            mlflow_model_name="cbm-fusion",
+            mlflow_model_version="3",
+            model_sha256="a" * 64,
+            dataset_hash="b" * 64,
+        )
+
+        response = self.client.get("/api/pipeline-multimodal/mlops/lineage/SESSION-LINEAGE/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mlflow_run_id"], "run-lineage")
+        self.assertNotIn("resultado", response.json())
+
     def test_terapeuta_puede_persistir_edicion_demuca_sin_autorizar_entrenamiento(self):
         ResultadoAnalisis.objects.create(
             session_id="SESSION-HITL",
@@ -132,7 +153,13 @@ class PipelineMultimodalAsyncTests(TestCase):
             session_id="SESSION-003", request_id="request-003", archivo_path=str(archivo)
         )
         configurado.return_value.ejecutar.return_value = {
-            "status": "completed", "session_id": "SESSION-003"
+            "status": "completed", "session_id": "SESSION-003",
+            "mlflow": {"run_id": "run-003", "experiment": "cbm-video-pipeline"},
+            "model_predictions": {
+                "model_type": "phase2_tree",
+                "model_version": "v3",
+                "model_path": "",
+            },
         }
 
         call_command("procesar_pipeline_multimodal", "--once")
@@ -142,6 +169,10 @@ class PipelineMultimodalAsyncTests(TestCase):
         self.assertEqual(trabajo.resultado["status"], "completed")
         resultado = ResultadoAnalisis.objects.get(session_id="SESSION-003")
         self.assertEqual(resultado.resultado["status"], "completed")
+        self.assertEqual(resultado.mlflow_run_id, "run-003")
+        self.assertEqual(resultado.mlflow_experiment, "cbm-video-pipeline")
+        self.assertEqual(resultado.mlflow_model_name, "phase2_tree")
+        self.assertEqual(resultado.mlflow_model_version, "v3")
         self.assertFalse(archivo.exists())
 
     def test_reintento_fallido_no_sobrescribe_archivo_original_si_falla_db(self):
@@ -221,3 +252,124 @@ class PipelineMultimodalAsyncTests(TestCase):
             TrabajoAnalisis.objects.create(
                 session_id="SESSION-007", request_id="request-008", archivo_path="/tmp/two.mp4"
             )
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="pipeline-datasets-test-"), MEDIA_URL="/media/")
+class TherapistDatasetApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username="therapist", password="secret", ci="CI-THERAPIST", email="therapist@example.com")
+        self.other = user_model.objects.create_user(username="other", password="secret", ci="CI-OTHER", email="other@example.com")
+        self.staff = user_model.objects.create_user(username="staff", password="secret", ci="CI-STAFF", email="staff@example.com", is_staff=True)
+        self.sample_payload = {
+            "session_id": "SESSION-1", "window_id": "window-1",
+            "features": {"audio_rms_mean": 0.1, "audio_zcr_mean": 0.2, "visual_motion_mean": 0.3, "visual_motion_max": 0.4},
+            "labels": {"audio__HABLA": 1, "visual__MOVIMIENTO": 0},
+        }
+
+    def test_requires_login_and_owner_or_staff_access(self):
+        response = self.client.get("/api/pipeline-multimodal/datasets/")
+        self.assertEqual(response.status_code, 401)
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Private")
+        self.client.login(username="other", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/").status_code, 404)
+        self.client.login(username="staff", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/").status_code, 200)
+
+    def test_crud_validates_values_and_duplicate_keys(self):
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post("/api/pipeline-multimodal/datasets/", data=json.dumps({"name": "Reviewed windows"}), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        dataset_id = response.json()["id"]
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(self.sample_payload), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        duplicate = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(self.sample_payload), content_type="application/json")
+        self.assertEqual(duplicate.status_code, 400)
+        invalid = dict(self.sample_payload, features=dict(self.sample_payload["features"], audio_rms_mean=float("nan")))
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(invalid), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        sample = TherapistDatasetSample.objects.get(dataset_id=dataset_id)
+        response = self.client.patch(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/{sample.pk}/", data=json.dumps({"reviewed": True}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["reviewed"])
+
+    def test_export_writes_schema_without_identifiers(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Export")
+        TherapistDatasetSample.objects.create(dataset=dataset, **self.sample_payload)
+        self.client.login(username="therapist", password="secret")
+        with patch("pipeline_multimodal.views.log_run", return_value="dataset-run") as track:
+            response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/export/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        csv_path = Path(settings.MEDIA_ROOT) / "datasets" / str(dataset.pk) / "dataset.csv"
+        manifest_path = csv_path.with_name("manifest.json")
+        self.assertTrue(csv_path.exists())
+        self.assertTrue(manifest_path.exists())
+        csv_text = csv_path.read_text()
+        self.assertNotIn("SESSION-1", csv_text)
+        self.assertEqual(payload["rows"], 1)
+        self.assertFalse(json.loads(manifest_path.read_text())["training_authorized"])
+        self.assertEqual(payload["mlflow"]["run_id"], "dataset-run")
+        self.assertEqual(track.call_args.kwargs["dataset_path"], csv_path)
+
+    def test_staff_can_authorize_only_fully_reviewed_dataset(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Authorization")
+        TherapistDatasetSample.objects.create(dataset=dataset, **self.sample_payload)
+        self.client.login(username="staff", password="secret")
+        blocked = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(blocked.status_code, 400)
+        sample = dataset.samples.get()
+        sample.reviewed = True
+        sample.save(update_fields=["reviewed", "updated_at"])
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(response.status_code, 200)
+        dataset.refresh_from_db()
+        self.assertTrue(dataset.training_authorized)
+        self.assertEqual(dataset.status, TherapistDataset.Status.AUTHORIZED)
+
+    def test_non_staff_cannot_authorize_dataset(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Restricted authorization")
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_annotation_persists_timestamp_tags_features_and_pose_without_training_authorization(self):
+        self.client.login(username="therapist", password="secret")
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Session annotations")
+        payload = {
+            "session_id": "SESSION-ANNOTATED", "window_id": "window-001",
+            "start_time": 1.5, "end_time": 4.25, "demuca_phase": "MOVIMIENTO",
+            "sound_tags": ["habla"], "movement_tags": ["camina"], "interaction_tags": [],
+            "features": {"audio_rms_mean": 0.1, "audio_zcr_mean": 0.2, "visual_motion_mean": 0.3, "visual_motion_max": 0.4},
+            "labels": {"visual__MOVIMIENTO": 1},
+            "derived_features": {"velocity_mean": 0.75},
+            "pose_landmarks": [{"name": "nose", "x": 0.1, "y": 0.2, "visibility": 0.9}],
+            "artifact_payload": {"video_url": "/media/session.mp4"},
+        }
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/annotations/", data=json.dumps(payload), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.json()["training_authorized"])
+        sample = TherapistDatasetSample.objects.get(dataset=dataset)
+        self.assertEqual(sample.start_time, 1.5)
+        self.assertEqual(sample.pose_landmarks[0]["name"], "nose")
+
+    def test_annotation_rejects_invalid_window_and_artifact_access_is_owner_scoped(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Private annotations")
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-ANNOTATED",
+            resultado={"status": "completed", "pose_landmarks": [{"x": 0.2}]},
+        )
+        invalid = {
+            "session_id": "SESSION-ANNOTATED", "window_id": "window-001", "start_time": 3, "end_time": 2,
+            "demuca_phase": "MOVIMIENTO", "sound_tags": [], "movement_tags": [], "interaction_tags": [],
+            "features": self.sample_payload["features"], "labels": self.sample_payload["labels"],
+        }
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/annotations/", data=json.dumps(invalid), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        response = self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/sessions/SESSION-ANNOTATED/artifacts/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pose_landmarks"], [{"x": 0.2}])
+        self.assertFalse(response.json()["training_authorized"])
+        self.client.login(username="other", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/sessions/SESSION-ANNOTATED/artifacts/").status_code, 404)

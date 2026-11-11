@@ -21,10 +21,11 @@ python-dotenv
 Pillow
 django-storages
 numpy
+soundfile>=0.14,<1
+mlflow>=3.1,<4
 scikit-learn
 mediapipe
 opencv-python-headless
-mlflow>=3.1,<4
 
 # OneDrive token encryption
 cryptography

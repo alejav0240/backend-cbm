@@ -1,0 +1,22 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "include": [
+    "ml/tracking.py",
+    "ml/aplicacion/servicio_analisis_video.py",
+    "pipeline_multimodal/views.py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["ml"]
+    }
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
+  "reportMissingImports": false,
+  "reportAttributeAccessIssue": false,
+  "reportGeneralTypeIssues": false,
+  "reportOptionalMemberAccess": false,
+  "reportPrivateImportUsage": false
+}

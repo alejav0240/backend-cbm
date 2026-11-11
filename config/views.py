@@ -3,9 +3,16 @@ from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.http import require_GET
 
+from .application_encryption import public_jwk
+
 @require_GET
 def csrf_token_view(request):
     return JsonResponse({"csrfToken": get_token(request)})
+
+
+@require_GET
+def application_encryption_key_view(request):
+    return JsonResponse(public_jwk(), headers={"Cache-Control": "no-store"})
 
 class CBMGraphQLView(GraphQLView):
     def execute_graphql_request(self, *args, **kwargs):

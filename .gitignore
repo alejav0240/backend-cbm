@@ -1,6 +1,7 @@
 db.sqlite3
 __init__.py
 .env
+secrets/
 __pycache__
 migrations
 !pipeline_multimodal/migrations/

@@ -3,13 +3,19 @@
 import graphene
 import graphql_jwt
 from graphql import GraphQLError
+from graphql_jwt.exceptions import JSONWebTokenError
 from django.contrib.auth.models import Group
 from django.db import transaction
+from graphql_jwt.refresh_token.mutations import DeleteRefreshTokenCookie
+from graphql_jwt.refresh_token.shortcuts import get_refresh_token
+from graphql_jwt.refresh_token.utils import get_refresh_token_model
+from graphql_jwt.settings import jwt_settings
 
 from .models import User, Notification, OnboardingView
 from .types import UserType, NotificationType, RoleType, OnboardingViewType
 from .permissions_map import get_permissions_for_modules
 from .emails import send_welcome_credentials_email
+from .token_lifecycle import revoke_cookie_refresh_token, revoke_user_refresh_tokens
 from .utils import generate_unique_username
 from config.utils import get_db_id
 
@@ -209,6 +215,7 @@ class ChangePassword(graphene.Mutation):
 
         user.set_password(new_password)
         user.save()
+        revoke_user_refresh_tokens(user)
         return ChangePassword(success=True)
 
 # ── Leer la notificacion ──────────────────────────────────────────────────────
@@ -259,12 +266,37 @@ class ObtainToken(graphql_jwt.JSONWebTokenMutation):
 class RefreshToken(graphql_jwt.Refresh):
     # La librería manejará la cookie de refresco automáticamente 
     # según la configuración en settings.py
-    pass
+
+    @classmethod
+    def mutate(cls, root, info, **kwargs):
+        token = kwargs.get("refresh_token") or info.context.COOKIES.get(
+            jwt_settings.JWT_REFRESH_TOKEN_COOKIE_NAME
+        )
+        if not token:
+            return super().mutate(root, info, **kwargs)
+
+        refresh_token = get_refresh_token(token, info.context)
+        refresh_token_model = get_refresh_token_model()
+        with transaction.atomic():
+            locked_token = refresh_token_model.objects.select_for_update().get(
+                pk=refresh_token.pk
+            )
+            if locked_token.revoked is not None:
+                raise JSONWebTokenError("Invalid refresh token")
+            return super().mutate(root, info, **kwargs)
 
 
 class RevokeToken(graphql_jwt.Revoke):
-    # Opcional: para invalidar refresh tokens en la DB
     pass
+
+
+class DeleteRefreshTokenCookieAndRevoke(DeleteRefreshTokenCookie):
+    """Delete the browser cookie and revoke its server-side token record."""
+
+    @classmethod
+    def mutate(cls, root, info, **kwargs):
+        revoke_cookie_refresh_token(info.context)
+        return super().mutate(root, info, **kwargs)
 
 
 class Mutation(graphene.ObjectType):
@@ -285,4 +317,4 @@ class Mutation(graphene.ObjectType):
 
     # Logout (Borrado de Cookies HttpOnly)
     delete_token_cookie = graphql_jwt.DeleteJSONWebTokenCookie.Field()
-    delete_refresh_token_cookie = graphql_jwt.refresh_token.mutations.DeleteRefreshTokenCookie.Field()
+    delete_refresh_token_cookie = DeleteRefreshTokenCookieAndRevoke.Field()

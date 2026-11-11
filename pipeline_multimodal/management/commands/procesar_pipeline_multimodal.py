@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 
 from pipeline_multimodal.models import ResultadoAnalisis, TrabajoAnalisis
+from pipeline_multimodal.views import _mlops_lineage
 from pipeline_multimodal.servicios import ErrorPipelineMultimodal, ServicioPipelineMultimodal
 
 
@@ -65,6 +66,7 @@ class Command(BaseCommand):
                         "estado": trabajo.estado,
                         "resultado": trabajo.resultado or {"status": "failed", "error": trabajo.error},
                     }
+                    valores.update(_mlops_lineage(valores["resultado"]))
                     if resultado_publicado is None:
                         ResultadoAnalisis.objects.create(
                             session_id=trabajo.session_id,

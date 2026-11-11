@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ def log_run(
     tags: dict[str, str],
     artifacts: list[Path],
     tracking_uri: str | None = None,
+    project_root: Path | None = None,
+    dataset_path: Path | None = None,
+    dataset_name: str | None = None,
+    dataset_columns: tuple[str, ...] = (),
 ) -> str:
     """Log run metadata and explicitly selected, non-sensitive artifacts."""
     try:
@@ -32,11 +37,14 @@ def log_run(
             "`python -m pip install -r ml/requirements.txt`."
         ) from error
 
-    uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI") or DEFAULT_TRACKING_URI
+    root = (project_root or PROJECT_ROOT).resolve()
+    default_tracking_uri = f"sqlite:///{(root / 'ml' / 'mlflow.db').resolve()}"
+    default_artifact_root = root / "ml" / "mlartifacts"
+    uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI") or default_tracking_uri
     mlflow.set_tracking_uri(uri)
     if uri.startswith("sqlite:"):
         artifact_root = Path(
-            os.environ.get("MLFLOW_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))
+            os.environ.get("MLFLOW_ARTIFACT_ROOT", str(default_artifact_root))
         ).resolve()
         artifact_root.mkdir(parents=True, exist_ok=True)
         if mlflow.get_experiment_by_name(experiment_name) is None:
@@ -58,6 +66,24 @@ def log_run(
             mlflow.log_metrics(safe_metrics)
         if tags:
             mlflow.set_tags(tags)
+        if dataset_path is not None and dataset_path.is_file():
+            import pandas as pd
+
+            dataset_frame = pd.read_csv(
+                dataset_path,
+                usecols=list(dataset_columns) if dataset_columns else None,
+            )
+            dataset = mlflow.data.from_pandas(
+                dataset_frame,
+                source=str(dataset_path),
+                name=dataset_name or dataset_path.stem,
+            )
+            mlflow.log_input(dataset, context="therapist_export")
+            mlflow.set_tags({
+                "dataset_sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+                "dataset_rows": str(len(dataset_frame)),
+                "dataset_columns": ",".join(dataset_frame.columns),
+            })
         for artifact in artifacts:
             if artifact.is_file():
                 mlflow.log_artifact(str(artifact))

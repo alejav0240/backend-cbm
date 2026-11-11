@@ -11,6 +11,12 @@ BaseDatabaseWrapper.check_database_version_supported = lambda self: None
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
+
+def _get_csv_env(name, default=""):
+    """Read a comma-separated environment variable as a cleaned list."""
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
@@ -22,14 +28,13 @@ APP_ENV = os.getenv("APP_ENV", "development").lower()
 if APP_ENV == "production" and DEBUG:
     raise RuntimeError("DEBUG must be false when APP_ENV=production")
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "[::1]",
-    "api.musicoterapiabolivia.com",
-    "plataform.musicoterapiabolivia.com",
+ALLOWED_HOSTS = _get_csv_env(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,[::1],"
+    "api.musicoterapiabolivia.com,"
+    "plataform.musicoterapiabolivia.com,"
     "plataforma.musicoterapiabolivia.com",
-]
+)
 
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
@@ -98,6 +103,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'config.encryption_middleware.ApplicationEncryptionMiddleware',
     'config.middleware.ServiceKeyCSRFExemptMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -170,13 +176,14 @@ JWT_REFRESH_EXPIRATION_DELTA = datetime.timedelta(days=7)
 GRAPHQL_JWT = {
     "JWT_VERIFY_EXPIRATION": True,
     "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
-    "JWT_REUSE_REFRESH_TOKENS": True,
     "JWT_ALLOW_ANY_HANDLER": "config.jwt.allow_refresh_token",
     "JWT_COOKIE_NAME": "access_token",
     "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
     "JWT_COOKIE_HTTPONLY": True,
     "JWT_COOKIE_SECURE": not DEBUG,
     "JWT_COOKIE_SAMESITE": "Lax",
+    # Rotate and invalidate the previous database-backed refresh token on use.
+    "JWT_REUSE_REFRESH_TOKENS": False,
 }
 
 CSRF_COOKIE_SECURE = not DEBUG
@@ -189,25 +196,25 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # Tell Django the original request was HTTPS (Apache proxy terminates SSL)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "https://plataform.musicoterapiabolivia.com",
-    "https://plataforma.musicoterapiabolivia.com",
+CSRF_TRUSTED_ORIGINS = _get_csv_env(
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:3001,http://127.0.0.1:3001,"
+    "http://localhost:3004,http://127.0.0.1:3004,"
+    "https://plataform.musicoterapiabolivia.com,"
+    "https://plataforma.musicoterapiabolivia.com,"
     "https://api.musicoterapiabolivia.com",
-]
+)
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "https://plataform.musicoterapiabolivia.com",
-    "https://plataforma.musicoterapiabolivia.com",
+CORS_ALLOWED_ORIGINS = _get_csv_env(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:3001,http://127.0.0.1:3001,"
+    "http://localhost:3004,http://127.0.0.1:3004,"
+    "https://plataform.musicoterapiabolivia.com,"
+    "https://plataforma.musicoterapiabolivia.com,"
     "https://api.musicoterapiabolivia.com",
-]
+)
 
 CORS_ALLOW_CREDENTIALS = True
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, redirect_stdout
+import hashlib
 import json
 import os
 import shutil
@@ -13,6 +14,7 @@ from typing import Any, Callable
 from infraestructura.persistencia_json import RepositorioArtefactos
 from demuca_draft import write_demuca_draft
 from phase2_inference import predict_session, write_predictions
+from tracking import log_run
 
 
 class ServicioAnalisisVideo:
@@ -148,6 +150,53 @@ class ServicioAnalisisVideo:
         prediction_payload = response["model_predictions"]
         if prediction_payload["status"] != "unavailable":
             write_predictions(session_dir, prediction_payload)
+
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+        experiment_name = os.environ.get("MLFLOW_EXPERIMENT", "cbm-video-pipeline")
+        session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        tracking_artifacts = [
+            session_dir / "processed" / "segments" / "media_pipeline_summary.json",
+            session_dir / "processed" / "features" / "model_predictions.json",
+        ]
+        try:
+            run_id = log_run(
+                experiment_name=experiment_name,
+                run_name=f"video-{session_hash[:16]}",
+                params={
+                    "session_id_hash": session_hash,
+                    "window_seconds": window_seconds,
+                    "max_tail_trim_seconds": max_tail_trim_seconds,
+                    "pose_enabled": summary["pose_enabled"],
+                    "prediction_model_type": prediction_payload.get("model_type"),
+                },
+                metrics={
+                    "segments_created": summary["segments_created"],
+                    "max_segment_drift_seconds": summary["max_segment_drift_seconds"],
+                    "source_drift_seconds": summary["source_drift_seconds"],
+                    "tail_trim_seconds": summary["tail_trim_seconds"],
+                    "pose_frames_processed": summary["pose_frames_processed"],
+                    "acoustic_windows": summary["acoustic_windows"],
+                    "vocalization_candidates": summary["vocalization_candidates"],
+                },
+                tags={
+                    "pipeline": "multimodal-video",
+                    "pipeline_status": str(response["status"]),
+                    "training_authorized": str(prediction_payload.get("training_authorized", False)).lower(),
+                },
+                artifacts=tracking_artifacts,
+                tracking_uri=tracking_uri,
+                project_root=project_root,
+            )
+        except RuntimeError as error:
+            if os.environ.get("MLFLOW_REQUIRED", "false").lower() == "true":
+                raise
+            response["mlflow"] = {"status": "unavailable", "reason": str(error)}
+        else:
+            response["mlflow"] = {
+                "run_id": run_id,
+                "experiment": experiment_name,
+                "tracking_uri": tracking_uri or "local-sqlite",
+            }
         repositorio.escribir_json_atomico(response_path, response)
         return response
 
