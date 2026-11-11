@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 import secrets
+import shlex
 from collections import defaultdict
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
@@ -275,6 +277,8 @@ class Command(BaseCommand):
         }
 
         columns = column_mappings.get(table_name, [])
+        if not columns:
+            raise CommandError(f"Tabla no permitida para importar: {table_name}")
         
         # Si la conexión es un dict con 'ssh', usamos el cliente mysql remoto via SSH
         if isinstance(connection, dict) and connection.get("ssh"):
@@ -287,13 +291,43 @@ class Command(BaseCommand):
 
             # Construir SELECT con columnas conocidas (si están) para mantener el orden
             select_cols = ", ".join(columns) if columns else "*"
-            remote_mysql_cmd = f"mysql -u {user} -p'{password}' -D {database} -N -B -e \"SELECT {select_cols} FROM {table_name};\""
-            ssh_cmd = f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} \"{remote_mysql_cmd}\""
+            remote_mysql_cmd = [
+                "mysql",
+                "-u",
+                user,
+                f"-p{password}",
+                "-D",
+                database,
+                "-N",
+                "-B",
+                "-e",
+                f"SELECT {select_cols} FROM `{table_name}`;",
+            ]
+            remote_command = shlex.join([
+                "env",
+                f"MYSQL_PWD={password}",
+                *remote_mysql_cmd,
+            ])
+            ssh_cmd = [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "--",
+                f"{user}@{host}",
+                remote_command,
+            ]
 
             try:
                 # Usar sshpass para pasar la contraseña SSH si está disponible en el sistema
-                full_cmd = f"sshpass -p '{password}' {ssh_cmd}"
-                proc = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                full_cmd = ["sshpass", "-e", *ssh_cmd]
+                proc = subprocess.run(
+                    full_cmd,
+                    shell=False,
+                    env={**os.environ, "SSHPASS": password},
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
                 if proc.returncode != 0:
                     self.stdout.write(self.style.ERROR(f"Error ejecutando query remoto '{table_name}': {proc.stderr.strip()}"))
                     raise CommandError(f"SSH/mysql remoto falló: {proc.stderr.strip()}")
@@ -314,7 +348,7 @@ class Command(BaseCommand):
 
         try:
             cursor = connection.cursor(dictionary=True)
-            query = f"SELECT * FROM {table_name}"
+            query = f"SELECT * FROM `{table_name}`"
             cursor.execute(query)
             rows = cursor.fetchall()
             
@@ -979,4 +1013,3 @@ class Command(BaseCommand):
         if value in current:
             return current
         return f"{current} | {value}"
-

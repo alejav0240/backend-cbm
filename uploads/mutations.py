@@ -1,4 +1,5 @@
 import os
+import secrets
 
 import graphene
 from django.conf import settings
@@ -16,7 +17,7 @@ def _is_authorized(info) -> bool:
     if not service_key:
         return False
     provided = info.context.headers.get("X-Service-Key", "")
-    return provided == service_key
+    return secrets.compare_digest(provided, service_key)
 
 
 def _get_session(session_id: str) -> Session:

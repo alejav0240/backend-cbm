@@ -1,4 +1,5 @@
 import os
+import secrets
 
 from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
@@ -22,5 +23,7 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
             os.getenv("MULTIMODAL_SERVICE_KEY"),
         }
         provided = request.headers.get("X-Service-Key", "")
-        if provided and provided in service_keys:
+        if provided and any(
+            key and secrets.compare_digest(provided, key) for key in service_keys
+        ):
             request._dont_enforce_csrf_checks = True
