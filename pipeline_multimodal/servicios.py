@@ -45,9 +45,12 @@ class ServicioPipelineMultimodal:
         if not entrada.is_file():
             raise ErrorPipelineMultimodal("Archivo de entrada no disponible.")
         comando = [
-            str(self.interprete), str(self.raiz / "ml" / "analyze_video.py"), str(entrada),
-            "--session-id", session_id, "--project-root", str(self.raiz),
+            str(self.interprete), str(self.raiz / "ml" / "analyze_video.py"),
+            "--service-input", "--project-root", str(self.raiz),
         ]
+        entorno = os.environ.copy()
+        entorno["PIPELINE_INPUT_PATH"] = str(entrada)
+        entorno["PIPELINE_SESSION_ID"] = session_id
         if os.environ.get("MULTIMODAL_DEMO_MODE", "false").lower() == "true":
             demo_model = Path(
                 os.environ.get(
@@ -62,7 +65,7 @@ class ServicioPipelineMultimodal:
         try:
             resultado = subprocess.run(
                 comando, cwd=self.raiz, check=False, capture_output=True,
-                text=True, timeout=self.timeout,
+                text=True, timeout=self.timeout, env=entorno,
             )
         except subprocess.TimeoutExpired as error:
             raise ErrorPipelineMultimodal("El análisis excedió el tiempo límite.") from error

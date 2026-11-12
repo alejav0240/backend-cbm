@@ -252,7 +252,7 @@ def main() -> int:
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         print("[ERROR] DEMUCA estimate generation failed")
         return 2
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps({"status": "completed", "estimates_written": True}))
     return 0
 
 

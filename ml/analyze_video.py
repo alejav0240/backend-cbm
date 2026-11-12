@@ -106,8 +106,13 @@ def analyze_video(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("video", type=Path)
-    parser.add_argument("--session-id", required=True)
+    parser.add_argument("video", type=Path, nargs="?")
+    parser.add_argument("--session-id")
+    parser.add_argument(
+        "--service-input",
+        action="store_true",
+        help="Read validated service input from environment variables.",
+    )
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--window-seconds", type=float, default=5.0)
     parser.add_argument("--max-tail-trim-seconds", type=float, default=0.2)
@@ -122,11 +127,22 @@ def main() -> int:
         help="Allow the explicitly marked demo model; never enables clinical inference.",
     )
     args = parser.parse_args()
+    if args.service_input:
+        video_value = os.environ.get("PIPELINE_INPUT_PATH")
+        session_id = os.environ.get("PIPELINE_SESSION_ID")
+        if not video_value or not session_id:
+            parser.error("service input is incomplete")
+        video_path = Path(video_value)
+    else:
+        if args.video is None or not args.session_id:
+            parser.error("video and --session-id are required")
+        video_path = args.video
+        session_id = args.session_id
     reporter = ProgressReporter(enabled=not args.no_progress)
     try:
         response = analyze_video(
-            args.video,
-            session_id=args.session_id,
+            video_path,
+            session_id=session_id,
             project_root=args.project_root,
             window_seconds=args.window_seconds,
             max_tail_trim_seconds=args.max_tail_trim_seconds,
@@ -136,8 +152,8 @@ def main() -> int:
             prediction_model=args.prediction_model,
             allow_experimental_demo=args.allow_experimental_demo,
         )
-    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
-        print(json.dumps({"status": "failed", "error": str(error)}, ensure_ascii=False))
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+        print(json.dumps({"status": "failed", "error": "analysis_failed"}, ensure_ascii=False))
         return 2
     print(json.dumps(response, indent=2, ensure_ascii=False))
     return 0
