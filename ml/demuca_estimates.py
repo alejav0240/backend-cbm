@@ -47,6 +47,63 @@ def _input_fingerprint(
     return hashlib.sha256(value).hexdigest()
 
 
+def _normalize_evidence(evidence, duration_seconds, available_modalities, response_index):
+    if not isinstance(evidence, list):
+        raise ValueError(f"invalid_demuca_evidence:{response_index}")
+    supported_items = 0
+    supported_modalities: set[str] = set()
+    normalized = []
+    for evidence_index, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            raise ValueError(f"invalid_demuca_evidence:{response_index}:{evidence_index}")
+        modality, start, end = item.get("modality"), item.get("start_seconds"), item.get("end_seconds")
+        if modality not in SUPPORTED_MODALITIES:
+            raise ValueError(f"invalid_demuca_evidence_modality:{response_index}:{evidence_index}")
+        if not _finite_number(start) or not _finite_number(end) or float(start) < 0 or float(end) <= float(start) or float(end) > float(duration_seconds):
+            raise ValueError(f"invalid_demuca_evidence_interval:{response_index}:{evidence_index}")
+        available = modality in available_modalities
+        if available:
+            supported_items += 1
+            supported_modalities.add(modality)
+        normalized.append({
+            "modality": modality,
+            "start_seconds": float(start),
+            "end_seconds": float(end),
+            "available_in_pipeline": available,
+        })
+    return normalized, supported_items, supported_modalities
+
+
+def _build_estimate(response, index, duration_seconds, available_modalities):
+    if not isinstance(response, dict):
+        raise ValueError(f"invalid_demuca_response:{index}")
+    subscale, category = response.get("subscale"), response.get("category")
+    score, max_score = response.get("score"), response.get("max_score")
+    if not isinstance(subscale, str) or not subscale.strip():
+        raise ValueError(f"invalid_demuca_subscale:{index}")
+    if not isinstance(category, str) or not category.strip():
+        raise ValueError(f"invalid_demuca_category:{index}")
+    if not _finite_number(score) or not _finite_number(max_score) or float(max_score) <= 0 or float(score) < 0 or float(score) > float(max_score):
+        raise ValueError(f"invalid_demuca_score:{index}")
+    evidence, supported_items, supported_modalities = _normalize_evidence(
+        response.get("evidence"), duration_seconds, available_modalities, index
+    )
+    evidence_coverage = supported_items / len(evidence) if evidence else 0.0
+    modality_coverage = len(supported_modalities) / len(SUPPORTED_MODALITIES)
+    confidence = min(evidence_coverage * modality_coverage * 100.0, UNREVIEWED_CONFIDENCE_CAP_PERCENT)
+    return {
+        "subscale": subscale,
+        "category": category,
+        "predicted_score": score,
+        "max_score": max_score,
+        "confidence_percent": round(confidence, 2),
+        "evidence_coverage_percent": round(evidence_coverage * 100.0, 2),
+        "modality_coverage_percent": round(modality_coverage * 100.0, 2),
+        "evidence": evidence,
+        "estimate_origin": "recorded_demuca_score_with_observational_support",
+    }
+
+
 def build_demuca_estimates(
     payload: dict[str, Any],
     *,
@@ -74,73 +131,7 @@ def build_demuca_estimates(
 
     estimates: list[dict[str, Any]] = []
     for index, response in enumerate(responses):
-        if not isinstance(response, dict):
-            raise ValueError(f"invalid_demuca_response:{index}")
-        subscale = response.get("subscale")
-        category = response.get("category")
-        score = response.get("score")
-        max_score = response.get("max_score")
-        if not isinstance(subscale, str) or not subscale.strip():
-            raise ValueError(f"invalid_demuca_subscale:{index}")
-        if not isinstance(category, str) or not category.strip():
-            raise ValueError(f"invalid_demuca_category:{index}")
-        if (
-            not _finite_number(score)
-            or not _finite_number(max_score)
-            or float(max_score) <= 0
-            or float(score) < 0
-            or float(score) > float(max_score)
-        ):
-            raise ValueError(f"invalid_demuca_score:{index}")
-
-        evidence = response.get("evidence")
-        if not isinstance(evidence, list):
-            raise ValueError(f"invalid_demuca_evidence:{index}")
-        supported_items = 0
-        supported_modalities: set[str] = set()
-        normalized_evidence: list[dict[str, Any]] = []
-        for evidence_index, item in enumerate(evidence):
-            if not isinstance(item, dict):
-                raise ValueError(f"invalid_demuca_evidence:{index}:{evidence_index}")
-            modality = item.get("modality")
-            start = item.get("start_seconds")
-            end = item.get("end_seconds")
-            if modality not in SUPPORTED_MODALITIES:
-                raise ValueError(f"invalid_demuca_evidence_modality:{index}:{evidence_index}")
-            if (
-                not _finite_number(start)
-                or not _finite_number(end)
-                or float(start) < 0
-                or float(end) <= float(start)
-                or float(end) > float(duration_seconds)
-            ):
-                raise ValueError(f"invalid_demuca_evidence_interval:{index}:{evidence_index}")
-            available = modality in available_modalities
-            if available:
-                supported_items += 1
-                supported_modalities.add(modality)
-            normalized_evidence.append({
-                "modality": modality,
-                "start_seconds": float(start),
-                "end_seconds": float(end),
-                "available_in_pipeline": available,
-            })
-
-        evidence_coverage = supported_items / len(evidence) if evidence else 0.0
-        modality_coverage = len(supported_modalities) / len(SUPPORTED_MODALITIES)
-        observational_support = evidence_coverage * modality_coverage * 100.0
-        confidence = min(observational_support, UNREVIEWED_CONFIDENCE_CAP_PERCENT)
-        estimates.append({
-            "subscale": subscale,
-            "category": category,
-            "predicted_score": score,
-            "max_score": max_score,
-            "confidence_percent": round(confidence, 2),
-            "evidence_coverage_percent": round(evidence_coverage * 100.0, 2),
-            "modality_coverage_percent": round(modality_coverage * 100.0, 2),
-            "evidence": normalized_evidence,
-            "estimate_origin": "recorded_demuca_score_with_observational_support",
-        })
+        estimates.append(_build_estimate(response, index, duration_seconds, available_modalities))
 
     return {
         "schema_version": SCHEMA_VERSION,
