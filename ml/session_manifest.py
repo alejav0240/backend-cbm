@@ -58,6 +58,96 @@ def _resolve_source_path(
             errors.append(_issue("source_file_missing", field_path, f"file does not exist: {relative_path}"))
 
 
+def _validate_participant(participant: Any, path: str, ids: set[str], errors: list[dict[str, str]]) -> None:
+    if not isinstance(participant, dict):
+        errors.append(_issue("invalid_participant", path, "participant must be an object"))
+        return
+    for key in sorted(participant.keys() - {"id", "role"}):
+        errors.append(_issue("unknown_field", f"{path}.{key}", f"field '{key}' is not in the participant schema"))
+    for key in sorted({"id", "role"} - participant.keys()):
+        errors.append(_issue("required_field_missing", f"{path}.{key}", f"required field '{key}' is missing"))
+    participant_id = participant.get("id")
+    role = participant.get("role")
+    if not isinstance(participant_id, str) or not participant_id.strip():
+        errors.append(_issue("invalid_participant_id", f"{path}.id", "id must be a non-empty string"))
+    elif participant_id in ids:
+        errors.append(_issue("duplicate_participant_id", f"{path}.id", f"duplicate id '{participant_id}'"))
+    else:
+        ids.add(participant_id)
+    if not isinstance(role, str) or role not in {"PATIENT", "THERAPIST", "UNKNOWN"}:
+        errors.append(_issue("invalid_participant_role", f"{path}.role", "role must be PATIENT, THERAPIST, or UNKNOWN"))
+
+
+def _validate_fragment(
+    fragment: Any,
+    path: str,
+    ids: set[str],
+    orders: list[int],
+    normalized: list[tuple[int, float, float, str]],
+    errors: list[dict[str, str]],
+    session_dir: Path,
+    check_files: bool,
+) -> None:
+    if not isinstance(fragment, dict):
+        errors.append(_issue("invalid_fragment", path, "fragment must be an object"))
+        return
+    allowed = {"fragment_id", "order", "global_start_seconds", "duration_seconds", "video_path", "audio_path"}
+    required = allowed - {"audio_path"}
+    for key in sorted(fragment.keys() - allowed):
+        errors.append(_issue("unknown_field", f"{path}.{key}", f"field '{key}' is not in the fragment schema"))
+    for key in sorted(required - fragment.keys()):
+        errors.append(_issue("required_field_missing", f"{path}.{key}", f"required field '{key}' is missing"))
+    fragment_id, order = fragment.get("fragment_id"), fragment.get("order")
+    start, fragment_duration = fragment.get("global_start_seconds"), fragment.get("duration_seconds")
+    if not isinstance(fragment_id, str) or not fragment_id.strip():
+        errors.append(_issue("invalid_fragment_id", f"{path}.fragment_id", "fragment_id must be a non-empty string"))
+    elif fragment_id in ids:
+        errors.append(_issue("duplicate_fragment_id", f"{path}.fragment_id", f"duplicate id '{fragment_id}'"))
+    else:
+        ids.add(fragment_id)
+    valid_order = isinstance(order, int) and not isinstance(order, bool) and order >= 0
+    if not valid_order:
+        errors.append(_issue("invalid_fragment_order", f"{path}.order", "order must be a non-negative integer"))
+    else:
+        orders.append(order)
+    valid_start = _is_finite_number(start) and start >= 0
+    valid_duration = _is_finite_number(fragment_duration) and fragment_duration > 0
+    if not valid_start:
+        errors.append(_issue("invalid_fragment_start", f"{path}.global_start_seconds", "start must be a finite number greater than or equal to zero"))
+    if not valid_duration:
+        errors.append(_issue("invalid_fragment_duration", f"{path}.duration_seconds", "duration must be a finite number greater than zero"))
+    if valid_order and valid_start and valid_duration:
+        normalized.append((order, float(start), float(fragment_duration), path))
+    _resolve_source_path(fragment.get("video_path"), session_dir, f"{path}.video_path", errors, check_files)
+    if fragment.get("audio_path") is not None:
+        _resolve_source_path(fragment["audio_path"], session_dir, f"{path}.audio_path", errors, check_files)
+
+
+def _validate_timeline(normalized, duration, policy, tolerance, errors, warnings):
+    if not normalized or not _is_finite_number(duration):
+        return
+    normalized.sort(key=lambda item: item[0])
+    previous_end = None
+    for _, start, fragment_duration, path in normalized:
+        end = start + fragment_duration
+        if end > float(duration) + tolerance:
+            errors.append(_issue("fragment_exceeds_session_duration", path, "fragment ends after duration_seconds"))
+        if previous_end is None:
+            if abs(start) > tolerance:
+                errors.append(_issue("timeline_does_not_start_at_zero", path, "first fragment must start at session time zero"))
+        else:
+            delta = start - previous_end
+            if delta < 0:
+                errors.append(_issue("fragment_overlap", path, f"fragment overlaps the previous fragment by {-delta:.3f}s"))
+            elif delta > 0:
+                issue = _issue("timeline_gap", path, f"timeline has a {delta:.3f}s gap before this fragment")
+                (errors if policy == "contiguous" and delta > tolerance else warnings).append(issue)
+        previous_end = end
+    final_end = normalized[-1][1] + normalized[-1][2]
+    if abs(float(duration) - final_end) > tolerance:
+        errors.append(_issue("session_duration_mismatch", "duration_seconds", "duration must match the final fragment end"))
+
+
 def validate_session_manifest(
     payload: Any,
     session_dir: Path,
@@ -120,24 +210,7 @@ def validate_session_manifest(
     else:
         participant_ids: set[str] = set()
         for index, participant in enumerate(participants):
-            participant_path = f"participants[{index}]"
-            if not isinstance(participant, dict):
-                errors.append(_issue("invalid_participant", participant_path, "participant must be an object"))
-                continue
-            for key in sorted(participant.keys() - {"id", "role"}):
-                errors.append(_issue("unknown_field", f"{participant_path}.{key}", f"field '{key}' is not in the participant schema"))
-            for key in sorted({"id", "role"} - participant.keys()):
-                errors.append(_issue("required_field_missing", f"{participant_path}.{key}", f"required field '{key}' is missing"))
-            participant_id = participant.get("id")
-            role = participant.get("role")
-            if not isinstance(participant_id, str) or not participant_id.strip():
-                errors.append(_issue("invalid_participant_id", f"{participant_path}.id", "id must be a non-empty string"))
-            elif participant_id in participant_ids:
-                errors.append(_issue("duplicate_participant_id", f"{participant_path}.id", f"duplicate id '{participant_id}'"))
-            else:
-                participant_ids.add(participant_id)
-            if not isinstance(role, str) or role not in {"PATIENT", "THERAPIST", "UNKNOWN"}:
-                errors.append(_issue("invalid_participant_role", f"{participant_path}.role", "role must be PATIENT, THERAPIST, or UNKNOWN"))
+            _validate_participant(participant, f"participants[{index}]", participant_ids, errors)
 
     fragments = payload["fragments"]
     if not isinstance(fragments, list) or not fragments:
@@ -148,75 +221,12 @@ def validate_session_manifest(
     orders: list[int] = []
     normalized: list[tuple[int, float, float, str]] = []
     for index, fragment in enumerate(fragments):
-        fragment_path = f"fragments[{index}]"
-        if not isinstance(fragment, dict):
-            errors.append(_issue("invalid_fragment", fragment_path, "fragment must be an object"))
-            continue
-        allowed_fields = {
-            "fragment_id",
-            "order",
-            "global_start_seconds",
-            "duration_seconds",
-            "video_path",
-            "audio_path",
-        }
-        required_fields = allowed_fields - {"audio_path"}
-        for key in sorted(fragment.keys() - allowed_fields):
-            errors.append(_issue("unknown_field", f"{fragment_path}.{key}", f"field '{key}' is not in the fragment schema"))
-        for key in sorted(required_fields - fragment.keys()):
-            errors.append(_issue("required_field_missing", f"{fragment_path}.{key}", f"required field '{key}' is missing"))
-        fragment_id = fragment.get("fragment_id")
-        order = fragment.get("order")
-        start = fragment.get("global_start_seconds")
-        fragment_duration = fragment.get("duration_seconds")
-        if not isinstance(fragment_id, str) or not fragment_id.strip():
-            errors.append(_issue("invalid_fragment_id", f"{fragment_path}.fragment_id", "fragment_id must be a non-empty string"))
-        elif fragment_id in ids:
-            errors.append(_issue("duplicate_fragment_id", f"{fragment_path}.fragment_id", f"duplicate id '{fragment_id}'"))
-        else:
-            ids.add(fragment_id)
-        if isinstance(order, bool) or not isinstance(order, int) or order < 0:
-            errors.append(_issue("invalid_fragment_order", f"{fragment_path}.order", "order must be a non-negative integer"))
-        else:
-            orders.append(order)
-        if not _is_finite_number(start) or start < 0:
-            errors.append(_issue("invalid_fragment_start", f"{fragment_path}.global_start_seconds", "start must be a finite number greater than or equal to zero"))
-        if not _is_finite_number(fragment_duration) or fragment_duration <= 0:
-            errors.append(_issue("invalid_fragment_duration", f"{fragment_path}.duration_seconds", "duration must be a finite number greater than zero"))
-        if isinstance(order, int) and not isinstance(order, bool) and _is_finite_number(start) and _is_finite_number(fragment_duration) and fragment_duration > 0:
-            normalized.append((order, float(start), float(fragment_duration), fragment_path))
-
-        _resolve_source_path(fragment.get("video_path"), session_dir, f"{fragment_path}.video_path", errors, check_files)
-        audio_path = fragment.get("audio_path")
-        if audio_path is not None:
-            _resolve_source_path(audio_path, session_dir, f"{fragment_path}.audio_path", errors, check_files)
+        _validate_fragment(fragment, f"fragments[{index}]", ids, orders, normalized, errors, session_dir, check_files)
 
     if orders and sorted(orders) != list(range(len(fragments))):
         errors.append(_issue("fragment_order_not_contiguous", "fragments", "order values must be unique and contiguous starting at zero"))
     if len(normalized) == len(fragments):
-        normalized.sort(key=lambda item: item[0])
-        previous_end: float | None = None
-        for order, start, fragment_duration, fragment_path in normalized:
-            end = start + fragment_duration
-            if _is_finite_number(duration) and end > float(duration) + tolerance_seconds:
-                errors.append(_issue("fragment_exceeds_session_duration", fragment_path, "fragment ends after duration_seconds"))
-            if previous_end is not None:
-                delta = start - previous_end
-                if delta < 0:
-                    errors.append(_issue("fragment_overlap", fragment_path, f"fragment overlaps the previous fragment by {-delta:.3f}s"))
-                elif delta > 0:
-                    issue = _issue("timeline_gap", fragment_path, f"timeline has a {delta:.3f}s gap before this fragment")
-                    if policy == "contiguous" and delta > tolerance_seconds:
-                        errors.append(issue)
-                    else:
-                        warnings.append(issue)
-            elif abs(start) > tolerance_seconds:
-                errors.append(_issue("timeline_does_not_start_at_zero", fragment_path, "first fragment must start at session time zero"))
-            previous_end = end
-        if normalized and _is_finite_number(duration):
-            final_end = normalized[-1][1] + normalized[-1][2]
-            if abs(float(duration) - final_end) > tolerance_seconds:
-                errors.append(_issue("session_duration_mismatch", "duration_seconds", "duration must match the final fragment end"))
+        _validate_timeline(normalized, duration, policy, tolerance_seconds, errors, warnings)
 
     return {
         "valid": not errors,
