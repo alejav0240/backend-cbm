@@ -286,6 +286,16 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
 
+      - name: Show image vulnerabilities in logs
+        if: ${{ failure() }}
+        continue-on-error: true
+        run: |
+          trivy image "$IMAGE" \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table
+
       - name: Upload image report
         if: ${{ always() && hashFiles('trivy-image.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
