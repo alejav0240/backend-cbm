@@ -12,6 +12,37 @@ DISCOUNT_NOT_FOUND = 'Descuento no encontrado'
 from finance.models import CoursePayment, CourseEnrollment, Expense, Payment, Discount, Course
 from finance.type import CourseEnrollmentType, DiscountType, ExpenseType, PaymentType, CourseType
 from therapeutic_sessions.models import Session
+
+
+def _resolve_discount(discount_id, base_total):
+    if not discount_id:
+        return None, base_total
+    try:
+        discount = Discount.objects.get(pk=get_db_id(discount_id))
+    except (Discount.DoesNotExist, ValueError):
+        raise GraphQLError(DISCOUNT_NOT_FOUND)
+    if discount.type == Discount.DiscountType.PERCENTAGE:
+        total = base_total * (Decimal("1") - discount.value / Decimal("100"))
+    else:
+        total = base_total - discount.value
+    return discount, total
+
+
+def _create_paid_sessions(patient_id, sessions_count, base_date, therapist_id, session_type, session_number):
+    sessions = []
+    for index in range(1, sessions_count + 1):
+        session_number += 1
+        sessions.append(Session(
+            patient_id=patient_id,
+            therapist_id=therapist_id,
+            session_date=base_date + timedelta(weeks=index),
+            session_type=session_type,
+            session_number=session_number,
+            cycle_number=math.ceil(session_number / 4),
+            session_status=Session.SessionStatus.CONFIRMADA,
+            payment_status=Session.PaymentStatus.PAID,
+        ))
+    return sessions
 from config.utils import get_db_id
 
 class CreatePayment(graphene.Mutation):
@@ -35,18 +66,7 @@ class CreatePayment(graphene.Mutation):
         base_total = Decimal(str(price_per_session)) * sessions_count
         final_total = base_total
         
-        # Lógica de descuento
-        discount_obj = None
-        if discount_id:
-            try:
-                real_discount_id = get_db_id(discount_id)
-                discount_obj = Discount.objects.get(pk=real_discount_id)
-                if discount_obj.type == Discount.DiscountType.PERCENTAGE:
-                    final_total = base_total * (Decimal('1') - (discount_obj.value / Decimal('100')))
-                else: # FIXED
-                    final_total = base_total - discount_obj.value
-            except (Discount.DoesNotExist, ValueError):
-                raise GraphQLError(DISCOUNT_NOT_FOUND)
+        discount_obj, final_total = _resolve_discount(discount_id, base_total)
 
         paid = Decimal(str(amount_paid))
 
@@ -101,23 +121,10 @@ class CreatePayment(graphene.Mutation):
                     # Por ahora lanzamos error para evitar inconsistencias
                     raise GraphQLError("No hay sesiones previas para este paciente. Crea al menos una sesión manual antes de registrar un pago anticipado.")
 
-                new_sessions = []
-                for i in range(1, remaining_to_create + 1):
-                    current_session_num += 1
-                    calculated_cycle = math.ceil(current_session_num / 4)
-                    
-                    new_sessions.append(
-                        Session(
-                            patient_id=real_patient_id,
-                            therapist_id=base_therapist_id,
-                            session_date=base_date + timedelta(weeks=i),
-                            session_type=base_type,
-                            session_number=current_session_num,
-                            cycle_number=calculated_cycle,
-                            session_status=Session.SessionStatus.CONFIRMADA,
-                            payment_status=Session.PaymentStatus.PAID
-                        )
-                    )
+                new_sessions = _create_paid_sessions(
+                    real_patient_id, remaining_to_create, base_date,
+                    base_therapist_id, base_type, current_session_num,
+                )
                 
                 if new_sessions:
                     Session.objects.bulk_create(new_sessions)
