@@ -671,11 +671,7 @@ def actualizar_demuca(request, session_id: str):
     return _respuesta(actualizado, 200, request_id)
 
 
-@require_POST
-def crear_trabajo(request):
-    request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
-    if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
+def _validate_job_upload(request, request_id):
     video = request.FILES.get("video")
     if video is None:
         return _respuesta({"status": "failed", "error": "Se requiere el campo video."}, 400, request_id)
@@ -687,6 +683,55 @@ def crear_trabajo(request):
     session_id = _session_id(request.POST.get("session_id") or f"HTTP-{uuid.uuid4().hex[:12]}")
     if session_id is None:
         return _respuesta({"status": "failed", "error": "session_id inválido."}, 400, request_id)
+    return video, extension, session_id
+
+
+def _duplicate_job_response(job, request_id):
+    return _respuesta({
+        "status": job.estado, "job_id": str(job.job_id),
+        "session_id": job.session_id, "duplicado": True,
+    }, 202, request_id)
+
+
+def _find_job(request_id, session_id):
+    return (
+        TrabajoAnalisis.objects.select_for_update()
+        .filter(Q(request_id=request_id) | Q(session_id=session_id))
+        .order_by("-actualizado_en")
+        .first()
+    )
+
+
+def _claim_job(existing, session_id, request_id):
+    try:
+        with transaction.atomic():
+            return existing or TrabajoAnalisis.objects.create(
+                session_id=session_id, request_id=request_id, archivo_path=""
+            ), existing is None
+    except IntegrityError:
+        job = _find_job(request_id, session_id)
+        if job is None or job.estado == TrabajoAnalisis.Estado.FALLIDO:
+            raise
+        return job, False
+
+
+def _move_upload_to_job(temporal, carpeta, trabajo, extension, existente, request_id):
+    previous = _managed_media_path(existente.archivo_path if existente is not None else "")
+    entrada = carpeta / f"{trabajo.job_id}-{uuid.uuid4().hex}{extension}"
+    os.replace(temporal, entrada)
+    if existente is not None:
+        trabajo.estado = TrabajoAnalisis.Estado.ENCOLADO
+        trabajo.resultado = None
+        trabajo.error = ""
+    trabajo.request_id = request_id
+    trabajo.archivo_path = str(entrada.resolve())
+    trabajo.save(update_fields=["request_id", "estado", "archivo_path", "resultado", "error", "actualizado_en"])
+    if previous and previous != entrada.resolve():
+        transaction.on_commit(lambda path=previous: path.unlink(missing_ok=True), robust=True)
+    return trabajo, entrada
+
+
+def _store_job_upload(video, extension, session_id, request_id):
     carpeta = Path(settings.MEDIA_ROOT) / "pipeline_jobs"
     carpeta.mkdir(parents=True, exist_ok=True)
     temporal = carpeta / f".upload-{uuid.uuid4().hex}{extension}"
@@ -696,71 +741,17 @@ def crear_trabajo(request):
             for bloque in video.chunks():
                 destino.write(bloque)
         with transaction.atomic():
-            existente = (
-                TrabajoAnalisis.objects.select_for_update()
-                .filter(Q(request_id=request_id) | Q(session_id=session_id))
-                .order_by("-actualizado_en")
-                .first()
-            )
+            existente = _find_job(request_id, session_id)
             if existente is not None and existente.estado != TrabajoAnalisis.Estado.FALLIDO:
-                temporary_path = _managed_media_path(str(temporal))
-                if temporary_path is not None:
-                    temporary_path.unlink(missing_ok=True)
-                return _respuesta(
-                    {
-                        "status": existente.estado,
-                        "job_id": str(existente.job_id),
-                        "session_id": existente.session_id,
-                        "duplicado": True,
-                    },
-                    202,
-                    request_id,
-                )
-            try:
-                with transaction.atomic():
-                    trabajo = existente or TrabajoAnalisis.objects.create(
-                        session_id=session_id, request_id=request_id, archivo_path=""
-                    )
-            except IntegrityError:
-                trabajo = (
-                    TrabajoAnalisis.objects.select_for_update()
-                    .filter(Q(request_id=request_id) | Q(session_id=session_id))
-                    .exclude(estado=TrabajoAnalisis.Estado.FALLIDO)
-                    .order_by("-actualizado_en")
-                    .first()
-                )
-                if trabajo is None:
-                    raise
-                temporary_path = _managed_media_path(str(temporal))
-                if temporary_path is not None:
-                    temporary_path.unlink(missing_ok=True)
-                return _respuesta(
-                    {
-                        "status": trabajo.estado,
-                        "job_id": str(trabajo.job_id),
-                        "session_id": trabajo.session_id,
-                        "duplicado": True,
-                    },
-                    202,
-                    request_id,
-                )
-            archivo_anterior = _managed_media_path(
-                existente.archivo_path if existente is not None else ""
+                temporal.unlink(missing_ok=True)
+                return None, _duplicate_job_response(existente, request_id), session_id
+            trabajo, created = _claim_job(existente, session_id, request_id)
+            if not created and trabajo.estado != TrabajoAnalisis.Estado.FALLIDO:
+                temporal.unlink(missing_ok=True)
+                return None, _duplicate_job_response(trabajo, request_id), session_id
+            trabajo, entrada = _move_upload_to_job(
+                temporal, carpeta, trabajo, extension, existente, request_id
             )
-            entrada = carpeta / f"{trabajo.job_id}-{uuid.uuid4().hex}{extension}"
-            os.replace(temporal, entrada)
-            if existente is not None:
-                trabajo.estado = TrabajoAnalisis.Estado.ENCOLADO
-                trabajo.resultado = None
-                trabajo.error = ""
-            trabajo.request_id = request_id
-            trabajo.archivo_path = str(entrada.resolve())
-            trabajo.save(update_fields=["request_id", "estado", "archivo_path", "resultado", "error", "actualizado_en"])
-            if archivo_anterior and archivo_anterior != entrada.resolve():
-                transaction.on_commit(
-                    lambda path=archivo_anterior: path.unlink(missing_ok=True),
-                    robust=True,
-                )
     except Exception:
         temporary_path = _managed_media_path(str(temporal))
         if temporary_path is not None:
@@ -769,6 +760,21 @@ def crear_trabajo(request):
         if input_path is not None:
             input_path.unlink(missing_ok=True)
         raise
+    return trabajo, None, session_id
+
+
+@require_POST
+def crear_trabajo(request):
+    request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
+    if not _autorizado(request):
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
+    details = _validate_job_upload(request, request_id)
+    if not isinstance(details, tuple):
+        return details
+    video, extension, session_id = details
+    trabajo, duplicate, session_id = _store_job_upload(video, extension, session_id, request_id)
+    if duplicate is not None:
+        return duplicate
     return _respuesta({"status": "queued", "job_id": str(trabajo.job_id), "session_id": session_id}, 202, request_id)
 
 
