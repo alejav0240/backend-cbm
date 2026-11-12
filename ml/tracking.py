@@ -98,6 +98,19 @@ def log_run(
         return run.info.run_id
 
 
+def _flatten_report(report_name, report, flattened):
+    for metric_name in ("micro_f1", "exact_match_accuracy"):
+        value = report.get(metric_name)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            flattened[f"{report_name}_{metric_name}"] = float(value)
+    for label_name, label_metrics in report.get("per_label", {}).items():
+        if not isinstance(label_metrics, dict):
+            continue
+        value = label_metrics.get("f1")
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            flattened[f"{report_name}_{label_name}_f1"] = float(value)
+
+
 def flatten_metrics(payload: dict[str, Any]) -> dict[str, float]:
     """Extract numeric metrics from split reports without logging examples or IDs."""
     flattened: dict[str, float] = {}
@@ -114,14 +127,5 @@ def flatten_metrics(payload: dict[str, Any]) -> dict[str, float]:
             }
         )
         for report_name, report in reports.items():
-            for metric_name in ("micro_f1", "exact_match_accuracy"):
-                value = report.get(metric_name)
-                if isinstance(value, (int, float)) and math.isfinite(float(value)):
-                    flattened[f"{report_name}_{metric_name}"] = float(value)
-            for label_name, label_metrics in report.get("per_label", {}).items():
-                if not isinstance(label_metrics, dict):
-                    continue
-                value = label_metrics.get("f1")
-                if isinstance(value, (int, float)) and math.isfinite(float(value)):
-                    flattened[f"{report_name}_{label_name}_f1"] = float(value)
+            _flatten_report(report_name, report, flattened)
     return flattened

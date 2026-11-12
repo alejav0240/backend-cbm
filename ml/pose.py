@@ -35,6 +35,29 @@ def _landmark_records(landmarks: list[Any]) -> list[dict[str, float | int | None
     ]
 
 
+def _process_pose_frame(frame_path, index, sampling_fps, cv2, mp, landmarker, last_timestamp_ms):
+    image_bgr = cv2.imread(str(frame_path))
+    if image_bgr is None:
+        return None, last_timestamp_ms
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+    timestamp_seconds = frame_timestamp_seconds(frame_path, index, sampling_fps)
+    timestamp_ms = round(timestamp_seconds * 1000)
+    if timestamp_ms <= last_timestamp_ms:
+        raise ValueError("frame timestamps must be strictly increasing")
+    result = landmarker.detect_for_video(mp_image, timestamp_ms)
+    world_tracks = result.pose_world_landmarks or []
+    poses = []
+    for pose_index, image_landmarks in enumerate(result.pose_landmarks or []):
+        world_landmarks = world_tracks[pose_index] if pose_index < len(world_tracks) else []
+        poses.append({
+            "pose_index": pose_index,
+            "landmarks": _landmark_records(image_landmarks),
+            "world_landmarks": _landmark_records(world_landmarks),
+        })
+    return {"timestamp_seconds": round(timestamp_seconds, 6), "poses": poses}, timestamp_ms
+
+
 def extract_pose_landmarks(
     frames_dir: Path,
     session_id: str,
@@ -80,31 +103,13 @@ def extract_pose_landmarks(
     last_timestamp_ms = -1
     with mp.tasks.vision.PoseLandmarker.create_from_options(options) as landmarker:
         for index, frame_path in enumerate(frames):
-            image_bgr = cv2.imread(str(frame_path))
-            if image_bgr is None:
+            frame_record, last_timestamp_ms = _process_pose_frame(
+                frame_path, index, sampling_fps, cv2, mp, landmarker, last_timestamp_ms
+            )
+            if frame_record is None:
                 skipped_frames += 1
                 continue
-            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-            timestamp_seconds = frame_timestamp_seconds(frame_path, index, sampling_fps)
-            timestamp_ms = round(timestamp_seconds * 1000)
-            if timestamp_ms <= last_timestamp_ms:
-                raise ValueError("frame timestamps must be strictly increasing")
-            last_timestamp_ms = timestamp_ms
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
-            world_tracks = result.pose_world_landmarks or []
-            poses = []
-            for pose_index, image_landmarks in enumerate(result.pose_landmarks or []):
-                world_landmarks = world_tracks[pose_index] if pose_index < len(world_tracks) else []
-                poses.append({
-                    "pose_index": pose_index,
-                    "landmarks": _landmark_records(image_landmarks),
-                    "world_landmarks": _landmark_records(world_landmarks),
-                })
-            results.append({
-                "timestamp_seconds": round(timestamp_seconds, 6),
-                "poses": poses,
-            })
+            results.append(frame_record)
 
     payload = {
         "schema_version": "1.0",
