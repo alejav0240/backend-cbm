@@ -65,7 +65,6 @@ def _acoustic_window(signal: np.ndarray, sample_rate: int, mel_bank: np.ndarray)
     window = np.hanning(frame_size)
     spectrum = np.abs(rfft(frames * window, n=fft_size, axis=1)) ** 2
     frequencies = np.fft.rfftfreq(fft_size, 1.0 / sample_rate)
-    power_sum = np.maximum(spectrum.sum(axis=1), 1e-12)
     magnitude = np.sqrt(spectrum)
     magnitude_sum = np.maximum(magnitude.sum(axis=1), 1e-12)
     centroid = (magnitude * frequencies).sum(axis=1) / magnitude_sum

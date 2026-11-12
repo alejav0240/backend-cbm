@@ -152,7 +152,7 @@ def main() -> int:
             prediction_model=args.prediction_model,
             allow_experimental_demo=args.allow_experimental_demo,
         )
-    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+    except (OSError, ValueError, RuntimeError):
         print(json.dumps({"status": "failed", "error": "analysis_failed"}, ensure_ascii=False))
         return 2
     print(json.dumps(response, indent=2, ensure_ascii=False))

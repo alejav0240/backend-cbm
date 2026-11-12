@@ -43,9 +43,9 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libgomp1 \
         libgl1 \
         libglib2.0-0 \
+        libgomp1 \
         libpq5 \
         libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
@@ -55,9 +55,8 @@ COPY --from=builder /wheels /wheels
 # omit the duplicate headless wheel from the final image.
 RUN rm -f /wheels/opencv_python_headless*.whl \
     && python -m pip install /wheels/* \
-    && rm -rf /wheels
-
-RUN groupadd --system app \
+    && rm -rf /wheels \
+    && groupadd --system app \
     && useradd --system --gid app --create-home --home-dir /home/app app \
     && mkdir -p /app/media /app/staticfiles \
     && chown -R app:app /app

@@ -76,7 +76,7 @@ class Query(graphene.ObjectType):
     )
 
     @module_permission_required('roles', action='view')
-    def resolve_roles(root, info, search=None, page=1, page_size=10):
+    def resolve_roles(self, info, search=None, page=1, page_size=10):
         qs = Group.objects.all()
         if search:
             qs = qs.filter(name__icontains=search)
@@ -91,7 +91,7 @@ class Query(graphene.ObjectType):
         )
 
     @module_permission_required('roles', action='view')
-    def resolve_role(root, info, id):
+    def resolve_role(self, info, id):
         real_id = get_db_id(id)
         try:
             return Group.objects.get(pk=real_id)
@@ -100,12 +100,12 @@ class Query(graphene.ObjectType):
 
     # ── me ──────────────────────────────────────────────────────────────────
     @login_required
-    def resolve_me(root, info):
+    def resolve_me(self, info):
         return info.context.user
 
     # ── users ───────────────────────────────────────────────────────────────
     @module_permission_required('usuarios', action='view')
-    def resolve_users(root, info, search=None, role_name=None, exclude_role=None, page=1, page_size=10):
+    def resolve_users(self, info, search=None, role_name=None, exclude_role=None, page=1, page_size=10):
         qs = User.objects.all().order_by('-date_joined')
         
         if role_name:
@@ -138,7 +138,7 @@ class Query(graphene.ObjectType):
 
     # ── user por id (solo staff o el propio usuario) ─────────────────────────
     @login_required
-    def resolve_user(root, info, id):
+    def resolve_user(self, info, id):
         user = info.context.user
         real_id = get_db_id(id)
 
@@ -154,7 +154,7 @@ class Query(graphene.ObjectType):
 
     # ── notificaciones (solo las propias) ────────────────────────────────────
     @login_required
-    def resolve_notifications(root, info, is_read=None):
+    def resolve_notifications(self, info, is_read=None):
         user = info.context.user
         qs = Notification.objects.filter(user=user)
         if is_read is not None:
@@ -163,12 +163,12 @@ class Query(graphene.ObjectType):
 
     # ── contador rápido ──────────────────────────────────────────────────────
     @login_required
-    def resolve_unread_notifications_count(root, info):
+    def resolve_unread_notifications_count(self, info):
         user = info.context.user
         return Notification.objects.filter(user=user, is_read=False).count()
 
     @login_required
-    def resolve_onboarding_view(root, info, view_key):
+    def resolve_onboarding_view(self, info, view_key):
         return OnboardingView.objects.filter(
             user=info.context.user,
             view_key=view_key,
@@ -176,7 +176,7 @@ class Query(graphene.ObjectType):
 
     # ── usuario con sus pacientes asociados ──────────────────────────────────
     @module_permission_required('usuarios', action='view')
-    def resolve_user_with_patients(root, info, id):
+    def resolve_user_with_patients(self, info, id):
         from clinical.models import Patient
         from therapeutic_sessions.models import Session
 

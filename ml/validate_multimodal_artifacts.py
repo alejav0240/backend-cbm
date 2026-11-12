@@ -28,7 +28,7 @@ def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
     summary_path = session_dir / "processed" / "segments" / "media_pipeline_summary.json"
     try:
         summary = _read_object(summary_path)
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return ["invalid_or_missing_media_pipeline_summary"]
     if summary.get("session_id") != session_dir.name:
         issues.append("summary_session_id_mismatch")
@@ -70,7 +70,7 @@ def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
             continue
         try:
             loaded[name] = _read_object(path)
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, ValueError):
             issues.append(f"artifact_invalid_json:{name}")
 
     window_index = loaded.get("stable_window_index")

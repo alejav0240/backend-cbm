@@ -403,7 +403,7 @@ def main() -> int:
             summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return 0
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"[ERROR] Media pipeline failed: {error}", file=sys.stderr)
         return 2
 

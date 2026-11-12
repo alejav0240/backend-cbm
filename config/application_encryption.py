@@ -12,11 +12,12 @@ from django.conf import settings
 CONTENT_TYPE = "application/vnd.cbm.encrypted+json"
 ALGORITHM = "RSA-OAEP-256+A256GCM"
 VERSION = 1
+INVALID_ENCRYPTED_PAYLOAD = "Invalid encrypted payload"
 
 
 def _b64decode(value):
     if not isinstance(value, str):
-        raise ValueError("Invalid encrypted payload")
+        raise ValueError(INVALID_ENCRYPTED_PAYLOAD)
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
@@ -69,7 +70,7 @@ def unwrap_aes_key(wrapped_key, wrapped_key_id):
 
 def decrypt_envelope(envelope, request_path):
     if not isinstance(envelope, dict) or envelope.get("v") != VERSION:
-        raise ValueError("Invalid encrypted payload")
+        raise ValueError(INVALID_ENCRYPTED_PAYLOAD)
     if envelope.get("alg") != ALGORITHM or envelope.get("kid") != key_id():
         raise ValueError("Unsupported encryption key")
     aes_key = unwrap_aes_key(envelope["ek"], envelope["kid"])
@@ -80,7 +81,7 @@ def decrypt_envelope(envelope, request_path):
             _aad(request_path),
         )
     except (InvalidTag, ValueError) as exc:
-        raise ValueError("Invalid encrypted payload") from exc
+        raise ValueError(INVALID_ENCRYPTED_PAYLOAD) from exc
     return plaintext, aes_key
 
 

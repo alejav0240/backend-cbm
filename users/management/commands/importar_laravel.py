@@ -101,7 +101,6 @@ class Command(BaseCommand):
             
             scale_importer.import_scales_and_evaluations(
                 datasets["matrizescalas"],
-                datasets["submatrizescalas"],
                 datasets["demucas"],
                 info_map,
                 therapist

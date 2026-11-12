@@ -248,8 +248,8 @@ def main() -> int:
     args = parser.parse_args()
     output = args.out or args.session_dir / "processed" / "features" / "demuca_estimates.json"
     try:
-        result = write_demuca_estimates(args.session_dir, output, overwrite=args.overwrite)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+        write_demuca_estimates(args.session_dir, output, overwrite=args.overwrite)
+    except (OSError, ValueError, KeyError):
         print("[ERROR] DEMUCA estimate generation failed")
         return 2
     print(json.dumps({"status": "completed", "estimates_written": True}))

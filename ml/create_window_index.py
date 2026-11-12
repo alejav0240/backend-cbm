@@ -53,7 +53,7 @@ def main() -> int:
     output = args.out or args.session_dir / "processed" / "windows" / "windows.json"
     try:
         index = write_window_index(args.session_dir, output, overwrite=args.overwrite)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         print(f"[ERROR] Window index creation failed: {error}", file=sys.stderr)
         return 2
     print(json.dumps({

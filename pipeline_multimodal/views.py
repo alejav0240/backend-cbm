@@ -40,6 +40,7 @@ from .demuca_review import merge_demuca_data
 from ml.tracking import log_run
 
 EXTENSIONES_VIDEO = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+ERROR_NO_AUTORIZADO = "No autorizado."
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _LOGGER = logging.getLogger(__name__)
 
@@ -548,7 +549,7 @@ def _respuesta(cuerpo: dict, estado: int, request_id: str) -> JsonResponse:
 def analizar_video(request):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
     if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
     video = request.FILES.get("video")
     if video is None:
         return _respuesta({"status": "failed", "error": "Se requiere el campo video."}, 400, request_id)
@@ -588,7 +589,7 @@ def analizar_video(request):
 def obtener_resultado(request, session_id: str):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
     if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
     resultado = ResultadoAnalisis.objects.filter(session_id=session_id).first()
     if resultado is None:
         return _respuesta({"status": "pending", "session_id": session_id}, 202, request_id)
@@ -636,7 +637,7 @@ def listar_modelos_mlops(request):
 def actualizar_demuca(request, session_id: str):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
     if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
     resultado = ResultadoAnalisis.objects.filter(session_id=session_id).first()
     if resultado is None:
         return _respuesta({"status": "failed", "error": "Resultado no encontrado."}, 404, request_id)
@@ -674,7 +675,7 @@ def actualizar_demuca(request, session_id: str):
 def crear_trabajo(request):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
     if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
     video = request.FILES.get("video")
     if video is None:
         return _respuesta({"status": "failed", "error": "Se requiere el campo video."}, 400, request_id)
@@ -775,7 +776,7 @@ def crear_trabajo(request):
 def obtener_trabajo(request, job_id):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
     if not _autorizado(request):
-        return _respuesta({"status": "failed", "error": "No autorizado."}, 403, request_id)
+        return _respuesta({"status": "failed", "error": ERROR_NO_AUTORIZADO}, 403, request_id)
     trabajo = TrabajoAnalisis.objects.filter(job_id=job_id).first()
     if trabajo is None:
         return _respuesta({"status": "failed", "error": "Trabajo no encontrado."}, 404, request_id)

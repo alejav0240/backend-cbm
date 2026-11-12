@@ -164,9 +164,6 @@ class Command(BaseCommand):
             action = "Creado" if created else "Actualizado"
             self.stdout.write(f"  {action} Form id={form.id}: {form.name}")
 
-            existing_orders = set(
-                FormQuestion.objects.filter(form=form).values_list("order_index", flat=True)
-            )
             created_count = 0
             updated_count = 0
 
@@ -175,7 +172,7 @@ class Command(BaseCommand):
                 # para que el frontend pueda agruparlas visualmente si lo necesita.
                 full_question = f"{q_data['question']}"
 
-                q, q_created = FormQuestion.objects.update_or_create(
+                _, q_created = FormQuestion.objects.update_or_create(
                     form=form,
                     order_index=q_data["order_index"],
                     defaults={

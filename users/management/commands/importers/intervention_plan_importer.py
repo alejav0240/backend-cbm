@@ -39,7 +39,6 @@ class InterventionPlanImporter(BaseImporter):
         self.logger(f"✅ Pasos de planes migrados: {self.stats['steps']}")
 
     def _process_row(self, row, info_map, created_by, plan_by_patient):
-        legacy_plan_id = self._to_int(row[0])
         order_index = self._to_int(row[1], 0)
         legacy_info_id = self._to_int(row[2])
         info = info_map.get(legacy_info_id)
