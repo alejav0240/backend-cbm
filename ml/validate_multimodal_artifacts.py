@@ -35,6 +35,27 @@ ARTIFACT_NAMES = (
 )
 
 
+def _load_one_artifact(session_dir: Path, name: str, record: Any) -> tuple[str | None, dict[str, Any] | None]:
+    if not isinstance(record, dict):
+        return f"artifact_record_missing:{name}", None
+    relative = record.get("path")
+    if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
+        return f"unsafe_artifact_path:{name}", None
+    path = session_dir / relative
+    try:
+        path.resolve().relative_to(session_dir.resolve())
+    except (OSError, ValueError):
+        return f"unsafe_artifact_path:{name}", None
+    if not path.is_file():
+        return f"artifact_missing:{name}", None
+    if record.get("sha256") != _sha256(path):
+        return f"artifact_hash_mismatch:{name}", None
+    try:
+        return None, _read_object(path)
+    except (OSError, ValueError):
+        return f"artifact_invalid_json:{name}", None
+
+
 def _load_artifacts(session_dir: Path, records: dict[str, Any]) -> tuple[list[str], dict[str, dict[str, Any]]]:
     issues: list[str] = []
     loaded: dict[str, dict[str, Any]] = {}
@@ -42,29 +63,11 @@ def _load_artifacts(session_dir: Path, records: dict[str, Any]) -> tuple[list[st
         record = records.get(name)
         if record is None and name in OPTIONAL_ARTIFACTS:
             continue
-        if not isinstance(record, dict):
-            issues.append(f"artifact_record_missing:{name}")
-            continue
-        relative = record.get("path")
-        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
-            issues.append(f"unsafe_artifact_path:{name}")
-            continue
-        path = session_dir / relative
-        try:
-            path.resolve().relative_to(session_dir.resolve())
-        except (OSError, ValueError):
-            issues.append(f"unsafe_artifact_path:{name}")
-            continue
-        if not path.is_file():
-            issues.append(f"artifact_missing:{name}")
-            continue
-        if record.get("sha256") != _sha256(path):
-            issues.append(f"artifact_hash_mismatch:{name}")
-            continue
-        try:
-            loaded[name] = _read_object(path)
-        except (OSError, ValueError):
-            issues.append(f"artifact_invalid_json:{name}")
+        issue, payload = _load_one_artifact(session_dir, name, record)
+        if issue:
+            issues.append(issue)
+        elif payload is not None:
+            loaded[name] = payload
     return issues, loaded
 
 
