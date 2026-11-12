@@ -30,16 +30,16 @@ class Patient(models.Model):
     )
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
-    ci = models.CharField(max_length=30, blank=True)
+    ci = models.CharField(max_length=30, blank=True, default="")
     birth_date = models.DateField(blank=True, null=True)
-    image_url = models.TextField(blank=True)
-    notes = models.TextField(blank=True)
+    image_url = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     registration_complete = models.BooleanField(default=False)
     diagnosis = models.CharField(max_length=50, default='sin diagnostico')
-    residence = models.CharField(max_length=100, blank=True)
+    residence = models.CharField(max_length=100, blank=True, default="")
 
     class Meta:
         db_table = "patients"
@@ -232,11 +232,11 @@ class PlanStep(models.Model):
     moment = models.CharField(max_length=20, choices=Moment.choices)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     objective = models.CharField(max_length=255, choices=Objective.choices)
-    focus = models.TextField(blank=True, choices=Focus.choices)
-    musical_resources = models.TextField(blank=True)
-    musical_emphasis = models.CharField(max_length=255, blank=True)
-    approach = models.CharField(max_length=255, blank=True, choices=Approach.choices)
-    mlt_method = models.CharField(max_length=100, blank=True, choices=MltMethod.choices)
+    focus = models.TextField(blank=True, default="", choices=Focus.choices)
+    musical_resources = models.TextField(blank=True, default="")
+    musical_emphasis = models.CharField(max_length=255, blank=True, default="")
+    approach = models.CharField(max_length=255, blank=True, default="", choices=Approach.choices)
+    mlt_method = models.CharField(max_length=100, blank=True, default="", choices=MltMethod.choices)
     order_index = models.PositiveSmallIntegerField(default=0)
 
     class Meta:

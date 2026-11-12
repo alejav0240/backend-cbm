@@ -150,12 +150,12 @@ class CreatePatient(graphene.Mutation):
         patient = Patient.objects.create(
             first_name  = first_name,
             last_name   = last_name,
-            ci          = ci,                          # campo directo en el modelo real
+            ci          = ci or "",                    # campo directo en el modelo real
             birth_date  = birth_date,
             diagnosis   = diagnosis or "sin diagnostico",  # default del modelo
-            residence   = residence,
-            image_url   = image_url,
-            notes       = notes,
+            residence   = residence or "",
+            image_url   = image_url or "",
+            notes       = notes or "",
             tutor       = tutor,
             registration_complete = False,
         )

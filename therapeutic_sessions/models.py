@@ -18,7 +18,7 @@ class DigitalResource(models.Model):
 
     title = models.CharField(max_length=255)
     type = models.CharField(max_length=20, choices=ResourceType.choices)
-    category = models.CharField(max_length=100, blank=True)
+    category = models.CharField(max_length=100, blank=True, default="")
     url = models.URLField()
 
     class Meta:
@@ -100,8 +100,8 @@ class Session(models.Model):
     session_number = models.IntegerField(default=0)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     cycle_number = models.PositiveIntegerField(blank=True, null=True)
-    notes = models.TextField(blank=True)
-    video_url = models.URLField(blank=True)
+    notes = models.TextField(blank=True, default="")
+    video_url = models.URLField(blank=True, default="")
     video_status = models.CharField(
         max_length=20,
         choices=[

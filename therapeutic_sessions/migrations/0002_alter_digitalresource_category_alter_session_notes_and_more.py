@@ -22,16 +22,16 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="digitalresource",
             name="category",
-            field=models.CharField(blank=True, max_length=100),
+            field=models.CharField(blank=True, default="", max_length=100),
         ),
         migrations.AlterField(
             model_name="session",
             name="notes",
-            field=models.TextField(blank=True),
+            field=models.TextField(blank=True, default=""),
         ),
         migrations.AlterField(
             model_name="session",
             name="video_url",
-            field=models.URLField(blank=True),
+            field=models.URLField(blank=True, default=""),
         ),
     ]

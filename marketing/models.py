@@ -11,12 +11,12 @@ class BlogPost(models.Model):
         LATEX = "LATEX", "LaTeX"
 
     title = models.CharField(max_length=255)
-    excerpt = models.TextField(blank=True)
+    excerpt = models.TextField(blank=True, default="")
     content = models.TextField()
     category = models.CharField(max_length=100)
     author = models.CharField(max_length=255)  # Puede ser un FK a User, pero por ahora seguimos la UI (string libre)
-    image_url = models.CharField(max_length=500, blank=True)
-    read_time = models.CharField(max_length=50, blank=True)
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    read_time = models.CharField(max_length=50, blank=True, default="")
     status = models.CharField(max_length=20, choices=PostStatus.choices, default=PostStatus.PUBLISHED)
     type = models.CharField(max_length=20, choices=PostType.choices, default=PostType.MARKDOWN)
     
@@ -70,8 +70,8 @@ class Lead(models.Model):
         LOST = "lost", "Perdido"
 
     name = models.CharField(max_length=255)
-    phone = models.CharField(max_length=20, blank=True)
-    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
     status = models.CharField(max_length=20, choices=LeadStatus.choices, default=LeadStatus.NEW)
     campaign = models.ForeignKey(
         MarketingCampaign,

@@ -15,7 +15,7 @@ class Scale(models.Model):
         VALUE_LIST = "value_list", "Por lista de valores"
 
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
+    description = models.TextField(blank=True, default="")
     scale_type = models.CharField(max_length=20, choices=ScaleType.choices)
 
     class Meta:
@@ -28,8 +28,8 @@ class Scale(models.Model):
 class Subscale(models.Model):
     scale = models.ForeignKey(Scale, on_delete=models.CASCADE, related_name="subscales")
     name = models.CharField(max_length=255)
-    description = models.CharField(max_length=255, blank=True)
-    category = models.CharField(max_length=255, blank=True)
+    description = models.CharField(max_length=255, blank=True, default="")
+    category = models.CharField(max_length=255, blank=True, default="")
     max_value = models.PositiveIntegerField()
 
     class Meta:
@@ -134,7 +134,7 @@ class ScaleEvaluationValueResponse(models.Model):
 
 class Form(models.Model):
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
+    description = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = "forms"
