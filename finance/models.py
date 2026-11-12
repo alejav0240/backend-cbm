@@ -108,10 +108,6 @@ class Expense(models.Model):
         return f"{self.category} — {self.amount} ({self.expense_date.date()})"
 
 
-# ─────────────────────────────────────────
-# Cursos (inscripción + pago)
-# ─────────────────────────────────────────
-
 class Course(models.Model):
 
     class CourseState(models.TextChoices):

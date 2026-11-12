@@ -4,10 +4,6 @@ from users.models import User
 from clinical.models import Patient
 
 
-# ─────────────────────────────────────────
-# Definición de escalas
-# ─────────────────────────────────────────
-
 class Scale(models.Model):
 
     class ScaleType(models.TextChoices):
@@ -51,10 +47,6 @@ class ScaleValue(models.Model):
     def __str__(self):
         return f"{self.label} ({self.value}) — {self.scale}"
 
-
-# ─────────────────────────────────────────
-# Aplicación de escalas
-# ─────────────────────────────────────────
 
 class ScaleEvaluation(models.Model):
     """
@@ -127,10 +119,6 @@ class ScaleEvaluationValueResponse(models.Model):
     def __str__(self):
         return f"{self.scale_value.label} — {self.evaluation}"
 
-
-# ─────────────────────────────────────────
-# Formularios
-# ─────────────────────────────────────────
 
 class Form(models.Model):
     name = models.CharField(max_length=255)

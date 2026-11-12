@@ -16,10 +16,6 @@ from .models import (
 )
 
 
-# ─────────────────────────────────────────
-# Escalas
-# ─────────────────────────────────────────
-
 class SubscaleInline(TabularInline):
     model = Subscale
     extra = 1
@@ -61,10 +57,6 @@ class ScaleAdmin(ModelAdmin):
     def display_type(self, obj):
         return obj.get_scale_type_display()
 
-
-# ─────────────────────────────────────────
-# Evaluaciones
-# ─────────────────────────────────────────
 
 class ScaleEvaluationSubscaleResponseInline(TabularInline):
     model = ScaleEvaluationSubscaleResponse
@@ -137,10 +129,6 @@ class ScaleEvaluationAdmin(ModelAdmin):
     def display_context(self, obj):
         return "En sesión" if obj.session_id else "Fuera de sesión"
 
-
-# ─────────────────────────────────────────
-# Formularios
-# ─────────────────────────────────────────
 
 class FormQuestionInline(StackedInline):
     model = FormQuestion

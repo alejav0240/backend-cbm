@@ -89,15 +89,22 @@ class CreatePatient(graphene.Mutation):
 
     @transaction.atomic
     @module_permission_required('pacientes', action='add')
-    def mutate(self, info,
-               author_id=None,
-               first_name=None, last_name=None,
-               ci=None, birth_date=None,
-               image_url=None, diagnosis=None,
-               residence=None, notes=None,
-               tutor_name=None, tutor_celular=None,
-               tutor_email=None, tutor_ci=None,
-               selected_day=None, selected_time=None):
+    def mutate(self, info, **kwargs):
+        author_id = kwargs.get("author_id")
+        first_name = kwargs.get("first_name")
+        last_name = kwargs.get("last_name")
+        ci = kwargs.get("ci")
+        birth_date = kwargs.get("birth_date")
+        image_url = kwargs.get("image_url")
+        diagnosis = kwargs.get("diagnosis")
+        residence = kwargs.get("residence")
+        notes = kwargs.get("notes")
+        tutor_name = kwargs.get("tutor_name")
+        tutor_celular = kwargs.get("tutor_celular")
+        tutor_email = kwargs.get("tutor_email")
+        tutor_ci = kwargs.get("tutor_ci")
+        selected_day = kwargs.get("selected_day")
+        selected_time = kwargs.get("selected_time")
         if not (info.context.user.is_staff or info.context.user.is_superuser) \
                 and get_db_id(author_id) != info.context.user.pk:
             raise GraphQLError(ERROR_NO_AUTORIZADO)

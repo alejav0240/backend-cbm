@@ -12,10 +12,6 @@ from .models import (
 )
 
 
-# ─────────────────────────────────────────
-# Descuentos
-# ─────────────────────────────────────────
-
 @admin.register(Discount)
 class DiscountAdmin(ModelAdmin):
     compressed_fields = True
@@ -43,10 +39,6 @@ class DiscountAdmin(ModelAdmin):
     def display_type(self, obj):
         return obj.get_type_display()
 
-
-# ─────────────────────────────────────────
-# Pagos de sesiones
-# ─────────────────────────────────────────
 
 @admin.register(Payment)
 class PaymentAdmin(ModelAdmin):
@@ -136,10 +128,6 @@ class PaymentAdmin(ModelAdmin):
         queryset.update(payment_status="completed")
 
 
-# ─────────────────────────────────────────
-# Gastos
-# ─────────────────────────────────────────
-
 @admin.register(Expense)
 class ExpenseAdmin(ModelAdmin):
     compressed_fields = True
@@ -184,10 +172,6 @@ class ExpenseAdmin(ModelAdmin):
     def display_status(self, obj):
         return obj.get_status_display()
 
-
-# ─────────────────────────────────────────
-# Cursos
-# ─────────────────────────────────────────
 
 class CourseEnrollmentInline(TabularInline):
     model = CourseEnrollment
