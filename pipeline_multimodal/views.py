@@ -6,7 +6,9 @@ import os
 import json
 import csv
 import hashlib
+import logging
 from pathlib import Path
+import re
 import tempfile
 import uuid
 from typing import Any
@@ -38,6 +40,56 @@ from .demuca_review import merge_demuca_data
 from ml.tracking import log_run
 
 EXTENSIONES_VIDEO = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_LOGGER = logging.getLogger(__name__)
+
+
+def _video_extension(filename):
+    """Return a fixed extension value, never the raw user-provided suffix."""
+    suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        ".mp4": ".mp4",
+        ".mov": ".mov",
+        ".avi": ".avi",
+        ".mkv": ".mkv",
+        ".webm": ".webm",
+    }.get(suffix)
+
+
+def _session_id(value):
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    return candidate if _SESSION_ID_RE.fullmatch(candidate) else None
+
+
+def _managed_media_path(value):
+    """Resolve a stored path only when it remains inside MEDIA_ROOT."""
+    if not isinstance(value, str) or not value:
+        return None
+    root = Path(settings.MEDIA_ROOT).resolve()
+    candidate = Path(value).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _safe_model_path(value):
+    """Resolve model artifacts only from application-controlled directories."""
+    if not isinstance(value, str) or not value:
+        return None
+    candidate = Path(value).resolve()
+    allowed_roots = (Path(settings.BASE_DIR).resolve(), Path(settings.MEDIA_ROOT).resolve())
+    if not any(candidate == root or root in candidate.parents for root in allowed_roots):
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _invalid_request(error):
+    _LOGGER.warning("Invalid multimodal request: %s", error)
+    return JsonResponse({"error": "invalid_request"}, status=400)
 
 
 def _api_login_required(view):
@@ -79,14 +131,13 @@ def _mlops_lineage(payload):
     predictions: dict[str, Any] = dict(predictions_value) if isinstance(predictions_value, dict) else {}
     model_path = predictions.get("model_path")
     model_sha256 = ""
-    if isinstance(model_path, str):
-        path = Path(model_path)
-        if path.is_file():
-            digest = hashlib.sha256()
-            with path.open("rb") as source:
-                for block in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(block)
-            model_sha256 = digest.hexdigest()
+    path = _safe_model_path(model_path)
+    if path is not None:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+        model_sha256 = digest.hexdigest()
     return {
         "mlflow_run_id": str(mlflow.get("run_id") or ""),
         "mlflow_experiment": str(mlflow.get("experiment") or ""),
@@ -175,7 +226,7 @@ def datasets(request):
             raise ValidationError("description must be a string")
         dataset = TherapistDataset.objects.create(owner=request.user, name=name.strip(), description=description)
     except (ValidationError, IntegrityError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return _invalid_request(error)
     return JsonResponse(_dataset_payload(dataset), status=201)
 
 
@@ -216,7 +267,7 @@ def create_dataset_sample(request, dataset_id):
                 features=body["features"], labels=body["labels"],
             )
     except (ValidationError, IntegrityError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return _invalid_request(error)
     return JsonResponse(_sample_payload(sample), status=201)
 
 
@@ -242,7 +293,7 @@ def create_dataset_annotation(request, dataset_id):
             features=features, labels=labels, **annotation,
         )
     except (ValidationError, IntegrityError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return _invalid_request(error)
     return JsonResponse(_sample_payload(sample), status=201)
 
 
@@ -337,7 +388,7 @@ def annotation_windows(request, session_id):
             artifact_payload=artifact_payload,
         )
     except (ValidationError, IntegrityError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return _invalid_request(error)
     return JsonResponse(_annotation_window_payload(sample), status=201)
 
 
@@ -401,7 +452,7 @@ def update_dataset_sample(request, dataset_id, sample_id):
             setattr(sample, field, value)
         sample.save(update_fields=["features", "labels", "reviewed", *annotation_fields, "updated_at"])
     except ValidationError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return _invalid_request(error)
     return JsonResponse(_sample_payload(sample))
 
 
@@ -447,9 +498,10 @@ def export_dataset(request, dataset_id):
         )
         tracking = {"status": "tracked", "run_id": run_id, "experiment": experiment}
     except (ImportError, OSError, RuntimeError, ValueError) as error:
+        _LOGGER.warning("MLflow tracking unavailable: %s", error)
         if os.environ.get("MLFLOW_REQUIRED", "false").lower() == "true":
-            return JsonResponse({"error": "mlflow_tracking_required", "reason": str(error)}, status=503)
-        tracking = {"status": "unavailable", "reason": str(error)}
+            return JsonResponse({"error": "mlflow_tracking_required"}, status=503)
+        tracking = {"status": "unavailable", "reason": "tracking_unavailable"}
     return JsonResponse({
         "dataset_id": dataset.id,
         "download_url": f"{settings.MEDIA_URL.rstrip('/')}/datasets/{dataset.id}/dataset.csv",
@@ -502,11 +554,13 @@ def analizar_video(request):
         return _respuesta({"status": "failed", "error": "Se requiere el campo video."}, 400, request_id)
     if video.size > int(os.environ.get("MULTIMODAL_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024))):
         return _respuesta({"status": "failed", "error": "El video excede el tamaño máximo permitido."}, 413, request_id)
-    extension = Path(video.name).suffix.lower()
-    if extension not in EXTENSIONES_VIDEO:
+    extension = _video_extension(video.name)
+    if extension is None:
         return _respuesta({"status": "failed", "error": "Formato de video no soportado."}, 400, request_id)
 
-    session_id = request.POST.get("session_id") or f"HTTP-{uuid.uuid4().hex[:12]}"
+    session_id = _session_id(request.POST.get("session_id") or f"HTTP-{uuid.uuid4().hex[:12]}")
+    if session_id is None:
+        return _respuesta({"status": "failed", "error": "session_id inválido."}, 400, request_id)
     servicio = ServicioPipelineMultimodal.configurado()
     Path(settings.MEDIA_ROOT).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="multimodal-", dir=settings.MEDIA_ROOT) as temporal:
@@ -524,7 +578,8 @@ def analizar_video(request):
                 **_mlops_lineage(cuerpo),
             )
         except ErrorPipelineMultimodal as error:
-            return _respuesta({"status": "failed", "error": str(error)}, 502, request_id)
+            _LOGGER.warning("Multimodal pipeline failed: %s", error)
+            return _respuesta({"status": "failed", "error": "pipeline_failed"}, 502, request_id)
     estado = 422 if cuerpo.get("status") == "failed" else 200
     return _respuesta(cuerpo, estado, request_id)
 
@@ -596,7 +651,8 @@ def actualizar_demuca(request, session_id: str):
         datos_actuales = demuca_actual.get("data")
         datos = merge_demuca_data(datos_actuales, incoming, session_id=session_id)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        return _respuesta({"status": "failed", "error": str(error)}, 400, request_id)
+        _LOGGER.warning("Invalid DEMUCA update: %s", error)
+        return _respuesta({"status": "failed", "error": "invalid_request"}, 400, request_id)
 
     actualizado = dict(resultado_actual)
     actualizado["demuca"] = {
@@ -622,12 +678,14 @@ def crear_trabajo(request):
     video = request.FILES.get("video")
     if video is None:
         return _respuesta({"status": "failed", "error": "Se requiere el campo video."}, 400, request_id)
-    extension = Path(video.name).suffix.lower()
-    if extension not in EXTENSIONES_VIDEO:
+    extension = _video_extension(video.name)
+    if extension is None:
         return _respuesta({"status": "failed", "error": "Formato de video no soportado."}, 400, request_id)
     if video.size > int(os.environ.get("MULTIMODAL_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024))):
         return _respuesta({"status": "failed", "error": "El video excede el tamaño máximo permitido."}, 413, request_id)
-    session_id = request.POST.get("session_id") or f"HTTP-{uuid.uuid4().hex[:12]}"
+    session_id = _session_id(request.POST.get("session_id") or f"HTTP-{uuid.uuid4().hex[:12]}")
+    if session_id is None:
+        return _respuesta({"status": "failed", "error": "session_id inválido."}, 400, request_id)
     carpeta = Path(settings.MEDIA_ROOT) / "pipeline_jobs"
     carpeta.mkdir(parents=True, exist_ok=True)
     temporal = carpeta / f".upload-{uuid.uuid4().hex}{extension}"
@@ -644,7 +702,9 @@ def crear_trabajo(request):
                 .first()
             )
             if existente is not None and existente.estado != TrabajoAnalisis.Estado.FALLIDO:
-                temporal.unlink(missing_ok=True)
+                temporary_path = _managed_media_path(str(temporal))
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
                 return _respuesta(
                     {
                         "status": existente.estado,
@@ -670,7 +730,9 @@ def crear_trabajo(request):
                 )
                 if trabajo is None:
                     raise
-                temporal.unlink(missing_ok=True)
+                temporary_path = _managed_media_path(str(temporal))
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
                 return _respuesta(
                     {
                         "status": trabajo.estado,
@@ -681,7 +743,9 @@ def crear_trabajo(request):
                     202,
                     request_id,
                 )
-            archivo_anterior = existente.archivo_path if existente is not None else ""
+            archivo_anterior = _managed_media_path(
+                existente.archivo_path if existente is not None else ""
+            )
             entrada = carpeta / f"{trabajo.job_id}-{uuid.uuid4().hex}{extension}"
             os.replace(temporal, entrada)
             if existente is not None:
@@ -689,17 +753,20 @@ def crear_trabajo(request):
                 trabajo.resultado = None
                 trabajo.error = ""
             trabajo.request_id = request_id
-            trabajo.archivo_path = str(entrada)
+            trabajo.archivo_path = str(entrada.resolve())
             trabajo.save(update_fields=["request_id", "estado", "archivo_path", "resultado", "error", "actualizado_en"])
-            if archivo_anterior and archivo_anterior != str(entrada):
+            if archivo_anterior and archivo_anterior != entrada.resolve():
                 transaction.on_commit(
-                    lambda path=archivo_anterior: Path(path).unlink(missing_ok=True),
+                    lambda path=archivo_anterior: path.unlink(missing_ok=True),
                     robust=True,
                 )
     except Exception:
-        temporal.unlink(missing_ok=True)
-        if entrada is not None:
-            entrada.unlink(missing_ok=True)
+        temporary_path = _managed_media_path(str(temporal))
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        input_path = _managed_media_path(str(entrada)) if entrada is not None else None
+        if input_path is not None:
+            input_path.unlink(missing_ok=True)
         raise
     return _respuesta({"status": "queued", "job_id": str(trabajo.job_id), "session_id": session_id}, 202, request_id)
 

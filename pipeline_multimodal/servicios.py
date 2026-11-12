@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
+
+from django.conf import settings
 
 
 class ErrorPipelineMultimodal(Exception):
@@ -31,6 +34,16 @@ class ServicioPipelineMultimodal:
     def ejecutar(self, entrada: Path, session_id: str) -> dict:
         if not self.interprete.is_file():
             raise ErrorPipelineMultimodal("Entorno ML no disponible.")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", session_id or ""):
+            raise ErrorPipelineMultimodal("Identificador de sesión inválido.")
+        entrada = Path(entrada).resolve()
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        try:
+            entrada.relative_to(media_root)
+        except ValueError as error:
+            raise ErrorPipelineMultimodal("Archivo de entrada inválido.") from error
+        if not entrada.is_file():
+            raise ErrorPipelineMultimodal("Archivo de entrada no disponible.")
         comando = [
             str(self.interprete), str(self.raiz / "ml" / "analyze_video.py"), str(entrada),
             "--session-id", session_id, "--project-root", str(self.raiz),

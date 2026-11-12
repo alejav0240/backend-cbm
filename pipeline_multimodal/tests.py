@@ -56,11 +56,13 @@ class PipelineMultimodalTests(SimpleTestCase):
         servicio = __import__("pipeline_multimodal.servicios", fromlist=["ServicioPipelineMultimodal"]).ServicioPipelineMultimodal(
             Path("/proyecto"), Path(sys.executable), timeout=3
         )
+        archivo = Path(settings.MEDIA_ROOT) / "video.mp4"
+        archivo.write_bytes(b"video")
         with patch("pipeline_multimodal.servicios.subprocess.run") as ejecutar:
             ejecutar.return_value.returncode = 0
             ejecutar.return_value.stdout = json.dumps({"status": "completed"})
             ejecutar.return_value.stderr = ""
-            resultado = servicio.ejecutar(Path("/tmp/video.mp4"), "PIPE-001")
+            resultado = servicio.ejecutar(archivo, "PIPE-001")
         self.assertEqual(resultado["status"], "completed")
         self.assertIn("ml/analyze_video.py", " ".join(ejecutar.call_args.args[0]))
 
@@ -142,7 +144,7 @@ class PipelineMultimodalAsyncTests(TestCase):
 
         trabajo.refresh_from_db()
         self.assertEqual(trabajo.estado, TrabajoAnalisis.Estado.FALLIDO)
-        self.assertEqual(trabajo.error, "fallo ML")
+        self.assertEqual(trabajo.error, "El pipeline no pudo procesar el trabajo.")
         self.assertTrue(archivo.exists())
 
     @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")

@@ -250,7 +250,7 @@ def main() -> int:
     try:
         result = write_demuca_estimates(args.session_dir, output, overwrite=args.overwrite)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
-        print(f"[ERROR] DEMUCA estimate generation failed: {error}")
+        print("[ERROR] DEMUCA estimate generation failed")
         return 2
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
