@@ -3,10 +3,10 @@ from django.db import models
 
 class Institution(models.Model):
     name = models.CharField(max_length=255)
-    address = models.TextField(blank=True, null=True)
+    address = models.TextField(blank=True)
     contact_name = models.CharField(max_length=255)
-    contact_email = models.EmailField(blank=True, null=True)
-    contact_phone = models.CharField(max_length=20, blank=True, null=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
 
     class Meta:
         db_table = "institutions"
@@ -20,7 +20,7 @@ class InstitutionGroup(models.Model):
         Institution, on_delete=models.CASCADE, related_name="groups"
     )
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True)
 
     class Meta:
         db_table = "institution_groups"
