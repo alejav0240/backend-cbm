@@ -82,7 +82,7 @@ class Command(BaseCommand):
             # Ejecutar importación en orden de dependencias
             users_by_name = user_importer.import_users(datasets["usuarios"])
             
-            patients_by_legacy_client, info_map = patient_importer.import_patients(
+            _, info_map = patient_importer.import_patients(
                 datasets["clientes"], 
                 users_by_name, 
                 therapist

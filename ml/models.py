@@ -92,6 +92,7 @@ class MultilabelLogisticModel:
                     max_iter=1000,
                     random_state=seed,
                 ),
+                memory=None,
             )
             estimator.fit(features, targets)
             scaler = estimator.named_steps["standardscaler"]

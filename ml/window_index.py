@@ -297,7 +297,7 @@ def validate_window_index(index: dict[str, Any], session_dir: Path) -> list[str]
                     and float(start) <= timestamps[end_index - 1] < float(end)
                 ):
                     issues.append(f"feature_timestamp_outside_window:{expected_index}:{modality}")
-            except (OSError, ValueError, json.JSONDecodeError):
+            except (OSError, ValueError):
                 issues.append(f"feature_source_invalid:{expected_index}:{modality}")
 
     source_artifacts = index.get("source_artifacts")

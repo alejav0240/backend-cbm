@@ -45,6 +45,8 @@ class MultiLabelTreeModel:
             return RandomForestClassifier(
                 n_estimators=300,
                 class_weight="balanced",
+                min_samples_leaf=1,
+                max_features="sqrt",
                 random_state=self.seed,
                 n_jobs=-1,
             )

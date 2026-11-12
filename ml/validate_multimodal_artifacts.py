@@ -23,31 +23,24 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
-    issues: list[str] = []
-    summary_path = session_dir / "processed" / "segments" / "media_pipeline_summary.json"
-    try:
-        summary = _read_object(summary_path)
-    except (OSError, ValueError):
-        return ["invalid_or_missing_media_pipeline_summary"]
-    if summary.get("session_id") != session_dir.name:
-        issues.append("summary_session_id_mismatch")
+OPTIONAL_ARTIFACTS = {"pose_landmarks", "movement_interaction", "demuca_estimates"}
+ARTIFACT_NAMES = (
+    "pose_landmarks",
+    "stable_window_index",
+    "acoustic_features",
+    "vocalization_candidates",
+    "movement_interaction",
+    "demuca_estimates",
+    "multimodal_manifest",
+)
 
-    artifacts = summary.get("derived_artifacts")
-    if not isinstance(artifacts, dict):
-        return [*issues, "derived_artifacts_missing"]
+
+def _load_artifacts(session_dir: Path, records: dict[str, Any]) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    issues: list[str] = []
     loaded: dict[str, dict[str, Any]] = {}
-    for name in (
-        "pose_landmarks",
-        "stable_window_index",
-        "acoustic_features",
-        "vocalization_candidates",
-        "movement_interaction",
-        "demuca_estimates",
-        "multimodal_manifest",
-    ):
-        record = artifacts.get(name)
-        if record is None and name in {"pose_landmarks", "movement_interaction", "demuca_estimates"}:
+    for name in ARTIFACT_NAMES:
+        record = records.get(name)
+        if record is None and name in OPTIONAL_ARTIFACTS:
             continue
         if not isinstance(record, dict):
             issues.append(f"artifact_record_missing:{name}")
@@ -72,7 +65,34 @@ def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
             loaded[name] = _read_object(path)
         except (OSError, ValueError):
             issues.append(f"artifact_invalid_json:{name}")
+    return issues, loaded
 
+
+def _validate_estimates(issues: list[str], demuca: dict[str, Any]) -> None:
+    if demuca.get("training_authorized") is not False:
+        issues.append("provisional_training_flag_invalid:demuca_estimates")
+    if demuca.get("ground_truth") is not False:
+        issues.append("demuca_ground_truth_flag_invalid")
+    if demuca.get("calibration_status") != "not_calibrated":
+        issues.append("demuca_calibration_status_invalid")
+    estimates = demuca.get("estimates")
+    if not isinstance(estimates, list) or not estimates:
+        issues.append("demuca_estimates_missing_or_empty")
+        return
+    for index, estimate in enumerate(estimates):
+        confidence = estimate.get("confidence_percent") if isinstance(estimate, dict) else None
+        valid = (
+            not isinstance(confidence, bool)
+            and isinstance(confidence, (int, float))
+            and math.isfinite(float(confidence))
+            and 0 <= float(confidence) <= 49
+        )
+        if not valid:
+            issues.append(f"demuca_confidence_invalid:{index}")
+
+
+def _validate_loaded_artifacts(session_dir: Path, loaded: dict[str, dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
     window_index = loaded.get("stable_window_index")
     acoustics = loaded.get("acoustic_features")
     if window_index is not None and acoustics is not None:
@@ -88,31 +108,33 @@ def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
             issues.append(f"provisional_training_flag_invalid:{name}")
     demuca = loaded.get("demuca_estimates")
     if demuca is not None:
-        if demuca.get("training_authorized") is not False:
-            issues.append("provisional_training_flag_invalid:demuca_estimates")
-        if demuca.get("ground_truth") is not False:
-            issues.append("demuca_ground_truth_flag_invalid")
-        if demuca.get("calibration_status") != "not_calibrated":
-            issues.append("demuca_calibration_status_invalid")
-        estimates = demuca.get("estimates")
-        if not isinstance(estimates, list) or not estimates:
-            issues.append("demuca_estimates_missing_or_empty")
-        else:
-            for index, estimate in enumerate(estimates):
-                confidence = estimate.get("confidence_percent") if isinstance(estimate, dict) else None
-                if (
-                    isinstance(confidence, bool)
-                    or not isinstance(confidence, (int, float))
-                    or not math.isfinite(float(confidence))
-                    or not 0 <= float(confidence) <= 49
-                ):
-                    issues.append(f"demuca_confidence_invalid:{index}")
-    pose = loaded.get("pose_landmarks")
-    if pose is not None and pose.get("session_id") != session_dir.name:
-        issues.append("pose_session_id_mismatch")
-    manifest = loaded.get("multimodal_manifest")
-    if manifest is not None and manifest.get("session_id") != session_dir.name:
-        issues.append("multimodal_manifest_session_id_mismatch")
+        _validate_estimates(issues, demuca)
+    for name, error in (
+        ("pose_landmarks", "pose_session_id_mismatch"),
+        ("multimodal_manifest", "multimodal_manifest_session_id_mismatch"),
+    ):
+        payload = loaded.get(name)
+        if payload is not None and payload.get("session_id") != session_dir.name:
+            issues.append(error)
+    return issues
+
+
+def validate_multimodal_artifacts(session_dir: Path) -> list[str]:
+    issues: list[str] = []
+    summary_path = session_dir / "processed" / "segments" / "media_pipeline_summary.json"
+    try:
+        summary = _read_object(summary_path)
+    except (OSError, ValueError):
+        return ["invalid_or_missing_media_pipeline_summary"]
+    if summary.get("session_id") != session_dir.name:
+        issues.append("summary_session_id_mismatch")
+
+    artifacts = summary.get("derived_artifacts")
+    if not isinstance(artifacts, dict):
+        return [*issues, "derived_artifacts_missing"]
+    load_issues, loaded = _load_artifacts(session_dir, artifacts)
+    issues.extend(load_issues)
+    issues.extend(_validate_loaded_artifacts(session_dir, loaded))
     return issues
 
 

@@ -15,6 +15,7 @@ from config.utils import get_db_id, module_permission_required, user_can_access_
 import datetime
 import math
 
+ERROR_NO_AUTORIZADO = "No autorizado."
 
 def _generate_username(last_name: str, ci: str | None) -> str:
     """
@@ -99,7 +100,7 @@ class CreatePatient(graphene.Mutation):
                selected_day=None, selected_time=None):
         if not (info.context.user.is_staff or info.context.user.is_superuser) \
                 and get_db_id(author_id) != info.context.user.pk:
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         tutor = None
         tutor_username = None
@@ -122,7 +123,7 @@ class CreatePatient(graphene.Mutation):
 
             else:
                 if not tutor_name:
-                    raise Exception(
+                    raise GraphQLError(
                         "tutor_name es requerido para registrar un tutor nuevo."
                     )
 
@@ -241,9 +242,9 @@ class UpdatePatientStatus(graphene.Mutation):
         try:
             patient = Patient.objects.get(pk=real_id)
         except Patient.DoesNotExist:
-            raise Exception("Paciente no encontrado")
+            raise GraphQLError("Paciente no encontrado")
         if not user_can_access_patient(info.context.user, patient.pk):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         patient.status = status
         patient.save(update_fields=["status", "updated_at"])
@@ -265,7 +266,7 @@ class UpdatePatient(graphene.Mutation):
         try:
             patient = Patient.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, patient.pk):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
 
             if image_url is not None:
                 patient.image_url = image_url
@@ -280,7 +281,7 @@ class UpdatePatient(graphene.Mutation):
             return UpdatePatient(patient=patient)
 
         except Patient.DoesNotExist:
-            raise Exception("Paciente no encontrado")
+            raise GraphQLError("Paciente no encontrado")
 
 class BasicNote(graphene.InputObjectType):
     category = graphene.String()
@@ -299,13 +300,13 @@ class UpdateClinicalNotes(graphene.Mutation):
         real_patient_id = get_db_id(patient_id)
         real_author_id = get_db_id(author_id)
         if not user_can_access_patient(info.context.user, real_patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         updated_instances = []
 
         for n in notes:
             category_upper = n.category.upper()
             
-            note, created = PatientClinicalNote.objects.update_or_create(
+            note, _ = PatientClinicalNote.objects.update_or_create(
                 patient_id=real_patient_id,
                 category=category_upper,
                 defaults={
@@ -331,7 +332,7 @@ class CreateInterventionPlan(graphene.Mutation):
     def mutate(self, info, patient_id, created_by_id, main_objective,
                start_date=None, end_date=None):
         if not user_can_access_patient(info.context.user, get_db_id(patient_id)):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         plan = InterventionPlan.objects.create(
             patient_id=get_db_id(patient_id),
             created_by_id=get_db_id(created_by_id),
@@ -361,7 +362,7 @@ class CreateStepPlan(graphene.Mutation):
         real_plan_id = get_db_id(plan_id)
         plan = InterventionPlan.objects.get(pk=real_plan_id)
         if not user_can_access_patient(info.context.user, plan.patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         order_index = kwargs.get('order_index')
         if order_index is None:
             last_order = PlanStep.objects.filter(plan_id=real_plan_id).aggregate(
@@ -397,9 +398,9 @@ class UpdatePlanProgress(graphene.Mutation):
         try:
             plan = InterventionPlan.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, plan.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
         except InterventionPlan.DoesNotExist:
-            raise Exception("Plan de intervención no encontrado")
+            raise GraphQLError("Plan de intervención no encontrado")
         
         plan.progress_percent = max(0, min(100, progress_percent))
         plan.save(update_fields=["progress_percent", "updated_at"])
@@ -418,7 +419,7 @@ class DeletePatient(graphene.Mutation):
         try:
             patient = Patient.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, patient.pk):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             patient.status = Patient.Status.INACTIVE
             patient.save(update_fields=['status'])
             return DeletePatient(success=True, message="Paciente desactivado correctamente")
@@ -442,13 +443,13 @@ class UpdateInterventionPlan(graphene.Mutation):
         try:
             plan = InterventionPlan.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, plan.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             for key, value in kwargs.items():
                 setattr(plan, key, value)
             plan.save()
             return UpdateInterventionPlan(plan=plan)
         except InterventionPlan.DoesNotExist:
-            raise Exception("Plan no encontrado")
+            raise GraphQLError("Plan no encontrado")
 
 class DeleteInterventionPlan(graphene.Mutation):
     class Arguments:
@@ -461,7 +462,7 @@ class DeleteInterventionPlan(graphene.Mutation):
         try:
             plan = InterventionPlan.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, plan.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             plan.delete()
             return DeleteInterventionPlan(success=True)
         except InterventionPlan.DoesNotExist:
@@ -487,13 +488,13 @@ class UpdateStepPlan(graphene.Mutation):
         try:
             step = PlanStep.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, step.plan.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             for key, value in kwargs.items():
                 setattr(step, key, value)
             step.save()
             return UpdateStepPlan(step=step)
         except PlanStep.DoesNotExist:
-            raise Exception("Paso no encontrado")
+            raise GraphQLError("Paso no encontrado")
 
 
 # ─────────────────────────────────────────
@@ -518,7 +519,7 @@ class AddStepToSession(graphene.Mutation):
         real_step_id = get_db_id(plan_step_id)
         session = Session.objects.get(pk=real_session_id)
         if not user_can_access_patient(info.context.user, session.patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         sps, _ = SessionPlanStep.objects.get_or_create(
             session_id=real_session_id,
@@ -555,9 +556,9 @@ class UpdateSessionPlanStep(graphene.Mutation):
                 plan_step_id=real_step_id,
             )
         except SessionPlanStep.DoesNotExist:
-            raise Exception("No existe ese paso asociado a la sesión. Usa addStepToSession primero.")
+            raise GraphQLError("No existe ese paso asociado a la sesión. Usa addStepToSession primero.")
         if not user_can_access_patient(info.context.user, sps.session.patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         if is_completed is not None:
             sps.is_completed = is_completed
@@ -583,7 +584,7 @@ class RemoveStepFromSession(graphene.Mutation):
         real_step_id = get_db_id(plan_step_id)
         session = Session.objects.get(pk=real_session_id)
         if not user_can_access_patient(info.context.user, session.patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         deleted, _ = SessionPlanStep.objects.filter(
             session_id=real_session_id,
             plan_step_id=real_step_id,
@@ -601,7 +602,7 @@ class DeleteStepPlan(graphene.Mutation):
         try:
             step = PlanStep.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, step.plan.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             step.delete()
             return DeleteStepPlan(success=True)
         except PlanStep.DoesNotExist:
@@ -619,7 +620,7 @@ class CreateTherapyReport(graphene.Mutation):
     def mutate(self, info, patient_id, generated_by_id, report_url):
         real_patient_id = get_db_id(patient_id)
         if not user_can_access_patient(info.context.user, real_patient_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         report = TherapyReport.objects.create(
             patient_id=real_patient_id,
             generated_by_id=get_db_id(generated_by_id),
@@ -638,7 +639,7 @@ class DeleteTherapyReport(graphene.Mutation):
         try:
             report = TherapyReport.objects.get(pk=real_id)
             if not user_can_access_patient(info.context.user, report.patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             report.delete()
             return DeleteTherapyReport(success=True)
         except TherapyReport.DoesNotExist:

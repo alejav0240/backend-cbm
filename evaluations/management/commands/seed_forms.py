@@ -1,6 +1,10 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+FORM_REFERENCIAS_MUSICALES = 'Referencias Musicales'
+FORM_REFERENCIAS_GENERALES = 'Referencias Generales'
+FORM_REFERENCIAS_FAMILIARES = 'Referencias Familiares'
+
 from evaluations.models import Form, FormQuestion
 
 
@@ -15,56 +19,56 @@ CUESTIONARIO_INGRESO = {
         # ── Referencias Musicales ─────────────────────────────────────────────
         {
             "order_index": 1,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Cuáles son las preferencias/rechazos musicales/sonoros de los responsables?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 2,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Cuáles/Cómo fueron tus experiencias musicales/sonoras durante el embarazo?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 3,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Cuáles/Cómo fueron tus primeras experiencias musicales/sonoras después del nacimiento?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 4,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Cuáles son las preferencias/rechazos musicales/sonoros del niño?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 5,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Tienes experiencia musical?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 6,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Tienes familiares que sean músicos?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 7,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Tienes instrumentos musicales en casa?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 8,
-            "section": "Referencias Musicales",
+            "section": FORM_REFERENCIAS_MUSICALES,
             "question": "¿Cómo se involucra musicalmente 'más'?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
@@ -72,42 +76,42 @@ CUESTIONARIO_INGRESO = {
         # ── Referencias Generales ─────────────────────────────────────────────
         {
             "order_index": 9,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Tiene alguna discapacidad o enfermedad? ¿Alguna hiper o hiposensibilidad?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 10,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Usas algún medicamento?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 11,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Tiene algún tipo de alergia?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 12,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Tiene alguna dificultad motora, social, comunicativa, cognitiva, emocional o de otro tipo?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 13,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Realiza intervenciones/monitoreos/terapias?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 14,
-            "section": "Referencias Generales",
+            "section": FORM_REFERENCIAS_GENERALES,
             "question": "¿Tienes algún hiperenfoque?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
@@ -115,28 +119,28 @@ CUESTIONARIO_INGRESO = {
         # ── Referencias Familiares ────────────────────────────────────────────
         {
             "order_index": 15,
-            "section": "Referencias Familiares",
+            "section": FORM_REFERENCIAS_FAMILIARES,
             "question": "¿Cuál es el origen de la familia?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 16,
-            "section": "Referencias Familiares",
+            "section": FORM_REFERENCIAS_FAMILIARES,
             "question": "¿Tienes hermanos?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 17,
-            "section": "Referencias Familiares",
+            "section": FORM_REFERENCIAS_FAMILIARES,
             "question": "¿Adopción u otra información relevante?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,
         },
         {
             "order_index": 18,
-            "section": "Referencias Familiares",
+            "section": FORM_REFERENCIAS_FAMILIARES,
             "question": "¿Con quién pasa el niño la mayor parte del tiempo?",
             "question_type": FormQuestion.QuestionType.TEXT_LONG,
             "is_required": False,

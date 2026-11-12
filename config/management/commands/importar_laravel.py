@@ -101,7 +101,6 @@ class Command(BaseCommand):
                             ssh_username=options["user"],
                             ssh_password=options["password"],
                             remote_bind_address=(remote_host, 3306),
-                            # local_bind_address=("127.0.0.1", 3307),
                         )
                         ssh_tunnel.start()
                         config["host"] = "127.0.0.1"
@@ -181,7 +180,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.NOTICE(f"Terapeuta por defecto: user_id={therapist.id}"))
 
             users_by_name = self._import_users(datasets["usuarios"])
-            patients_by_legacy_client, info_map = self._import_patients_and_info(
+            _, info_map = self._import_patients_and_info(
                 datasets["clientes"],
                 datasets["infoclientes"],
                 users_by_name,

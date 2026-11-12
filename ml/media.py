@@ -120,7 +120,7 @@ def probe_stream_duration(path: Path, stream_selector: str) -> float:
     ])
     try:
         duration = float(value.splitlines()[0])
-    except (IndexError, ValueError) as error:
+    except (IndexError, ValueError):
         # Some containers (notably Matroska) omit per-stream duration. A
         # container duration is safe only when there is exactly one stream;
         # otherwise it could mask audio/video drift by reporting the longest.
@@ -133,7 +133,7 @@ def probe_stream_duration(path: Path, stream_selector: str) -> float:
             duration = float(details["format"]["duration"])
             if len(streams) != 1:
                 raise ValueError("container has multiple streams")
-        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as fallback_error:
+        except (KeyError, TypeError, ValueError) as fallback_error:
             raise ValueError(f"could not read {stream_selector} duration for {path}") from fallback_error
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError(f"invalid {stream_selector} duration for {path}")
@@ -405,11 +405,12 @@ def segment_and_synchronize(
             f"source streams differ by {source_drift:.3f}s "
             f"(maximum tail trim {max_tail_trim_seconds:.3f}s)"
         )
-    trimmed_stream = (
-        "audio" if audio_duration > video_duration
-        else "video" if video_duration > audio_duration
-        else None
-    )
+    if audio_duration > video_duration:
+        trimmed_stream = "audio"
+    elif video_duration > audio_duration:
+        trimmed_stream = "video"
+    else:
+        trimmed_stream = None
     common_duration = min(video_duration, audio_duration)
 
     output_root.parent.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+WINDOWS_FILENAME = "windows.json"
+
 import argparse
 import json
 import os
@@ -58,7 +60,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def load_or_create_window_index(session_dir: Path, *, overwrite: bool) -> dict[str, Any]:
     """Return the validated stable window index required by derived modalities."""
-    output_path = session_dir / "processed" / "windows" / "windows.json"
+    output_path = session_dir / "processed" / "windows" / WINDOWS_FILENAME
     if output_path.exists() and not overwrite:
         payload = json.loads(output_path.read_text(encoding="utf-8"))
         issues = validate_window_index(payload, session_dir)
@@ -190,7 +192,7 @@ def process_session(
             if (
                 existing.get("pose_source_sha256") != pose_result.get("source_frames_sha256")
                 or existing.get("window_index_sha256") != sha256_feature_file(
-                    session_dir / "processed" / "windows" / "windows.json"
+                    session_dir / "processed" / "windows" / WINDOWS_FILENAME
                 )
             ):
                 raise FileExistsError(
@@ -199,7 +201,7 @@ def process_session(
             movement_status = "reused"
             movement_payload = existing
         else:
-            window_index_path = session_dir / "processed" / "windows" / "windows.json"
+            window_index_path = session_dir / "processed" / "windows" / WINDOWS_FILENAME
             if not window_index_path.is_file():
                 raise FileNotFoundError(
                     "stable window index required before movement/interaction aggregation"
@@ -275,9 +277,9 @@ def process_session(
         ),
         "derived_artifacts": {
             "stable_window_index": {
-                "path": "processed/windows/windows.json",
+                "path": "processed/windows/WINDOWS_FILENAME",
                 "sha256": sha256_feature_file(
-                    session_dir / "processed" / "windows" / "windows.json"
+                    session_dir / "processed" / "windows" / WINDOWS_FILENAME
                 ),
             },
             "pose_landmarks": (

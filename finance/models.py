@@ -12,7 +12,7 @@ class Discount(models.Model):
     name = models.CharField(max_length=255)
     type = models.CharField(max_length=20, choices=DiscountType.choices)
     value = models.DecimalField(max_digits=10, decimal_places=2)
-    description = models.CharField(max_length=255, blank=True, null=True)
+    description = models.CharField(max_length=255, blank=True)
 
     class Meta:
         db_table = "discounts"
@@ -54,7 +54,7 @@ class Payment(models.Model):
     price_per_session = models.DecimalField(max_digits=10, decimal_places=2)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
-    payment_proof_url = models.TextField(blank=True, null=True)
+    payment_proof_url = models.TextField(blank=True)
     payment_date = models.DateTimeField(auto_now_add=True)
     payment_status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
@@ -120,7 +120,7 @@ class Course(models.Model):
         ARCHIVED = "archived", "Archivado"
 
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     state = models.CharField(max_length=20, choices=CourseState.choices, default=CourseState.DRAFT)
 
@@ -133,9 +133,8 @@ class Course(models.Model):
 
 class CourseEnrollment(models.Model):
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="enrollments")
-    # user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="enrollments")
     full_name = models.CharField(max_length=255)
-    carnet = models.CharField(max_length=50, blank=True, null=True)
+    carnet = models.CharField(max_length=50, blank=True)
     enrolled_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -206,7 +206,7 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
                     '<img src="{}" width="40" height="40" style="border-radius:50%;" />',
                     obj.foto.url,
                 )
-            except:
+            except (AttributeError, ValueError):
                 return "Sin imagen"
         return "Sin foto"
 

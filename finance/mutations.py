@@ -7,6 +7,8 @@ from django.db import transaction
 from django.db.models import Max
 from django.db.models.functions import Coalesce
 
+DISCOUNT_NOT_FOUND = 'Descuento no encontrado'
+
 from finance.models import CoursePayment, CourseEnrollment, Expense, Payment, Discount, Course
 from finance.type import CourseEnrollmentType, DiscountType, ExpenseType, PaymentType, CourseType
 from therapeutic_sessions.models import Session
@@ -44,7 +46,7 @@ class CreatePayment(graphene.Mutation):
                 else: # FIXED
                     final_total = base_total - discount_obj.value
             except (Discount.DoesNotExist, ValueError):
-                raise GraphQLError("Descuento no encontrado")
+                raise GraphQLError(DISCOUNT_NOT_FOUND)
 
         paid = Decimal(str(amount_paid))
 
@@ -360,7 +362,7 @@ class UpdateDiscount(graphene.Mutation):
             discount.save()
             return UpdateDiscount(discount=discount)
         except Discount.DoesNotExist:
-            raise GraphQLError("Descuento no encontrado")
+            raise GraphQLError(DISCOUNT_NOT_FOUND)
 
 
 class DeleteDiscount(graphene.Mutation):
@@ -377,7 +379,7 @@ class DeleteDiscount(graphene.Mutation):
             discount.delete()
             return DeleteDiscount(success=True, message="Descuento eliminado correctamente")
         except Discount.DoesNotExist:
-            return DeleteDiscount(success=False, message="Descuento no encontrado")
+            return DeleteDiscount(success=False, message=DISCOUNT_NOT_FOUND)
 
 
 class Mutation(graphene.ObjectType):

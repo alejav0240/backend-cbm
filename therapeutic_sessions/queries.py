@@ -1,6 +1,7 @@
 import graphene
 from graphql import GraphQLError
 
+ERROR_NO_AUTORIZADO = "No autorizado."
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import (
     SessionType, DigitalResourceType, InventoryItemType, CycleType,
@@ -187,16 +188,20 @@ class Query(graphene.ObjectType):
                          session_type=None, payment_status=None, session_status=None,
                          date_from=None, date_to=None, include_no_date=True,
                          search=None, page=1, page_size=10, by_cycles=False):
-        from django.db.models import Q
+        from django.db.models import F, Q
         from django.utils import timezone
 
         user = info.context.user
         if not (user.is_staff or user.is_superuser):
             if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             therapist_id = str(user.pk)
 
-        qs = Session.objects.select_related("patient", "therapist", "group").order_by("-pk")
+        # The sessions view is chronological; keep pagination consistent with
+        # the order shown by the frontend instead of paginating by insertion id.
+        qs = Session.objects.select_related("patient", "therapist", "group").order_by(
+            F("session_date").desc(nulls_last=True), "-pk"
+        )
 
         if patient_id:
             qs = qs.filter(patient_id=get_db_id(patient_id))
@@ -270,7 +275,7 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not (user.is_staff or user.is_superuser):
             if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             therapist_id = str(user.pk)
 
         qs = Session.objects.select_related("patient", "therapist", "group").filter(
@@ -318,7 +323,7 @@ class Query(graphene.ObjectType):
             ).get(pk=real_id)
             if not (info.context.user.is_staff or info.context.user.is_superuser) \
                     and session.therapist_id != info.context.user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             return session
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
@@ -405,7 +410,7 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not (user.is_staff or user.is_superuser):
             if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             therapist_id = str(user.pk)
 
         qs = Session.objects.filter(cycle_number__isnull=False)

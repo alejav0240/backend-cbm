@@ -39,7 +39,8 @@ from .models import (
 from .demuca_review import merge_demuca_data
 from ml.tracking import log_run
 
-EXTENSIONES_VIDEO = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+EXTENSION_WEBM = ".webm"
+EXTENSIONES_VIDEO = {".mp4", ".mov", ".avi", ".mkv", EXTENSION_WEBM}
 ERROR_NO_AUTORIZADO = "No autorizado."
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _LOGGER = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def _video_extension(filename):
         ".mov": ".mov",
         ".avi": ".avi",
         ".mkv": ".mkv",
-        ".webm": ".webm",
+        EXTENSION_WEBM: EXTENSION_WEBM,
     }.get(suffix)
 
 
@@ -651,7 +652,7 @@ def actualizar_demuca(request, session_id: str):
         demuca_actual = demuca_actual if isinstance(demuca_actual, dict) else {}
         datos_actuales = demuca_actual.get("data")
         datos = merge_demuca_data(datos_actuales, incoming, session_id=session_id)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+    except (UnicodeDecodeError, ValueError) as error:
         _LOGGER.warning("Invalid DEMUCA update: %s", error)
         return _respuesta({"status": "failed", "error": "invalid_request"}, 400, request_id)
 

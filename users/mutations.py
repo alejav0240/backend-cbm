@@ -1,5 +1,7 @@
 # users/mutations.py
 
+ERROR_NO_AUTORIZADO = "No autorizado."
+ERROR_NO_AUTENTICADO = "No autenticado."
 import graphene
 import graphql_jwt
 from graphql import GraphQLError
@@ -165,13 +167,13 @@ class UpdateUser(graphene.Mutation):
     def mutate(self, info, id, **kwargs):
         current_user = info.context.user
         if not current_user.is_authenticated:
-            raise GraphQLError("No autenticado.")
+            raise GraphQLError(ERROR_NO_AUTENTICADO)
 
         real_id = get_db_id(id)
 
         # Solo el propio usuario o un admin puede editar
         if not current_user.is_staff and str(current_user.pk) != str(real_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         try:
             user = User.objects.get(pk=real_id)
@@ -207,7 +209,7 @@ class ChangePassword(graphene.Mutation):
     def mutate(self, info, old_password, new_password):
         user = info.context.user
         if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
+            raise GraphQLError(ERROR_NO_AUTENTICADO)
         if not user.check_password(old_password):
             raise GraphQLError("La contraseña actual es incorrecta.")
         if len(new_password) < 8:
@@ -244,7 +246,7 @@ class MarkOnboardingViewSeen(graphene.Mutation):
     def mutate(self, info, view_key):
         user = info.context.user
         if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
+            raise GraphQLError(ERROR_NO_AUTENTICADO)
 
         onboarding_view, _ = OnboardingView.objects.get_or_create(
             user=user,

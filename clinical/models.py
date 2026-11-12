@@ -2,6 +2,17 @@ from django.db import models
 from users.models import User
 from django.utils import timezone
 
+APPROACH_ACUL_E1_ABSORCION = "ACUL-E1: ABSORCIÓN"
+APPROACH_ACUL_E2_RESPUESTA_SIN_INTENCION = "ACUL-E2: RESPUESTA SIN INTENCIÓN"
+APPROACH_ACUL_E3_RESPUESTA_INTENCIONADA = "ACUL-E3: RESPUESTA INTENCIONADA"
+APPROACH_ASI_E6_INTROSPECCION = "ASI-E6: INTROSPECCIÓN"
+APPROACH_ASI_E7_COORDINACION = "ASI-E7: COORDINACIÓN"
+APPROACH_IMI_E4_SALIENDO_DEL_EGOCENTRISMO = "IMI-E4: SALIENDO DEL EGOCENTRISMO"
+APPROACH_IMI_E5_CAPTANDO_EL_SENTIDO = "IMI-E5: CAPTANDO EL SENTIDO"
+APPROACH_MLT_GORDON = "MLT GORDON"
+APPROACH_MT_CONDUCTUAL = "MT CONDUCTUAL"
+APPROACH_MT_CREATIVA = "MT CREATIVA"
+
 class Patient(models.Model):
 
     class Status(models.TextChoices):
@@ -19,16 +30,16 @@ class Patient(models.Model):
     )
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
-    ci = models.CharField(max_length=30, blank=True, null=True)
+    ci = models.CharField(max_length=30, blank=True)
     birth_date = models.DateField(blank=True, null=True)
-    image_url = models.TextField(blank=True, null=True)
-    notes = models.TextField(blank=True, null=True)
+    image_url = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     registration_complete = models.BooleanField(default=False)
     diagnosis = models.CharField(max_length=50, default='sin diagnostico')
-    residence = models.CharField(max_length=100, blank=True, null=True)
+    residence = models.CharField(max_length=100, blank=True)
 
     class Meta:
         db_table = "patients"
@@ -170,33 +181,33 @@ class PlanStep(models.Model):
         SENSACION_DE_CONCLUSION = "SENSACIÓN DE CONCLUSIÓN", "SENSACIÓN DE CONCLUSIÓN"
 
     class Approach(models.TextChoices):
-        ACUL_E1_ABSORCION = "ACUL-E1: ABSORCIÓN", "ACUL-E1: ABSORCIÓN"
-        ACUL_E2_RESPUESTA_SIN_INTENCION = "ACUL-E2: RESPUESTA SIN INTENCIÓN", "ACUL-E2: RESPUESTA SIN INTENCIÓN"
-        ACUL_E3_RESPUESTA_INTENCIONADA = "ACUL-E3: RESPUESTA INTENCIONADA", "ACUL-E3: RESPUESTA INTENCIONADA"
-        ASI_E6_INTROSPECCION = "ASI-E6: INTROSPECCIÓN", "ASI-E6: INTROSPECCIÓN"
-        ASI_E7_COORDINACION = "ASI-E7: COORDINACIÓN", "ASI-E7: COORDINACIÓN"
+        ACUL_E1_ABSORCION = APPROACH_ACUL_E1_ABSORCION, APPROACH_ACUL_E1_ABSORCION
+        ACUL_E2_RESPUESTA_SIN_INTENCION = APPROACH_ACUL_E2_RESPUESTA_SIN_INTENCION, APPROACH_ACUL_E2_RESPUESTA_SIN_INTENCION
+        ACUL_E3_RESPUESTA_INTENCIONADA = APPROACH_ACUL_E3_RESPUESTA_INTENCIONADA, APPROACH_ACUL_E3_RESPUESTA_INTENCIONADA
+        ASI_E6_INTROSPECCION = APPROACH_ASI_E6_INTROSPECCION, APPROACH_ASI_E6_INTROSPECCION
+        ASI_E7_COORDINACION = APPROACH_ASI_E7_COORDINACION, APPROACH_ASI_E7_COORDINACION
         DALCROZE = "DALCROZE", "DALCROZE"
         GIM = "GIM", "GIM"
-        IMI_E4_SALIENDO_DEL_EGOCENTRISMO = "IMI-E4: SALIENDO DEL EGOCENTRISMO", "IMI-E4: SALIENDO DEL EGOCENTRISMO"
-        IMI_E5_CAPTANDO_EL_SENTIDO = "IMI-E5: CAPTANDO EL SENTIDO", "IMI-E5: CAPTANDO EL SENTIDO"
-        MLT_GORDON = "MLT GORDON", "MLT GORDON"
-        MT_CONDUCTUAL = "MT CONDUCTUAL", "MT CONDUCTUAL"
-        MT_CREATIVA = "MT CREATIVA", "MT CREATIVA"
+        IMI_E4_SALIENDO_DEL_EGOCENTRISMO = APPROACH_IMI_E4_SALIENDO_DEL_EGOCENTRISMO, APPROACH_IMI_E4_SALIENDO_DEL_EGOCENTRISMO
+        IMI_E5_CAPTANDO_EL_SENTIDO = APPROACH_IMI_E5_CAPTANDO_EL_SENTIDO, APPROACH_IMI_E5_CAPTANDO_EL_SENTIDO
+        MLT_GORDON = APPROACH_MLT_GORDON, APPROACH_MLT_GORDON
+        MT_CONDUCTUAL = APPROACH_MT_CONDUCTUAL, APPROACH_MT_CONDUCTUAL
+        MT_CREATIVA = APPROACH_MT_CREATIVA, APPROACH_MT_CREATIVA
         WILLIEMS = "WILLIEMS", "WILLIEMS"
 
     class MltMethod(models.TextChoices):
-        ACUL_E1_ABSORCION = "ACUL-E1: ABSORCIÓN", "ACUL-E1: ABSORCIÓN"
-        ACUL_E2_RESPUESTA_SIN_INTENCION = "ACUL-E2: RESPUESTA SIN INTENCIÓN", "ACUL-E2: RESPUESTA SIN INTENCIÓN"
-        ACUL_E3_RESPUESTA_INTENCIONADA = "ACUL-E3: RESPUESTA INTENCIONADA", "ACUL-E3: RESPUESTA INTENCIONADA"
-        ASI_E6_INTROSPECCION = "ASI-E6: INTROSPECCIÓN", "ASI-E6: INTROSPECCIÓN"
-        ASI_E7_COORDINACION = "ASI-E7: COORDINACIÓN", "ASI-E7: COORDINACIÓN"
+        ACUL_E1_ABSORCION = APPROACH_ACUL_E1_ABSORCION, APPROACH_ACUL_E1_ABSORCION
+        ACUL_E2_RESPUESTA_SIN_INTENCION = APPROACH_ACUL_E2_RESPUESTA_SIN_INTENCION, APPROACH_ACUL_E2_RESPUESTA_SIN_INTENCION
+        ACUL_E3_RESPUESTA_INTENCIONADA = APPROACH_ACUL_E3_RESPUESTA_INTENCIONADA, APPROACH_ACUL_E3_RESPUESTA_INTENCIONADA
+        ASI_E6_INTROSPECCION = APPROACH_ASI_E6_INTROSPECCION, APPROACH_ASI_E6_INTROSPECCION
+        ASI_E7_COORDINACION = APPROACH_ASI_E7_COORDINACION, APPROACH_ASI_E7_COORDINACION
         DALCROZE = "DALCROZE", "DALCROZE"
         GIM = "GIM", "GIM"
-        IMI_E4_SALIENDO_DEL_EGOCENTRISMO = "IMI-E4: SALIENDO DEL EGOCENTRISMO", "IMI-E4: SALIENDO DEL EGOCENTRISMO"
-        IMI_E5_CAPTANDO_EL_SENTIDO = "IMI-E5: CAPTANDO EL SENTIDO", "IMI-E5: CAPTANDO EL SENTIDO"
-        MLT_GORDON = "MLT GORDON", "MLT GORDON"
-        MT_CONDUCTUAL = "MT CONDUCTUAL", "MT CONDUCTUAL"
-        MT_CREATIVA = "MT CREATIVA", "MT CREATIVA"
+        IMI_E4_SALIENDO_DEL_EGOCENTRISMO = APPROACH_IMI_E4_SALIENDO_DEL_EGOCENTRISMO, APPROACH_IMI_E4_SALIENDO_DEL_EGOCENTRISMO
+        IMI_E5_CAPTANDO_EL_SENTIDO = APPROACH_IMI_E5_CAPTANDO_EL_SENTIDO, APPROACH_IMI_E5_CAPTANDO_EL_SENTIDO
+        MLT_GORDON = APPROACH_MLT_GORDON, APPROACH_MLT_GORDON
+        MT_CONDUCTUAL = APPROACH_MT_CONDUCTUAL, APPROACH_MT_CONDUCTUAL
+        MT_CREATIVA = APPROACH_MT_CREATIVA, APPROACH_MT_CREATIVA
         WILLIEMS = "WILLIEMS", "WILLIEMS"
 
     MUSICAL_EMPHASIS_OPTIONS = (
@@ -221,11 +232,11 @@ class PlanStep(models.Model):
     moment = models.CharField(max_length=20, choices=Moment.choices)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     objective = models.CharField(max_length=255, choices=Objective.choices)
-    focus = models.TextField(blank=True, null=True, choices=Focus.choices)
-    musical_resources = models.TextField(blank=True, null=True)
-    musical_emphasis = models.CharField(max_length=255, blank=True, null=True)
-    approach = models.CharField(max_length=255, blank=True, null=True, choices=Approach.choices)
-    mlt_method = models.CharField(max_length=100, blank=True, null=True, choices=MltMethod.choices)
+    focus = models.TextField(blank=True, choices=Focus.choices)
+    musical_resources = models.TextField(blank=True)
+    musical_emphasis = models.CharField(max_length=255, blank=True)
+    approach = models.CharField(max_length=255, blank=True, choices=Approach.choices)
+    mlt_method = models.CharField(max_length=100, blank=True, choices=MltMethod.choices)
     order_index = models.PositiveSmallIntegerField(default=0)
 
     class Meta:

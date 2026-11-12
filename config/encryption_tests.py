@@ -3,11 +3,13 @@ import os
 import tempfile
 from pathlib import Path
 
+GRAPHQL_PATH = '/graphql/'
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.http import JsonResponse
-from django.test import RequestFactory, SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 
 from config.application_encryption import (
     CONTENT_TYPE,
@@ -72,10 +74,10 @@ class ApplicationEncryptionTests(SimpleTestCase):
 
     def test_request_and_response_round_trip(self):
         request_envelope, aes_key = self._request_envelope(
-            "/graphql/", b'{"query":"{ me { username } }"}'
+            GRAPHQL_PATH, b'{"query":"{ me { username } }"}'
         )
         request = RequestFactory().post(
-            "/graphql/",
+            GRAPHQL_PATH,
             data=json.dumps(request_envelope),
             content_type=CONTENT_TYPE,
         )
@@ -90,12 +92,43 @@ class ApplicationEncryptionTests(SimpleTestCase):
         response_payload = AESGCM(aes_key).decrypt(
             _b64decode(response_envelope["iv"]),
             _b64decode(response_envelope["ct"]),
-            _aad("/graphql/"),
+            _aad(GRAPHQL_PATH),
         )
         self.assertEqual(json.loads(response_payload), {"ok": True})
 
     def test_request_path_is_authenticated(self):
-        envelope, _ = self._request_envelope("/graphql/", b"{}")
+        envelope, _ = self._request_envelope(GRAPHQL_PATH, b"{}")
 
         with self.assertRaises(ValueError):
             decrypt_envelope(envelope, "/api/other/")
+
+    @override_settings(APP_ENCRYPTION_ENABLED=False)
+    def test_middleware_passes_plaintext_when_disabled(self):
+        request = RequestFactory().post(
+            GRAPHQL_PATH, data=json.dumps({"query": "{}"}), content_type="application/json"
+        )
+        middleware = ApplicationEncryptionMiddleware(
+            lambda current_request: JsonResponse({"ok": True})
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(json.loads(response.content), {"ok": True})
+
+    @override_settings(APP_ENCRYPTION_ENABLED=False)
+    def test_disabled_middleware_does_not_require_response_key(self):
+        request = RequestFactory().get(
+            GRAPHQL_PATH,
+            HTTP_X_CBM_ENCRYPTED_RESPONSE="1",
+            HTTP_X_CBM_RESPONSE_KEY="invalid",
+            HTTP_X_CBM_RESPONSE_KEY_ID="invalid",
+        )
+        middleware = ApplicationEncryptionMiddleware(
+            lambda current_request: JsonResponse({"ok": True})
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"ok": True})

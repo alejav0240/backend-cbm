@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.http import JsonResponse
 
 from .application_encryption import (
@@ -17,12 +18,15 @@ class ApplicationEncryptionMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if not settings.APP_ENCRYPTION_ENABLED:
+            return self.get_response(request)
+
         if request.content_type == CONTENT_TYPE:
             try:
                 plaintext, aes_key = decrypt_envelope(
                     json.loads(request.body.decode("utf-8")), request.path
                 )
-            except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+            except (TypeError, ValueError, KeyError):
                 return JsonResponse({"error": "Invalid encrypted payload"}, status=400)
             request._body = plaintext
             request.META["CONTENT_TYPE"] = "application/json"

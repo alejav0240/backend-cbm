@@ -3,6 +3,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
+CLINICAL_PATIENT_CHANGE_LIST = 'admin:clinical_patient_changelist'
+
 # Monkeypatch to bypass database version checks (PostgreSQL 10.23 vs Django 4.2 requirement of 12+)
 from django.db.backends.base.base import BaseDatabaseWrapper
 BaseDatabaseWrapper.check_database_version_supported = lambda self: None
@@ -25,6 +27,12 @@ if not SECRET_KEY:
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+APP_ENCRYPTION_ENABLED = os.getenv("APP_ENCRYPTION_ENABLED", "true").strip().lower() not in (
+    "false",
+    "0",
+    "no",
+    "off",
+)
 if APP_ENV == "production" and DEBUG:
     raise RuntimeError("DEBUG must be false when APP_ENV=production")
 
@@ -292,7 +300,7 @@ UNFOLD = {
                     {
                         "title": _("Pacientes"),
                         "icon": "person",
-                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                        "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                     },
                     {
                         "title": _("Planes de Intervención"),
@@ -376,7 +384,7 @@ UNFOLD = {
             "items": [
                 {
                     "title": _("Pacientes"),
-                    "link": reverse_lazy("admin:clinical_patient_changelist"),
+                    "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                 },
                 {
                     "title": _("Planes"),
@@ -397,7 +405,7 @@ UNFOLD = {
                     {
                         "title": _("Pacientes"),
                         "icon": "person",
-                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                        "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                     },
                     {
                         "title": _("Sesiones"),
