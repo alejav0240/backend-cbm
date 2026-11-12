@@ -38,6 +38,21 @@ DATASET_LABEL_COLUMNS = (
 ANNOTATION_TAG_FIELDS = ("sound_tags", "movement_tags", "interaction_tags")
 
 
+def _validate_json_collection(value, field_name, depth):
+    if isinstance(value, list):
+        if len(value) > 2048:
+            raise ValidationError(f"{field_name} contains too many items")
+        for item in value:
+            _validate_json_value(item, field_name, depth + 1)
+        return
+    if len(value) > 256:
+        raise ValidationError(f"{field_name} contains too many keys")
+    for key, item in value.items():
+        if not isinstance(key, str) or len(key) > 128:
+            raise ValidationError(f"invalid key in {field_name}")
+        _validate_json_value(item, field_name, depth + 1)
+
+
 def _validate_json_value(value, field_name, depth=0):
     if depth > 6:
         raise ValidationError(f"{field_name} nesting is too deep")
@@ -49,19 +64,9 @@ def _validate_json_value(value, field_name, depth=0):
         if not math.isfinite(value):
             raise ValidationError(f"invalid numeric value: {field_name}")
         return
-    if isinstance(value, list):
-        if len(value) > 2048:
-            raise ValidationError(f"{field_name} contains too many items")
-        for item in value:
-            _validate_json_value(item, field_name, depth + 1)
+    if isinstance(value, (list, dict)):
+        _validate_json_collection(value, field_name, depth)
         return
-    if isinstance(value, dict):
-        if len(value) > 256:
-            raise ValidationError(f"{field_name} contains too many keys")
-        for key, item in value.items():
-            if not isinstance(key, str) or len(key) > 128:
-                raise ValidationError(f"invalid key in {field_name}")
-            _validate_json_value(item, field_name, depth + 1)
         return
     raise ValidationError(f"invalid value: {field_name}")
 
@@ -78,14 +83,18 @@ def validate_annotation_values(start_time, end_time, demuca_phase, tags, derived
         raise ValidationError("demuca_phase must be a non-empty string")
     if not isinstance(tags, dict) or set(tags) != set(ANNOTATION_TAG_FIELDS):
         raise ValidationError("tags must contain sound_tags, movement_tags, and interaction_tags")
-    for field in ANNOTATION_TAG_FIELDS:
-        values = tags[field]
-        if not isinstance(values, list) or len(values) > 64 or any(not isinstance(tag, str) or not tag.strip() or len(tag) > 128 for tag in values):
-            raise ValidationError(f"{field} must be a list of non-empty strings")
+    _validate_annotation_tags(tags)
     for field_name, value in (("derived_features", derived_features), ("pose_landmarks", pose_landmarks), ("artifact_payload", artifact_payload)):
         if not isinstance(value, (dict, list)):
             raise ValidationError(f"{field_name} must be an object or array")
         _validate_json_value(value, field_name)
+
+
+def _validate_annotation_tags(tags):
+    for field in ANNOTATION_TAG_FIELDS:
+        values = tags[field]
+        if not isinstance(values, list) or len(values) > 64 or any(not isinstance(tag, str) or not tag.strip() or len(tag) > 128 for tag in values):
+            raise ValidationError(f"{field} must be a list of non-empty strings")
 
 
 def validate_dataset_values(features, labels):

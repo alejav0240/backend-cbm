@@ -39,6 +39,23 @@ DEMUCA_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _merge_category(category, fields, source, patch):
+    if not isinstance(source, dict) or not isinstance(patch, dict):
+        raise ValueError(f"demuca_category_must_be_object:{category}")
+    unknown = set(patch).difference(fields)
+    if unknown:
+        raise ValueError(f"demuca_unknown_field:{category}:{sorted(unknown)[0]}")
+    merged = {field: source.get(field, 0) for field in fields}
+    merged.update(patch)
+    for field, value in merged.items():
+        if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+            raise ValueError(f"demuca_value_must_be_finite_number:{category}:{field}")
+        if float(value) < 0:
+            raise ValueError(f"demuca_value_must_be_non_negative:{category}:{field}")
+        merged[field] = int(value) if float(value).is_integer() else float(value)
+    return merged
+
+
 def merge_demuca_data(
     current: dict[str, Any] | None,
     incoming: dict[str, Any],
@@ -54,21 +71,7 @@ def merge_demuca_data(
     current = current if isinstance(current, dict) else {}
     normalized: dict[str, Any] = {"sesion_id": session_id}
     for category, fields in DEMUCA_FIELDS.items():
-        source = current.get(category, {})
-        patch = incoming.get(category, {})
-        if not isinstance(source, dict) or not isinstance(patch, dict):
-            raise ValueError(f"demuca_category_must_be_object:{category}")
-        unknown = set(patch).difference(fields)
-        if unknown:
-            raise ValueError(f"demuca_unknown_field:{category}:{sorted(unknown)[0]}")
-        merged = {field: source.get(field, 0) for field in fields}
-        merged.update(patch)
-        for field in fields:
-            value = merged[field]
-            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
-                raise ValueError(f"demuca_value_must_be_finite_number:{category}:{field}")
-            if float(value) < 0:
-                raise ValueError(f"demuca_value_must_be_non_negative:{category}:{field}")
-            merged[field] = int(value) if float(value).is_integer() else float(value)
-        normalized[category] = merged
+        normalized[category] = _merge_category(
+            category, fields, current.get(category, {}), incoming.get(category, {})
+        )
     return normalized

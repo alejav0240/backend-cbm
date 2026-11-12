@@ -57,6 +57,52 @@ def get_next_weekday(start_date, weekday_name):
         days_ahead += 7
     return start_date + datetime.timedelta(days_ahead)
 
+
+def _resolve_tutor(tutor_name, tutor_email, tutor_ci, tutor_celular, last_name):
+    if not (tutor_name or tutor_email or tutor_ci):
+        return None, None, None, False
+    existing = User.objects.filter(ci=tutor_ci).first() if tutor_ci else None
+    if not existing and tutor_email:
+        existing = User.objects.filter(email=tutor_email).first()
+    if existing:
+        return existing, None, None, False
+    if not tutor_name:
+        raise GraphQLError("tutor_name es requerido para registrar un tutor nuevo.")
+    parts = tutor_name.strip().split()
+    username = _generate_username(last_name, tutor_ci)
+    password = _generate_password(last_name, tutor_ci)
+    tutor = User.objects.create(
+        username=username,
+        password=make_password(password),
+        email=tutor_email or f"{username}@sin-email.cbm",
+        first_name=parts[0],
+        last_name=" ".join(parts[1:]) if len(parts) > 1 else last_name,
+        ci=tutor_ci,
+        celular=tutor_celular,
+        is_active=True,
+    )
+    return tutor, username, password, True
+
+
+def _create_initial_sessions(patient, author_id, selected_day, selected_time):
+    today = datetime.date.today()
+    first_date = get_next_weekday(today, selected_day)
+    hour, minute = map(int, selected_time.split(":"))
+    start = datetime.datetime.combine(first_date, datetime.time(hour, minute))
+    Session.objects.bulk_create([
+        Session(
+            patient=patient,
+            therapist_id=author_id,
+            session_date=start + datetime.timedelta(weeks=index),
+            session_type="individual",
+            session_number=index + 1,
+            cycle_number=math.ceil((index + 1) / 4),
+            session_status="agendada",
+            payment_status="pending",
+        )
+        for index in range(4)
+    ])
+
 class CreatePatient(graphene.Mutation):
     class Arguments:
         # autor
@@ -109,49 +155,9 @@ class CreatePatient(graphene.Mutation):
                 and get_db_id(author_id) != info.context.user.pk:
             raise GraphQLError(ERROR_NO_AUTORIZADO)
 
-        tutor = None
-        tutor_username = None
-        tutor_password_plain = None
-        tutor_created = False
-
-        # ── Tutor ─────────────────────────────────────────────────
-        if tutor_name or tutor_email or tutor_ci:
-
-            # 1. Buscar existente: primero por CI, luego por email
-            existing = None
-            if tutor_ci:
-                existing = User.objects.filter(ci=tutor_ci).first()
-            if not existing and tutor_email:
-                existing = User.objects.filter(email=tutor_email).first()
-
-            if existing:
-                tutor = existing
-                tutor_created = False
-
-            else:
-                if not tutor_name:
-                    raise GraphQLError(
-                        "tutor_name es requerido para registrar un tutor nuevo."
-                    )
-
-                name_parts  = tutor_name.strip().split()
-                tutor_first = name_parts[0]
-                tutor_last  = " ".join(name_parts[1:]) if len(name_parts) > 1 else last_name
-
-                tutor_username      = _generate_username(last_name, tutor_ci)
-                tutor_password_plain = _generate_password(last_name, tutor_ci)
-
-                tutor = User.objects.create(
-                    username   = tutor_username,
-                    password   = make_password(tutor_password_plain),
-                    email      = tutor_email or f"{tutor_username}@sin-email.cbm",
-                    first_name = tutor_first,
-                    last_name  = tutor_last,
-                    ci         = tutor_ci,
-                    celular      = tutor_celular,
-                    is_active  = True,
-                )
-                tutor_created = True
+        tutor, tutor_username, tutor_password_plain, tutor_created = _resolve_tutor(
+            tutor_name, tutor_email, tutor_ci, tutor_celular, last_name
+        )
 
         # ── Paciente ──────────────────────────────────────────────
         patient = Patient.objects.create(
@@ -189,40 +195,9 @@ class CreatePatient(graphene.Mutation):
 
         PatientClinicalNote.objects.bulk_create(default_notes)
 
-        # ── Sesiones Iniciales (Ciclo de 4) ───────────────────────
         if selected_day and selected_time:
             try:
-                # Calcular la primera fecha
-                today = datetime.date.today()
-                first_session_date = get_next_weekday(today, selected_day)
-                
-                # Parsear la hora
-                hour, minute = map(int, selected_time.split(':'))
-                
-                # Combinar fecha y hora
-                start_datetime = datetime.datetime.combine(first_session_date, datetime.time(hour, minute))
-                
-                sessions_to_create = []
-                for i in range(4):
-                    session_number = i + 1
-                    calculated_cycle = math.ceil(session_number / 4)
-                    
-                    # Programar una sesión cada semana (7 días)
-                    session_date = start_datetime + datetime.timedelta(weeks=i)
-                    
-                    sessions_to_create.append(
-                        Session(
-                            patient=patient,
-                            therapist_id=author_id,
-                            session_date=session_date,
-                            session_type="individual",
-                            session_number=session_number,
-                            cycle_number=calculated_cycle,
-                            session_status="agendada", # Antes "confirma"
-                            payment_status="pending"
-                        )
-                    )
-                Session.objects.bulk_create(sessions_to_create)
+                _create_initial_sessions(patient, author_id, selected_day, selected_time)
             except Exception as e:
                 # No queremos que falle el registro del paciente si fallan las sesiones
                 print(f"Error creando sesiones iniciales: {e}")
