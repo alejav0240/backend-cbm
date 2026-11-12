@@ -94,21 +94,25 @@ def _invalid_request(error):
     return JsonResponse({"error": "invalid_request"}, status=400)
 
 
+def _authenticate_request(request):
+    if request.user.is_authenticated:
+        return True
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.upper() not in {"JWT", "BEARER"} or not token:
+        return False
+    try:
+        request.user = JSONWebTokenBackend().authenticate(request, token=token)
+    except JSONWebTokenError:
+        request.user = None
+    return request.user is not None and request.user.is_authenticated
+
+
 def _api_login_required(view):
     """Authenticate REST callers through Django sessions or the existing JWT flow."""
     @wraps(view)
     def wrapped(request, *args, **kwargs):
-        if not request.user.is_authenticated:
-            authorization = request.headers.get("Authorization", "")
-            scheme, _, token = authorization.partition(" ")
-            if scheme.upper() in {"JWT", "BEARER"} and token:
-                try:
-                    user = JSONWebTokenBackend().authenticate(request, token=token)
-                except JSONWebTokenError:
-                    user = None
-                if user is not None:
-                    request.user = user
-        if not request.user.is_authenticated:
+        if not _authenticate_request(request):
             return JsonResponse({"error": "authentication_required"}, status=401)
         return view(request, *args, **kwargs)
     return wrapped
@@ -346,6 +350,34 @@ def _artifact_payload_for_session(session_id):
     return payload, pose_landmarks
 
 
+def _create_annotation_sample(dataset, session_id, body):
+    tags = body.get("tags") or {}
+    normalized_tags = {
+        "sound_tags": tags.get("sonido", tags.get("sound_tags", [])),
+        "movement_tags": tags.get("movimiento", tags.get("movement_tags", [])),
+        "interaction_tags": tags.get("interaccion", tags.get("interaction_tags", [])),
+    }
+    start_time, end_time = body.get("start_time"), body.get("end_time")
+    demuca_phase = body.get("demuca_phase", "")
+    derived_features = body.get("features", {})
+    pose_landmarks = body.get("landmarks", [])
+    artifact_payload = body.get("artifact_payload", {})
+    validate_annotation_values(start_time, end_time, demuca_phase, normalized_tags, derived_features, pose_landmarks, artifact_payload)
+    features = {column: float(derived_features.get(column, 0.0)) for column in DATASET_FEATURE_COLUMNS}
+    labels = {column: 0 for column in DATASET_LABEL_COLUMNS}
+    window_id = str(body.get("window_id") or f"{session_id}_A{dataset.samples.filter(session_id=session_id).count():04d}")
+    if dataset.samples.filter(session_id=session_id, window_id=window_id).exists():
+        raise ValidationError("duplicate annotation window")
+    return TherapistDatasetSample.objects.create(
+        dataset=dataset, session_id=session_id, window_id=window_id,
+        features=features, labels=labels, start_time=start_time, end_time=end_time,
+        demuca_phase=demuca_phase.strip(), sound_tags=normalized_tags["sound_tags"],
+        movement_tags=normalized_tags["movement_tags"], interaction_tags=normalized_tags["interaction_tags"],
+        derived_features=derived_features, pose_landmarks=pose_landmarks,
+        artifact_payload=artifact_payload,
+    )
+
+
 @_api_login_required
 @require_http_methods(["GET", "POST"])
 def annotation_windows(request, session_id):
@@ -355,40 +387,7 @@ def annotation_windows(request, session_id):
         return JsonResponse({"windows": [_annotation_window_payload(sample) for sample in samples]})
     try:
         body = _json_body(request)
-        tags = body.get("tags") or {}
-        normalized_tags = {
-            "sound_tags": tags.get("sonido", tags.get("sound_tags", [])),
-            "movement_tags": tags.get("movimiento", tags.get("movement_tags", [])),
-            "interaction_tags": tags.get("interaccion", tags.get("interaction_tags", [])),
-        }
-        start_time = body.get("start_time")
-        end_time = body.get("end_time")
-        demuca_phase = body.get("demuca_phase", "")
-        derived_features = body.get("features", {})
-        pose_landmarks = body.get("landmarks", [])
-        artifact_payload = body.get("artifact_payload", {})
-        validate_annotation_values(start_time, end_time, demuca_phase, normalized_tags, derived_features, pose_landmarks, artifact_payload)
-        features = {column: float(derived_features.get(column, 0.0)) for column in DATASET_FEATURE_COLUMNS}
-        labels = {column: 0 for column in DATASET_LABEL_COLUMNS}
-        window_id = str(body.get("window_id") or f"{session_id}_A{dataset.samples.filter(session_id=session_id).count():04d}")
-        if dataset.samples.filter(session_id=session_id, window_id=window_id).exists():
-            raise ValidationError("duplicate annotation window")
-        sample = TherapistDatasetSample.objects.create(
-            dataset=dataset,
-            session_id=session_id,
-            window_id=window_id,
-            features=features,
-            labels=labels,
-            start_time=start_time,
-            end_time=end_time,
-            demuca_phase=demuca_phase.strip(),
-            sound_tags=normalized_tags["sound_tags"],
-            movement_tags=normalized_tags["movement_tags"],
-            interaction_tags=normalized_tags["interaction_tags"],
-            derived_features=derived_features,
-            pose_landmarks=pose_landmarks,
-            artifact_payload=artifact_payload,
-        )
+        sample = _create_annotation_sample(dataset, session_id, body)
     except (ValidationError, IntegrityError) as error:
         return _invalid_request(error)
     return JsonResponse(_annotation_window_payload(sample), status=201)
