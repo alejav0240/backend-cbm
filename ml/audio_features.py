@@ -175,6 +175,28 @@ def _candidate_intervals(
     return intervals
 
 
+def _complete_window_count(expected, available):
+    if expected is None:
+        return available
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0 or expected > available:
+        raise ValueError("expected_complete_windows_exceeds_audio")
+    return expected
+
+
+def _attach_pitch_features(feature_records, pitch_records, window_seconds):
+    per_window = [[] for _ in feature_records]
+    for record in pitch_records:
+        index = int(float(record["timestamp_seconds"]) // window_seconds)
+        if 0 <= index < len(per_window):
+            per_window[index].append(record)
+    for features, records in zip(feature_records, per_window):
+        voiced = [float(record["pitch_hz"]) for record in records if record["voiced_candidate"]]
+        features["pitch_median_hz"] = round(float(np.median(voiced)), 3) if voiced else None
+        features["voiced_frame_fraction"] = round(
+            sum(bool(record["voiced_candidate"]) for record in records) / len(records), 6
+        ) if records else 0.0
+
+
 def extract_audio_modalities(
     audio_path: Path,
     *,
@@ -199,17 +221,7 @@ def extract_audio_modalities(
     mel_bank = _mel_filterbank(sample_rate, 1 << (round(sample_rate * 0.025) - 1).bit_length())
     feature_records = []
     available_complete_windows = len(audio) // window_samples
-    if expected_complete_windows is None:
-        complete_windows = available_complete_windows
-    elif (
-        isinstance(expected_complete_windows, bool)
-        or not isinstance(expected_complete_windows, int)
-        or expected_complete_windows < 0
-        or expected_complete_windows > available_complete_windows
-    ):
-        raise ValueError("expected_complete_windows_exceeds_audio")
-    else:
-        complete_windows = expected_complete_windows
+    complete_windows = _complete_window_count(expected_complete_windows, available_complete_windows)
     for index in range(complete_windows):
         start = index * window_samples
         chunk = audio[start:start + window_samples]
@@ -220,18 +232,7 @@ def extract_audio_modalities(
         })
 
     pitch_records = _pitch_candidate_frames(audio, sample_rate, min_rms=min_rms)
-    per_window_pitch: list[list[dict[str, float | bool]]] = [[] for _ in feature_records]
-    for record in pitch_records:
-        index = int(float(record["timestamp_seconds"]) // window_seconds)
-        if 0 <= index < len(per_window_pitch):
-            per_window_pitch[index].append(record)
-    for index, features in enumerate(feature_records):
-        records = per_window_pitch[index]
-        voiced = [float(record["pitch_hz"]) for record in records if record["voiced_candidate"]]
-        features["pitch_median_hz"] = round(float(np.median(voiced)), 3) if voiced else None
-        features["voiced_frame_fraction"] = round(
-            sum(bool(record["voiced_candidate"]) for record in records) / len(records), 6
-        ) if records else 0.0
+    _attach_pitch_features(feature_records, pitch_records, window_seconds)
 
     feature_payload = {
         "schema_version": SCHEMA_VERSION,

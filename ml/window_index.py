@@ -31,11 +31,10 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _timestamps(payload: dict[str, Any], name: str) -> list[float]:
-    values = payload.get("timestamps")
+def _validate_timestamp_values(values, name):
     if not isinstance(values, list) or not values:
         raise ValueError(f"invalid_feature_timestamps:{name}")
-    result: list[float] = []
+    result = []
     for value in values:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"invalid_feature_timestamp:{name}")
@@ -43,14 +42,26 @@ def _timestamps(payload: dict[str, Any], name: str) -> list[float]:
         if result and timestamp <= result[-1]:
             raise ValueError(f"feature_timestamps_not_strictly_increasing:{name}")
         result.append(timestamp)
+    return result
+
+
+def _validate_feature_series(payload, name, timestamp_count):
     for key, series in payload.items():
         if key == "timestamps" or not isinstance(series, list):
             continue
-        if len(series) != len(result):
+        if len(series) != timestamp_count:
             raise ValueError(f"feature_array_length_mismatch:{name}:{key}")
-        for item in series:
-            if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
-                raise ValueError(f"invalid_feature_value:{name}:{key}")
+        if any(
+            isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item)
+            for item in series
+        ):
+            raise ValueError(f"invalid_feature_value:{name}:{key}")
+
+
+def _timestamps(payload: dict[str, Any], name: str) -> list[float]:
+    values = payload.get("timestamps")
+    result = _validate_timestamp_values(values, name)
+    _validate_feature_series(payload, name, len(result))
     return result
 
 

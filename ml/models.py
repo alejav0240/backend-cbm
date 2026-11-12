@@ -163,6 +163,33 @@ class MultilabelLogisticModel:
             "estimators": self.estimators,
         }
 
+    @staticmethod
+    def _validate_estimator(label, estimator, feature_count):
+        if not isinstance(label, str) or not label or not isinstance(estimator, dict):
+            raise ValueError("invalid_model_estimator_entry")
+        kind = estimator.get("kind")
+        if kind == "constant":
+            probability = estimator.get("probability")
+            if probability not in (0, 1, 0.0, 1.0):
+                raise ValueError(f"invalid_constant_estimator:{label}")
+            return {"kind": "constant", "probability": float(probability)}
+        if kind != "logistic_regression":
+            raise ValueError(f"unsupported_estimator_kind:{label}")
+        vectors = {key: estimator.get(key) for key in ("mean", "scale", "coefficients")}
+        if any(
+            not isinstance(vector, list)
+            or len(vector) != feature_count
+            or any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector)
+            for vector in vectors.values()
+        ):
+            raise ValueError(f"invalid_estimator_vector:{label}")
+        if any(scale <= 0 for scale in vectors["scale"]):
+            raise ValueError(f"invalid_estimator_scale:{label}")
+        intercept = estimator.get("intercept")
+        if not isinstance(intercept, (int, float)) or not math.isfinite(intercept):
+            raise ValueError(f"invalid_estimator_intercept:{label}")
+        return {"kind": kind, **vectors, "intercept": float(intercept)}
+
     @classmethod
     def from_dict(cls, artifact: dict[str, Any]) -> "MultilabelLogisticModel":
         """Restore an inference model from its JSON-safe coefficient artifact."""
@@ -187,42 +214,7 @@ class MultilabelLogisticModel:
 
         validated_estimators: dict[str, dict[str, Any]] = {}
         for label, estimator in estimators.items():
-            if not isinstance(label, str) or not label or not isinstance(estimator, dict):
-                raise ValueError("invalid_model_estimator_entry")
-            kind = estimator.get("kind")
-            if kind == "constant":
-                probability = estimator.get("probability")
-                if probability not in (0, 1, 0.0, 1.0):
-                    raise ValueError(f"invalid_constant_estimator:{label}")
-                validated_estimators[label] = {
-                    "kind": "constant",
-                    "probability": float(probability),
-                }
-                continue
-            if kind != "logistic_regression":
-                raise ValueError(f"unsupported_estimator_kind:{label}")
-
-            vectors = {
-                key: estimator.get(key)
-                for key in ("mean", "scale", "coefficients")
-            }
-            if any(
-                not isinstance(vector, list)
-                or len(vector) != len(features)
-                or any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector)
-                for vector in vectors.values()
-            ):
-                raise ValueError(f"invalid_estimator_vector:{label}")
-            if any(scale <= 0 for scale in vectors["scale"]):
-                raise ValueError(f"invalid_estimator_scale:{label}")
-            intercept = estimator.get("intercept")
-            if not isinstance(intercept, (int, float)) or not math.isfinite(intercept):
-                raise ValueError(f"invalid_estimator_intercept:{label}")
-            validated_estimators[label] = {
-                "kind": kind,
-                **vectors,
-                "intercept": float(intercept),
-            }
+            validated_estimators[label] = cls._validate_estimator(label, estimator, len(features))
 
         model = cls(threshold=float(threshold), feature_columns=tuple(features))
         model.estimators = validated_estimators
