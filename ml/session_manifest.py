@@ -78,6 +78,45 @@ def _validate_participant(participant: Any, path: str, ids: set[str], errors: li
         errors.append(_issue("invalid_participant_role", f"{path}.role", "role must be PATIENT, THERAPIST, or UNKNOWN"))
 
 
+def _validate_fragment_schema(fragment: dict[str, Any], path: str, errors: list[dict[str, str]]) -> None:
+    allowed = {"fragment_id", "order", "global_start_seconds", "duration_seconds", "video_path", "audio_path"}
+    for key in sorted(fragment.keys() - allowed):
+        errors.append(_issue("unknown_field", f"{path}.{key}", f"field '{key}' is not in the fragment schema"))
+    for key in sorted((allowed - {"audio_path"}) - fragment.keys()):
+        errors.append(_issue("required_field_missing", f"{path}.{key}", f"field '{key}' is not in the fragment schema"))
+
+
+def _validate_fragment_identity(fragment_id, order, path, ids, orders, errors) -> bool:
+    if not isinstance(fragment_id, str) or not fragment_id.strip():
+        errors.append(_issue("invalid_fragment_id", f"{path}.fragment_id", "fragment_id must be a non-empty string"))
+    elif fragment_id in ids:
+        errors.append(_issue("duplicate_fragment_id", f"{path}.fragment_id", f"duplicate id '{fragment_id}'"))
+    else:
+        ids.add(fragment_id)
+    valid_order = isinstance(order, int) and not isinstance(order, bool) and order >= 0
+    if valid_order:
+        orders.append(order)
+    else:
+        errors.append(_issue("invalid_fragment_order", f"{path}.order", "order must be a non-negative integer"))
+    return valid_order
+
+
+def _validate_fragment_times(start, fragment_duration, path, errors):
+    valid_start = _is_finite_number(start) and start >= 0
+    valid_duration = _is_finite_number(fragment_duration) and fragment_duration > 0
+    if not valid_start:
+        errors.append(_issue("invalid_fragment_start", f"{path}.global_start_seconds", "start must be a finite number greater than or equal to zero"))
+    if not valid_duration:
+        errors.append(_issue("invalid_fragment_duration", f"{path}.duration_seconds", "duration must be a finite number greater than zero"))
+    return valid_start, valid_duration
+
+
+def _validate_fragment_paths(fragment, path, session_dir, errors, check_files):
+    _resolve_source_path(fragment.get("video_path"), session_dir, f"{path}.video_path", errors, check_files)
+    if fragment.get("audio_path") is not None:
+        _resolve_source_path(fragment["audio_path"], session_dir, f"{path}.audio_path", errors, check_files)
+
+
 def _validate_fragment(
     fragment: Any,
     path: str,
@@ -91,36 +130,14 @@ def _validate_fragment(
     if not isinstance(fragment, dict):
         errors.append(_issue("invalid_fragment", path, "fragment must be an object"))
         return
-    allowed = {"fragment_id", "order", "global_start_seconds", "duration_seconds", "video_path", "audio_path"}
-    required = allowed - {"audio_path"}
-    for key in sorted(fragment.keys() - allowed):
-        errors.append(_issue("unknown_field", f"{path}.{key}", f"field '{key}' is not in the fragment schema"))
-    for key in sorted(required - fragment.keys()):
-        errors.append(_issue("required_field_missing", f"{path}.{key}", f"required field '{key}' is missing"))
+    _validate_fragment_schema(fragment, path, errors)
     fragment_id, order = fragment.get("fragment_id"), fragment.get("order")
     start, fragment_duration = fragment.get("global_start_seconds"), fragment.get("duration_seconds")
-    if not isinstance(fragment_id, str) or not fragment_id.strip():
-        errors.append(_issue("invalid_fragment_id", f"{path}.fragment_id", "fragment_id must be a non-empty string"))
-    elif fragment_id in ids:
-        errors.append(_issue("duplicate_fragment_id", f"{path}.fragment_id", f"duplicate id '{fragment_id}'"))
-    else:
-        ids.add(fragment_id)
-    valid_order = isinstance(order, int) and not isinstance(order, bool) and order >= 0
-    if not valid_order:
-        errors.append(_issue("invalid_fragment_order", f"{path}.order", "order must be a non-negative integer"))
-    else:
-        orders.append(order)
-    valid_start = _is_finite_number(start) and start >= 0
-    valid_duration = _is_finite_number(fragment_duration) and fragment_duration > 0
-    if not valid_start:
-        errors.append(_issue("invalid_fragment_start", f"{path}.global_start_seconds", "start must be a finite number greater than or equal to zero"))
-    if not valid_duration:
-        errors.append(_issue("invalid_fragment_duration", f"{path}.duration_seconds", "duration must be a finite number greater than zero"))
+    valid_order = _validate_fragment_identity(fragment_id, order, path, ids, orders, errors)
+    valid_start, valid_duration = _validate_fragment_times(start, fragment_duration, path, errors)
     if valid_order and valid_start and valid_duration:
         normalized.append((order, float(start), float(fragment_duration), path))
-    _resolve_source_path(fragment.get("video_path"), session_dir, f"{path}.video_path", errors, check_files)
-    if fragment.get("audio_path") is not None:
-        _resolve_source_path(fragment["audio_path"], session_dir, f"{path}.audio_path", errors, check_files)
+    _validate_fragment_paths(fragment, path, session_dir, errors, check_files)
 
 
 def _validate_timeline(normalized, duration, policy, tolerance, errors, warnings):
