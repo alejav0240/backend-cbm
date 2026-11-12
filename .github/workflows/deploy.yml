@@ -67,12 +67,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: python
 
       - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: /language:python
 
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload Trivy filesystem report
         if: ${{ always() && hashFiles('trivy-filesystem.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-filesystem.sarif
 
@@ -298,7 +298,7 @@ jobs:
 
       - name: Upload image report
         if: ${{ always() && hashFiles('trivy-image.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
 
