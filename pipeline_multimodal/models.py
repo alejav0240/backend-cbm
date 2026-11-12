@@ -71,7 +71,7 @@ def _validate_json_value(value, field_name, depth=0):
     raise ValidationError(f"invalid value: {field_name}")
 
 
-def validate_annotation_values(start_time, end_time, demuca_phase, tags, derived_features, pose_landmarks, artifact_payload):
+def _validate_annotation_window(start_time, end_time, demuca_phase):
     for name, value in (("start_time", start_time), ("end_time", end_time)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValidationError(f"{name} must be a finite non-negative number")
@@ -81,6 +81,9 @@ def validate_annotation_values(start_time, end_time, demuca_phase, tags, derived
         raise ValidationError("annotation window is too long")
     if not isinstance(demuca_phase, str) or not demuca_phase.strip() or len(demuca_phase.strip()) > 128:
         raise ValidationError("demuca_phase must be a non-empty string")
+
+
+def _validate_annotation_payloads(tags, derived_features, pose_landmarks, artifact_payload):
     if not isinstance(tags, dict) or set(tags) != set(ANNOTATION_TAG_FIELDS):
         raise ValidationError("tags must contain sound_tags, movement_tags, and interaction_tags")
     _validate_annotation_tags(tags)
@@ -88,6 +91,11 @@ def validate_annotation_values(start_time, end_time, demuca_phase, tags, derived
         if not isinstance(value, (dict, list)):
             raise ValidationError(f"{field_name} must be an object or array")
         _validate_json_value(value, field_name)
+
+
+def validate_annotation_values(start_time, end_time, demuca_phase, tags, derived_features, pose_landmarks, artifact_payload):
+    _validate_annotation_window(start_time, end_time, demuca_phase)
+    _validate_annotation_payloads(tags, derived_features, pose_landmarks, artifact_payload)
 
 
 def _validate_annotation_tags(tags):
@@ -106,9 +114,17 @@ def validate_dataset_values(features, labels):
         raise ValidationError("labels must be a non-empty object")
     if not set(labels).issubset(DATASET_LABEL_COLUMNS):
         raise ValidationError("labels contain an unknown label")
+    _validate_feature_values(features)
+    _validate_label_values(labels)
+
+
+def _validate_feature_values(features):
     for name, value in features.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValidationError(f"invalid feature: {name}")
+
+
+def _validate_label_values(labels):
     for name, value in labels.items():
         if isinstance(value, bool) or value not in (0, 1):
             raise ValidationError(f"invalid label: {name}")
