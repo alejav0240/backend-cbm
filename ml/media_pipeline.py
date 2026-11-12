@@ -70,6 +70,27 @@ def load_or_create_window_index(session_dir: Path, *, overwrite: bool) -> dict[s
     return write_window_index(session_dir, output_path, overwrite=overwrite)
 
 
+def _window_seconds_mismatch(payload, expected_window_seconds):
+    if expected_window_seconds is None:
+        return False
+    try:
+        return float(payload.get("window_seconds")) != float(expected_window_seconds)
+    except (TypeError, ValueError):
+        return True
+
+
+def _audio_artifact_is_stale(payload, generated_payload, source_audio_sha256, expected_window_seconds, expected_window_count):
+    if payload.get("source_audio_sha256") != source_audio_sha256:
+        return True
+    if _window_seconds_mismatch(payload, expected_window_seconds):
+        return True
+    if expected_window_count is not None:
+        windows = payload.get("windows")
+        if not isinstance(windows, list) or len(windows) != expected_window_count:
+            return True
+    return "candidates" in generated_payload and not isinstance(payload.get("candidates"), list)
+
+
 def persist_or_reuse_audio_artifact(
     output_path: Path,
     generated_payload: dict[str, Any],
@@ -82,26 +103,67 @@ def persist_or_reuse_audio_artifact(
     """Persist a generated artifact or return a structurally compatible existing one."""
     if output_path.exists() and not overwrite:
         payload = json.loads(output_path.read_text(encoding="utf-8"))
-        stale = payload.get("source_audio_sha256") != source_audio_sha256
-        if expected_window_seconds is not None:
-            try:
-                stale = stale or float(payload.get("window_seconds")) != float(
-                    expected_window_seconds
-                )
-            except (TypeError, ValueError):
-                stale = True
-        if expected_window_count is not None:
-            windows = payload.get("windows")
-            stale = stale or not isinstance(windows, list) or len(windows) != expected_window_count
-        if "candidates" in generated_payload and not isinstance(payload.get("candidates"), list):
-            stale = True
-        if stale:
+        if _audio_artifact_is_stale(payload, generated_payload, source_audio_sha256, expected_window_seconds, expected_window_count):
             raise FileExistsError(
                 f"stale audio feature output exists: {output_path}; pass --overwrite"
             )
         return payload
     _atomic_write_json(output_path, generated_payload)
     return generated_payload
+
+
+def _process_pose_stage(session_dir, session_id, pose_model, skip_pose, overwrite):
+    pose_result = None
+    pose_path = session_dir / "processed" / "features" / "pose_landmarks.json"
+    if skip_pose:
+        return pose_result, pose_path
+    if pose_model is None:
+        raise ValueError("provide --pose-model or explicitly use --skip-pose")
+    if pose_path.exists() and not overwrite:
+        pose_result = load_pose_landmarks(session_dir / "processed" / "frames", session_id, pose_model, pose_path)
+    else:
+        pose_result = extract_pose_landmarks(
+            session_dir / "processed" / "frames", session_id, pose_model, pose_path, overwrite=overwrite
+        )
+    return pose_result, pose_path
+
+
+def _process_audio_stage(session_dir, session_id, window_index, window_seconds, overwrite):
+    audio_path = session_dir / "processed" / "audio" / f"{session_id}_16khz_mono.wav"
+    audio_payload, vocalization_payload = extract_audio_modalities(
+        audio_path, window_seconds=window_seconds, expected_complete_windows=len(window_index["windows"])
+    )
+    source_hash = sha256_audio_file(audio_path)
+    feature_path = session_dir / "processed" / "features" / "acoustic_features.json"
+    vocalization_path = session_dir / "processed" / "features" / "vocalization_candidates.json"
+    audio_payload = persist_or_reuse_audio_artifact(
+        feature_path, audio_payload, source_audio_sha256=source_hash, overwrite=overwrite,
+        expected_window_seconds=window_seconds, expected_window_count=len(window_index["windows"]),
+    )
+    vocalization_payload = persist_or_reuse_audio_artifact(
+        vocalization_path, vocalization_payload, source_audio_sha256=source_hash, overwrite=overwrite,
+    )
+    return audio_payload, vocalization_payload, feature_path, vocalization_path
+
+
+def _process_movement_stage(session_dir, pose_result, window_index, overwrite):
+    movement_path = session_dir / "processed" / "features" / "movement_interaction.json"
+    if pose_result is None:
+        return None, movement_path, "skipped_pose_not_available"
+    window_index_path = session_dir / "processed" / "windows" / WINDOWS_FILENAME
+    window_hash = sha256_feature_file(window_index_path)
+    if movement_path.exists() and not overwrite:
+        existing = json.loads(movement_path.read_text(encoding="utf-8"))
+        if existing.get("pose_source_sha256") != pose_result.get("source_frames_sha256") or existing.get("window_index_sha256") != window_hash:
+            raise FileExistsError(f"stale movement feature output exists: {movement_path}; pass --overwrite")
+        return existing, movement_path, "reused"
+    if not window_index_path.is_file():
+        raise FileNotFoundError("stable window index required before movement/interaction aggregation")
+    payload = build_movement_interaction_features(
+        pose_result, window_index, pose_source_sha256=pose_result.get("source_frames_sha256"), window_index_sha256=window_hash
+    )
+    movement_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return payload, movement_path, "executed"
 
 
 def process_session(
@@ -132,91 +194,22 @@ def process_session(
     if progress_callback:
         progress_callback("segmentacion", "done")
         progress_callback("pose", "start")
-    pose_result = None
-    pose_path = session_dir / "processed" / "features" / "pose_landmarks.json"
-    if not skip_pose:
-        if pose_model is None:
-            raise ValueError("provide --pose-model or explicitly use --skip-pose")
-        if pose_path.exists() and not overwrite:
-            pose_result = load_pose_landmarks(
-                session_dir / "processed" / "frames",
-                session_id,
-                pose_model,
-                pose_path,
-            )
-        else:
-            pose_result = extract_pose_landmarks(
-                session_dir / "processed" / "frames",
-                session_id,
-                pose_model,
-                pose_path,
-                overwrite=overwrite,
-            )
+    pose_result, pose_path = _process_pose_stage(
+        session_dir, session_id, pose_model, skip_pose, overwrite
+    )
     if progress_callback:
         progress_callback("pose", "done")
         progress_callback("audio", "start")
-    audio_feature_payload, vocalization_payload = extract_audio_modalities(
-        session_dir / "processed" / "audio" / f"{session_id}_16khz_mono.wav",
-        window_seconds=window_seconds,
-        expected_complete_windows=len(window_index["windows"]),
-    )
-    audio_feature_path = session_dir / "processed" / "features" / "acoustic_features.json"
-    vocalization_path = session_dir / "processed" / "features" / "vocalization_candidates.json"
-    source_audio_sha256 = sha256_audio_file(
-        session_dir / "processed" / "audio" / f"{session_id}_16khz_mono.wav"
-    )
-    audio_feature_payload = persist_or_reuse_audio_artifact(
-        audio_feature_path,
-        audio_feature_payload,
-        source_audio_sha256=source_audio_sha256,
-        overwrite=overwrite,
-        expected_window_seconds=window_seconds,
-        expected_window_count=len(window_index["windows"]),
-    )
-    vocalization_payload = persist_or_reuse_audio_artifact(
-        vocalization_path,
-        vocalization_payload,
-        source_audio_sha256=source_audio_sha256,
-        overwrite=overwrite,
+    audio_feature_payload, vocalization_payload, audio_feature_path, vocalization_path = _process_audio_stage(
+        session_dir, session_id, window_index, window_seconds, overwrite
     )
 
     if progress_callback:
         progress_callback("audio", "done")
         progress_callback("movimiento", "start")
-    movement_path = session_dir / "processed" / "features" / "movement_interaction.json"
-    movement_status = "skipped_pose_not_available"
-    movement_payload = None
-    if pose_result is not None:
-        if movement_path.exists() and not overwrite:
-            existing = json.loads(movement_path.read_text(encoding="utf-8"))
-            if (
-                existing.get("pose_source_sha256") != pose_result.get("source_frames_sha256")
-                or existing.get("window_index_sha256") != sha256_feature_file(
-                    session_dir / "processed" / "windows" / WINDOWS_FILENAME
-                )
-            ):
-                raise FileExistsError(
-                    f"stale movement feature output exists: {movement_path}; pass --overwrite"
-                )
-            movement_status = "reused"
-            movement_payload = existing
-        else:
-            window_index_path = session_dir / "processed" / "windows" / WINDOWS_FILENAME
-            if not window_index_path.is_file():
-                raise FileNotFoundError(
-                    "stable window index required before movement/interaction aggregation"
-                )
-            movement_payload = build_movement_interaction_features(
-                pose_result,
-                window_index,
-                pose_source_sha256=pose_result.get("source_frames_sha256"),
-                window_index_sha256=sha256_feature_file(window_index_path),
-            )
-            movement_path.write_text(
-                json.dumps(movement_payload, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
-            movement_status = "executed"
+    movement_payload, movement_path, movement_status = _process_movement_stage(
+        session_dir, pose_result, window_index, overwrite
+    )
     if progress_callback:
         progress_callback("movimiento", "done")
         progress_callback("sincronizacion", "start")
