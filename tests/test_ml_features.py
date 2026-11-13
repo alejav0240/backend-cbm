@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import types
@@ -22,7 +23,9 @@ import analyze_video as analyze_video_module
 import multimodal_features as multimodal_features_module
 import therapeutic_sessions.queries as session_queries_module
 import pipeline_multimodal.views as pipeline_views_module
+import pipeline_multimodal.models as pipeline_models_module
 import clinical.mutations as clinical_mutations_module
+import finance.mutations as finance_mutations_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -888,6 +891,178 @@ class MlFeatureTests(TestCase):
              patch.object(fake_session.objects, "bulk_create") as bulk:
             clinical_mutations_module._create_initial_sessions(patient, 2, "monday", "10:30")
         self.assertEqual(len(bulk.call_args.args[0]), 4)
+
+    def test_analyze_video_main_handles_success_failure_and_service_input(self):
+        with patch.object(analyze_video_module, "analyze_video", return_value={"status": "completed"}), \
+             patch.object(analyze_video_module.sys, "argv", ["analyze_video.py", "video.mp4", "--session-id", "S1", "--no-progress"]):
+            self.assertEqual(analyze_video_module.main(), 0)
+        with patch.object(analyze_video_module, "analyze_video", side_effect=ValueError("bad")), \
+             patch.object(analyze_video_module.sys, "argv", ["analyze_video.py", "video.mp4", "--session-id", "S1", "--no-progress"]):
+            self.assertEqual(analyze_video_module.main(), 2)
+        with patch.dict(os.environ, {"PIPELINE_INPUT_PATH": "service.mp4", "PIPELINE_SESSION_ID": "S2"}), \
+             patch.object(analyze_video_module, "analyze_video", return_value={"status": "completed"}), \
+             patch.object(analyze_video_module.sys, "argv", ["analyze_video.py", "--service-input", "--no-progress"]):
+            self.assertEqual(analyze_video_module.main(), 0)
+
+    def test_tracking_logs_finite_metrics_and_artifacts(self):
+        class Run:
+            info = SimpleNamespace(run_id="run-1")
+
+        class Mlflow:
+            def __init__(self):
+                self.logged = []
+            def set_tracking_uri(self, value): self.logged.append(("uri", value))
+            def get_experiment_by_name(self, value): return None
+            def create_experiment(self, *args, **kwargs): return "exp"
+            def set_experiment(self, value): self.logged.append(("experiment", value))
+            def start_run(self, run_name):
+                self.logged.append(("run", run_name))
+                return self
+            def __enter__(self): return Run()
+            def __exit__(self, *args): return False
+            def log_params(self, value): self.logged.append(("params", value))
+            def log_metrics(self, value): self.logged.append(("metrics", value))
+            def set_tags(self, value): self.logged.append(("tags", value))
+            def log_artifact(self, value): self.logged.append(("artifact", value))
+
+        import tracking as tracking_module
+        fake_mlflow = Mlflow()
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact = Path(temporary) / "artifact.json"
+            artifact.write_text("{}")
+            with patch.dict(sys.modules, {"mlflow": fake_mlflow}):
+                run_id = tracking_module.log_run(
+                    experiment_name="exp", run_name="run", params={"p": 1},
+                    metrics={"good": 1, "bad": float("nan")}, tags={"tag": "x"},
+                    artifacts=[artifact], project_root=Path(temporary),
+                )
+        self.assertEqual(run_id, "run-1")
+        self.assertTrue(any(kind == "metrics" for kind, _ in fake_mlflow.logged))
+
+    def test_media_segment_pipeline_executes_and_cleans_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            video = session / "processed" / "video" / "S1_1280x720_10fps.mp4"
+            audio = session / "processed" / "audio" / "S1_16khz_mono.wav"
+            video.parent.mkdir(parents=True)
+            audio.parent.mkdir(parents=True)
+            video.write_bytes(b"v")
+            audio.write_bytes(b"a")
+            manifest = {"session_id": "S1", "segments": [{"index": 0}]}
+            with patch.object(media, "_segment_source_info", return_value=(1.0, 1.0, 0.0, None, 1.0)), \
+                 patch.object(media, "_build_segments", return_value=([{"index": 0}], 0.0)), \
+                 patch.object(media, "_segment_manifest", return_value=manifest), \
+                 patch.object(media, "_write_segment_manifest") as writer:
+                result = media.segment_and_synchronize(session, "S1", window_seconds=1)
+            self.assertEqual(result, manifest)
+            writer.assert_called_once()
+
+    def test_media_validation_and_reuse_helpers_cover_edge_cases(self):
+        with self.assertRaisesRegex(ValueError, "positive"):
+            media._segment_paths(Path("/tmp"), "S1", 0, 0.1, 0.2)
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary)
+            with self.assertRaises(FileNotFoundError):
+                media._segment_paths(session, "S1", 1, 0.1, 0.2)
+            output = session / "segments"
+            output.mkdir()
+            manifest_path = output / "segments.json"
+            manifest_path.write_text(json.dumps({
+                "window_seconds": 1, "drift_tolerance_seconds": 0.1,
+                "max_tail_trim_seconds": 0.2, "segments": [],
+            }))
+            self.assertIsNotNone(media._reuse_segments(output, manifest_path, 1, 0.1, 0.2))
+            self.assertIsNone(media._reuse_segments(output, manifest_path, 2, 0.1, 0.2))
+            list_file = session / "list.txt"
+            media._concat_file_list([Path("a'b.mp4")], list_file)
+            self.assertIn("file 'a'\\''b.mp4'", list_file.read_text())
+            with patch.object(media, "probe_stream_duration", side_effect=[2.0, 2.1]):
+                self.assertEqual(media._segment_source_info(Path("v"), Path("a"), 0.2)[3], "audio")
+            with patch.object(media, "probe_stream_duration", side_effect=[2.1, 2.0]):
+                self.assertEqual(media._segment_source_info(Path("v"), Path("a"), 0.2)[3], "video")
+
+    def test_pipeline_dataset_endpoints_and_annotation_validation(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        request = SimpleNamespace(user=user, method="GET", headers={}, body=b"")
+        dataset = SimpleNamespace(
+            id=1, name="D", description="", status="draft", training_authorized=False,
+            authorized_at=None, created_at=SimpleNamespace(isoformat=lambda: "c"),
+            updated_at=SimpleNamespace(isoformat=lambda: "u"),
+        )
+        samples = MagicMock()
+        samples.all.return_value = samples
+        samples.count.return_value = 0
+        samples.filter.return_value.count.return_value = 0
+        dataset.samples = samples
+        queryset = MagicMock()
+        queryset.__iter__.return_value = iter([dataset])
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "all", return_value=queryset):
+            response = pipeline_views_module.datasets(request)
+        self.assertEqual(response.status_code, 200)
+        request.method = "POST"
+        request.body = json.dumps({"name": " New ", "description": "desc"}).encode()
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "create", return_value=dataset) as create:
+            response = pipeline_views_module.datasets(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(create.call_args.kwargs["name"], "New")
+        features = {name: 1.0 for name in pipeline_models_module.DATASET_FEATURE_COLUMNS}
+        self.assertEqual(pipeline_models_module.validate_dataset_values(features, {"visual__MOVIMIENTO": 1}), None)
+        with self.assertRaisesRegex(Exception, "features"):
+            pipeline_models_module.validate_dataset_values({}, {"y": 1})
+
+    def test_session_query_pagination_resolvers_cover_normal_and_cycle_paths(self):
+        query = session_queries_module.Query()
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_staff=True, is_superuser=False, is_authenticated=True, pk=7,
+        )))
+        queryset = MagicMock()
+        queryset.__getitem__.return_value = [SimpleNamespace(id=1)]
+        queryset.count.return_value = 3
+        queryset.filter.return_value = queryset
+        ordered = MagicMock()
+        ordered.filter.return_value = queryset
+        ordered.count.return_value = 3
+        ordered.__getitem__.return_value = [SimpleNamespace(id=1)]
+        with patch.object(session_queries_module.Session.objects, "select_related", return_value=MagicMock(order_by=MagicMock(return_value=ordered))), \
+             patch.object(session_queries_module, "_apply_session_filters", return_value=ordered):
+            normal = query.resolve_sessions(info, page=2, page_size=2)
+        self.assertEqual(normal.total_count, 3)
+        with patch.object(session_queries_module.Session.objects, "select_related", return_value=MagicMock(order_by=MagicMock(return_value=ordered))), \
+             patch.object(session_queries_module, "_apply_session_filters", return_value=ordered), \
+             patch.object(session_queries_module, "_build_cycles", return_value=[SimpleNamespace(cycle_number=1)]):
+            cycles = query.resolve_sessions(info, by_cycles=True)
+        self.assertTrue(cycles.by_cycles)
+        resources = MagicMock()
+        resources.filter.return_value = resources
+        resources.count.return_value = 4
+        resources.__getitem__.return_value = [SimpleNamespace(id=1)]
+        with patch.object(session_queries_module.DigitalResource.objects, "all", return_value=resources):
+            result = query.resolve_digital_resources(info, type="audio", search="x", page_size=2)
+        self.assertEqual(result.total_pages, 2)
+
+    def test_finance_mutations_update_and_delete_paths(self):
+        expense = SimpleNamespace(status="pending", save=MagicMock())
+        with patch.object(finance_mutations_module.Expense.objects, "get", return_value=expense):
+            result = finance_mutations_module.UpdateExpenseStatus.mutate(None, None, "1", "paid")
+        self.assertEqual(result.expense, expense)
+        self.assertEqual(expense.status, "paid")
+        with patch.object(finance_mutations_module.Expense.objects, "get", side_effect=finance_mutations_module.Expense.DoesNotExist):
+            with self.assertRaisesRegex(Exception, "Gasto no encontrado"):
+                finance_mutations_module.UpdateExpenseStatus.mutate(None, None, "1", "paid")
+
+        deleted = SimpleNamespace(delete=MagicMock())
+        with patch.object(finance_mutations_module.Expense.objects, "get", return_value=deleted):
+            self.assertTrue(finance_mutations_module.DeleteExpense.mutate(None, None, "1").success)
+        course = SimpleNamespace(save=MagicMock())
+        with patch.object(finance_mutations_module.Course.objects, "get", return_value=course):
+            result = finance_mutations_module.UpdateCourse.mutate(None, None, "1", price=12.5, name="Course")
+        self.assertEqual(str(course.price), "12.5")
+        self.assertEqual(result.course, course)
+        discount = SimpleNamespace(save=MagicMock())
+        with patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
+            result = finance_mutations_module.UpdateDiscount.mutate(None, None, "1", value=5, description="x")
+        self.assertEqual(str(discount.value), "5")
+        self.assertEqual(result.discount, discount)
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
