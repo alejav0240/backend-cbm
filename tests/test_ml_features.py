@@ -241,6 +241,59 @@ class MlFeatureTests(TestCase):
             samples.exists = MagicMock(return_value=True)
             dataset.save = MagicMock()
             self.assertEqual(pipeline_views_module.authorize_dataset(post_request, 1).status_code, 200)
+
+    def test_pipeline_sample_annotation_update_and_export_endpoints(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1)
+        request_base = {"user": user, "headers": {}}
+        now = SimpleNamespace(isoformat=lambda: "now")
+        dataset = SimpleNamespace(
+            id=1, pk=1, status="draft", name="D", description="", training_authorized=False,
+            samples=MagicMock(), created_at=now, updated_at=now,
+        )
+        sample = SimpleNamespace(
+            id=2, pk=2, session_id="S1", window_id="W1", features={"f": 1}, labels={"l": 1},
+            reviewed=False, start_time=0, end_time=1, demuca_phase="MOVIMIENTO",
+            sound_tags=[], movement_tags=[], interaction_tags=[], derived_features={},
+            pose_landmarks=[], artifact_payload={}, updated_at=now, save=MagicMock(),
+        )
+        dataset.samples.all.return_value = [sample]
+        dataset.samples.filter.return_value = dataset.samples
+        dataset.samples.exists.return_value = False
+        request = SimpleNamespace(**request_base, method="POST", body=json.dumps({
+            "session_id": " S1 ", "window_id": " W1 ", "features": {"f": 1}, "labels": {"l": 1},
+        }).encode())
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample), \
+             patch.object(pipeline_views_module, "validate_dataset_values"):
+            self.assertEqual(pipeline_views_module.create_dataset_sample(request, 1).status_code, 201)
+
+        annotation_body = {
+            "session_id": "S1", "window_id": "W2", "start_time": 0, "end_time": 1,
+            "demuca_phase": "MOVIMIENTO", "sound_tags": [], "movement_tags": [], "interaction_tags": [],
+        }
+        annotation_request = SimpleNamespace(**request_base, method="POST", body=json.dumps(annotation_body).encode())
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module, "_annotation_values", return_value={"start_time": 0, "end_time": 1, "demuca_phase": "MOVIMIENTO", "sound_tags": [], "movement_tags": [], "interaction_tags": [], "derived_features": {}, "pose_landmarks": [], "artifact_payload": {}}), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample), \
+             patch.object(pipeline_views_module, "validate_dataset_values"):
+            self.assertEqual(pipeline_views_module.create_dataset_annotation(annotation_request, 1).status_code, 201)
+
+        patch_request = SimpleNamespace(**request_base, method="PATCH", body=b'{"reviewed": true}')
+        dataset.samples.filter.return_value.first.return_value = sample
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module, "_validated_sample_update", return_value=({"f": 2}, {"l": 2}, {"reviewed": True})):
+            self.assertEqual(pipeline_views_module.update_dataset_sample(patch_request, 1, 2).status_code, 200)
+
+        with tempfile.TemporaryDirectory() as temporary, override_settings(MEDIA_ROOT=temporary, MEDIA_URL="/media/"):
+            sample.features = {column: 0 for column in pipeline_views_module.DATASET_FEATURE_COLUMNS}
+            sample.labels = {column: 0 for column in pipeline_views_module.DATASET_LABEL_COLUMNS}
+            with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+                 patch.object(pipeline_views_module, "log_run", return_value="run-1"):
+                result = pipeline_views_module.export_dataset(request, 1)
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue((Path(temporary) / "datasets" / "1" / "dataset.csv").exists())
     def test_window_index_validation_helpers_cover_invalid_cases(self):
         with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([], "audio")
         with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([1, 1], "audio")
