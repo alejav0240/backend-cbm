@@ -212,6 +212,56 @@ class MlFeatureTests(TestCase):
         with patch.object(clinical_mutations_module.TherapyReport.objects, "get", return_value=report), \
              patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True):
             self.assertTrue(clinical_mutations_module.DeleteTherapyReport.mutate(None, info, "1").success)
+
+    def test_clinical_mutation_not_found_and_authorization_matrix(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        access_denied = patch.object(clinical_mutations_module, "user_can_access_patient", return_value=False)
+        with patch.object(clinical_mutations_module.Patient.objects, "get", side_effect=clinical_mutations_module.Patient.DoesNotExist):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdatePatientStatus.mutate(None, info, "1", "inactive")
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdatePatient.mutate(None, info, "1")
+        with access_denied, patch.object(clinical_mutations_module.Patient.objects, "get", return_value=SimpleNamespace(pk=1)):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdatePatientStatus.mutate(None, info, "1", "inactive")
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdatePatient.mutate(None, info, "1")
+            with self.assertRaises(Exception):
+                clinical_mutations_module.CreateInterventionPlan.mutate(None, info, "1", "1", "goal")
+        with patch.object(clinical_mutations_module.InterventionPlan.objects, "get", side_effect=clinical_mutations_module.InterventionPlan.DoesNotExist):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdatePlanProgress.mutate(None, info, "1", 20)
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdateInterventionPlan.mutate(None, info, "1")
+            self.assertFalse(clinical_mutations_module.DeleteInterventionPlan.mutate(None, info, "1").success)
+        with patch.object(clinical_mutations_module.PlanStep.objects, "get", side_effect=clinical_mutations_module.PlanStep.DoesNotExist):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdateStepPlan.mutate(None, info, "1")
+            self.assertFalse(clinical_mutations_module.DeleteStepPlan.mutate(None, info, "1").success)
+        with patch.object(clinical_mutations_module.Patient.objects, "get", side_effect=clinical_mutations_module.Patient.DoesNotExist):
+            self.assertFalse(clinical_mutations_module.DeletePatient.mutate(None, info, "1").success)
+        with patch.object(clinical_mutations_module.Patient.objects, "get", side_effect=RuntimeError("database")):
+            self.assertFalse(clinical_mutations_module.DeletePatient.mutate(None, info, "1").success)
+        with patch.object(clinical_mutations_module.TherapyReport.objects, "get", side_effect=clinical_mutations_module.TherapyReport.DoesNotExist):
+            self.assertFalse(clinical_mutations_module.DeleteTherapyReport.mutate(None, info, "1").success)
+        with access_denied, patch.object(clinical_mutations_module.TherapyReport.objects, "get", return_value=SimpleNamespace(patient_id=1)):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.CreateTherapyReport.mutate(None, info, "1", "1", "https://example.com/report")
+
+        session = SimpleNamespace(patient_id=1)
+        with access_denied, patch.object(clinical_mutations_module.Session.objects, "get", return_value=session):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.AddStepToSession.mutate(None, info, "1", "2")
+            with self.assertRaises(Exception):
+                clinical_mutations_module.RemoveStepFromSession.mutate(None, info, "1", "2")
+        with patch.object(clinical_mutations_module.SessionPlanStep.objects, "get", side_effect=clinical_mutations_module.SessionPlanStep.DoesNotExist):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdateSessionPlanStep.mutate(None, info, "1", "2")
+        sps = SimpleNamespace(session=SimpleNamespace(patient_id=1))
+        with access_denied, patch.object(clinical_mutations_module.SessionPlanStep.objects, "get", return_value=sps):
+            with self.assertRaises(Exception):
+                clinical_mutations_module.UpdateSessionPlanStep.mutate(None, info, "1", "2")
     def test_pipeline_dataset_endpoints_and_authorization_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1)
         now = SimpleNamespace(isoformat=lambda: "now")
