@@ -69,6 +69,23 @@ from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_laravel_remaining_payment_tutor_and_note_branches(self):
+        command = laravel_command_module.Command()
+        self.assertEqual(command._extract_payment_proofs([["short"], ["1", "7", "", "", "", "proof", "", "", "", ""]])[7], "proof")
+        self.assertEqual(command._count_cycles_by_payment([["short"], ["1", "7"]])[7], 0)
+        patient = SimpleNamespace(diagnosis="old", residence="old", notes="old", save=MagicMock(), tutor=None)
+        tutor = SimpleNamespace(set_password=MagicMock(), save=MagicMock())
+        with patch.object(laravel_command_module.User.objects, "update_or_create", return_value=(tutor, True)):
+            self.assertIs(command._resolve_or_create_tutor_user(1, "Tutor Name", {}) , tutor)
+        note = SimpleNamespace(content="old", save=MagicMock())
+        with patch.object(laravel_command_module.PatientClinicalNote.objects, "get_or_create", return_value=(note, False)):
+            command._upsert_clinical_note(patient, tutor, "GENERAL_OBJECTIVE", "new")
+        self.assertEqual(note.content, "new")
+        info = {1: {"patient": patient}}
+        payment = SimpleNamespace()
+        with patch.object(laravel_command_module.Payment.objects, "create", return_value=payment):
+            result = command._import_payments([["7", "1", "100", "", "50", "", "", "", "", "", ""]], info, {7: "proof"}, {7: 2})
+        self.assertIs(result[7], payment)
     def test_config_security_helpers_matrix(self):
         import base64
         self.assertIsNone(config_utils_module.get_db_id(None))
