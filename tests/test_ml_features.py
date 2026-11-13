@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import types
+from argparse import ArgumentParser
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -66,6 +67,7 @@ import validate_multimodal_artifacts as artifact_validation_module
 import window_index as window_index_module
 import config.utils as config_utils_module
 import config.views as config_views_module
+import config.application_encryption as application_encryption_module
 import users.admin as users_admin_module
 import users.management.commands.importar_laravel as users_laravel_module
 import ml.create_window_index as create_window_index_module
@@ -197,6 +199,23 @@ class MlFeatureTests(TestCase):
             config_utils_module.staff_member_required(lambda *_: True)(None, info)
         info.context.user.is_staff = True
         self.assertTrue(config_utils_module.staff_member_required(lambda *_: True)(None, info))
+        self.assertEqual(application_encryption_module.key_id(), os.environ.get("APP_ENCRYPTION_KEY_ID", "app-key-v1"))
+        with self.assertRaises(ValueError):
+            application_encryption_module.decrypt_envelope({}, "/graphql/")
+        with self.assertRaises(ValueError):
+            application_encryption_module.unwrap_aes_key("bad", "wrong-key")
+        with patch.object(config_utils_module, "user_can_access_patient", wraps=config_utils_module.user_can_access_patient):
+            non_staff = SimpleNamespace(is_staff=False, is_superuser=False, pk=1)
+            with patch("clinical.models.PatientClinicalNote.objects.filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+                 patch("therapeutic_sessions.models.Session.objects.filter", return_value=MagicMock(exists=MagicMock(return_value=False))):
+                self.assertFalse(config_utils_module.user_can_access_patient(non_staff, 1))
+            with patch("therapeutic_sessions.models.Session.objects.filter", return_value=MagicMock(exists=MagicMock(return_value=False))):
+                self.assertFalse(config_utils_module.user_can_access_session(non_staff, 1))
+        parser = ArgumentParser()
+        users_laravel_module.Command().add_arguments(parser)
+        parsed = parser.parse_args(["--dry-run", "--port", "22"])
+        self.assertTrue(parsed.dry_run)
+        self.assertEqual(parsed.port, 22)
 
     def test_config_views_user_admin_and_legacy_command_helpers(self):
         request = RequestFactory().get("/health/")
@@ -2095,6 +2114,63 @@ class MlFeatureTests(TestCase):
         with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment), \
              patch.object(evaluations_mutations_module.FormResponse.objects, "update_or_create"):
             self.assertTrue(evaluations_mutations_module.SubmitFullForm.mutate(None, info, "1", [SimpleNamespace(question_id="2", response_text="yes")]).success)
+
+    def test_evaluation_and_institution_mutation_error_matrix(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        with patch.object(evaluations_mutations_module.Form.objects, "get", side_effect=evaluations_mutations_module.Form.DoesNotExist):
+            self.assertFalse(evaluations_mutations_module.DeleteForm.mutate(None, info, "1").success)
+        with patch.object(evaluations_mutations_module.Scale.objects, "get", side_effect=evaluations_mutations_module.Scale.DoesNotExist):
+            self.assertFalse(evaluations_mutations_module.DeleteScale.mutate(None, info, "1").success)
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", side_effect=evaluations_mutations_module.FormAssignment.DoesNotExist):
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.UpdateFormAssignment.mutate(None, info, "1")
+            self.assertFalse(evaluations_mutations_module.DeleteFormAssignment.mutate(None, info, "1").success)
+            self.assertFalse(evaluations_mutations_module.SubmitFormResponse.mutate(None, info, "1", "2", "x").success)
+            self.assertFalse(evaluations_mutations_module.SubmitFullForm.mutate(None, info, "1", []).success)
+        unauthorized = SimpleNamespace(assigned_by_id=9, assigned_to_id=8, save=MagicMock(), delete=MagicMock())
+        unauthorized_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=False, is_superuser=False, pk=1,
+            has_perm=lambda _permission: True,
+        )))
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=unauthorized):
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.UpdateFormAssignment.mutate(None, unauthorized_info, "1", assigned_to_id="2")
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.DeleteFormAssignment.mutate(None, unauthorized_info, "1")
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.SubmitFormResponse.mutate(None, unauthorized_info, "1", "2", "x")
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "create", side_effect=RuntimeError("create failed")):
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.AssignForm.mutate(None, info, "1", "1")
+        value = SimpleNamespace(label="Yes", value=1)
+        scale = SimpleNamespace()
+        with patch.object(evaluations_mutations_module.Scale.objects, "create", return_value=scale), \
+             patch.object(evaluations_mutations_module.ScaleValue.objects, "create", return_value=value):
+            self.assertIs(evaluations_mutations_module.CreateScale.mutate(None, info, "Values", evaluations_mutations_module.Scale.ScaleType.VALUE_LIST, values=[value]).scale, scale)
+        with patch.object(evaluations_mutations_module.ScaleEvaluation.objects, "create", side_effect=RuntimeError("invalid")):
+            result = evaluations_mutations_module.AddScaleResponse.mutate(None, info, "1", "1", "1")
+        self.assertFalse(result.success)
+
+        institution = SimpleNamespace(contact_phone="", save=MagicMock(), delete=MagicMock())
+        with patch.object(institutions_mutations_module.Institution.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=True))):
+            with self.assertRaises(Exception):
+                institutions_mutations_module.CreateInstitution.mutate(None, None, "Clinic")
+        with patch.object(institutions_mutations_module.Institution.objects, "get", side_effect=institutions_mutations_module.Institution.DoesNotExist):
+            with self.assertRaises(Exception):
+                institutions_mutations_module.UpdateInstitution.mutate(None, None, "1")
+            with self.assertRaises(Exception):
+                institutions_mutations_module.DeleteInstitution.mutate(None, None, "1")
+            with self.assertRaises(Exception):
+                institutions_mutations_module.CreateInstitutionGroup.mutate(None, None, "1", "G")
+        with patch.object(institutions_mutations_module.InstitutionGroup.objects, "get", side_effect=institutions_mutations_module.InstitutionGroup.DoesNotExist):
+            with self.assertRaises(Exception):
+                institutions_mutations_module.UpdateInstitutionGroup.mutate(None, None, "1")
+            with self.assertRaises(Exception):
+                institutions_mutations_module.DeleteInstitutionGroup.mutate(None, None, "1")
+        with patch.object(institutions_mutations_module.Institution.objects, "get", return_value=institution):
+            self.assertIs(institutions_mutations_module.UpdateInstitution.mutate(None, None, "1").institution, institution)
 
     def test_therapeutic_inventory_and_resource_mutations(self):
         info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
