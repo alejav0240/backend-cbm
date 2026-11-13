@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from pathlib import Path
 from unittest import TestCase
@@ -31,6 +32,17 @@ import finance.mutations as finance_mutations_module
 import institutions.mutations as institutions_mutations_module
 import evaluations.mutations as evaluations_mutations_module
 import therapeutic_sessions.mutations as therapeutic_mutations_module
+import users.utils as users_utils_module
+import users.permissions_map as permissions_map_module
+import users.queries as users_queries_module
+import users.mutations as users_mutations_module
+import finance.queries as finance_queries_module
+import marketing.queries as marketing_queries_module
+import clinical.queries as clinical_queries_module
+import demuca_draft as demuca_draft_module
+import phase2_inference as phase2_module
+import pipeline_multimodal.servicios as pipeline_services_module
+import multimodal.views as multimodal_views_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -55,6 +67,282 @@ from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_phase2_prediction_and_demuca_draft_matrix(self):
+        with self.assertRaisesRegex(ValueError, "invalid_session_id"):
+            demuca_draft_module.build_demuca_draft("")
+        draft = demuca_draft_module.build_demuca_draft("S1")
+        self.assertEqual(draft["sesion_id"], "S1")
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            (session / "metadata").mkdir(parents=True)
+            (session / "metadata" / "session.json").write_text(json.dumps({"session_id": "S1"}))
+            written = demuca_draft_module.write_demuca_draft(session)
+            self.assertEqual(demuca_draft_module.write_demuca_draft(session), written)
+            self.assertEqual(phase2_module.predict_session(session, None)["status"], "unavailable")
+            with self.assertRaises(FileNotFoundError):
+                phase2_module.predict_session(session, session / "missing.json")
+
+    def test_pipeline_service_and_multimodal_view_failures(self):
+        service = pipeline_services_module.ServicioPipelineMultimodal(Path("/tmp"), Path("/missing"))
+        with self.assertRaises(pipeline_services_module.ErrorPipelineMultimodal):
+            service.ejecutar(Path("/tmp/file"), "S1")
+        with patch.dict(os.environ, {"MULTIMODAL_SERVICE_KEY": "secret"}):
+            request = SimpleNamespace(method="POST", headers={}, FILES={}, POST={})
+            response = multimodal_views_module.analizar_video(request)
+            self.assertEqual(response.status_code, 403)
+        with patch.dict(os.environ, {"MULTIMODAL_SERVICE_KEY": ""}), \
+             patch.object(multimodal_views_module.settings, "DEBUG", True):
+            request = SimpleNamespace(method="POST", headers={}, FILES={}, POST={})
+            self.assertEqual(multimodal_views_module.analizar_video(request).status_code, 400)
+    def test_user_utils_and_permissions_matrix(self):
+        self.assertEqual(users_utils_module.clean_text(" José-Luis!"), "JOSELUIS")
+        self.assertEqual(users_utils_module.clean_text(None), "")
+        with patch.object(users_utils_module, "get_user_model") as get_model, \
+             patch.object(users_utils_module.random, "randint", return_value=123):
+            get_model.return_value.objects.filter.return_value.exists.return_value = False
+            self.assertEqual(users_utils_module.generate_unique_username("Ana María", "", 3), "ANAMAR123")
+        with patch.object(users_utils_module, "get_user_model") as get_model, \
+             patch.object(users_utils_module.random, "randint", return_value=111):
+            manager = get_model.return_value.objects
+            manager.filter.return_value.exists.side_effect = [True] * 50 + [False]
+            self.assertEqual(users_utils_module.generate_unique_username("A", "B", 3), "AB100")
+        permission_qs = MagicMock()
+        permission_qs.__iter__.side_effect = lambda: iter(["permission"])
+        permission_qs.filter.return_value = permission_qs
+        with patch.object(permissions_map_module.Permission.objects, "filter", return_value=permission_qs):
+            self.assertEqual(permissions_map_module.get_permissions_for_modules(["pacientes:view", "invalid", "sesiones"]), ["permission", "permission"])
+        group = SimpleNamespace(permissions=MagicMock())
+        group.permissions.select_related.return_value.all.return_value = [
+            SimpleNamespace(content_type=SimpleNamespace(app_label="users", model="user"), codename="view_user"),
+            SimpleNamespace(content_type=SimpleNamespace(app_label="auth", model="group"), codename="change_group"),
+        ]
+        modules = permissions_map_module.get_modules_for_group(group)
+        self.assertIn("usuarios:view", modules)
+        self.assertIn("roles:change", modules)
+
+    def test_users_query_resolvers_and_patient_relations(self):
+        staff = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=7, has_perm=lambda _: False)
+        info = SimpleNamespace(context=SimpleNamespace(user=staff))
+        qs = MagicMock()
+        qs.count.return_value = 3
+        qs.__iter__.return_value = iter([])
+        qs.filter.return_value = qs
+        qs.exclude.return_value = qs
+        qs.order_by.return_value = qs
+        with patch.object(users_queries_module.Group.objects, "all", return_value=qs), \
+             patch.object(users_queries_module.User.objects, "all", return_value=qs):
+            self.assertEqual(users_queries_module.Query().resolve_roles(info, search="x").total_count, 3)
+            self.assertEqual(users_queries_module.Query().resolve_users(info, search="x", role_name="T", exclude_role="X").total_count, 3)
+        user = SimpleNamespace(pk=7)
+        with patch.object(users_queries_module.User.objects, "get", return_value=user):
+            self.assertIs(users_queries_module.Query().resolve_user(info, "7"), user)
+        notifications = MagicMock()
+        notifications.filter.return_value = notifications
+        notifications.count.return_value = 2
+        with patch.object(users_queries_module.Notification.objects, "filter", return_value=notifications), \
+             patch.object(users_queries_module.OnboardingView.objects, "filter", return_value=notifications):
+            self.assertEqual(list(users_queries_module.Query().resolve_notifications(info, is_read=True)), [])
+            self.assertEqual(users_queries_module.Query().resolve_unread_notifications_count(info), 2)
+            self.assertIs(users_queries_module.Query().resolve_onboarding_view(info, "intro"), notifications.first.return_value)
+        patient = SimpleNamespace(pk=1, first_name="A", last_name="B", diagnosis="D", status="active")
+        patient_qs = MagicMock()
+        patient_qs.__iter__.return_value = iter([patient])
+        session_qs = MagicMock()
+        session_qs.values_list.return_value.distinct.return_value = [1]
+        patient_qs.only.return_value = patient_qs
+        with patch.object(users_queries_module.User.objects, "get", return_value=user), \
+             patch("therapeutic_sessions.models.Session.objects.filter", return_value=session_qs), \
+             patch("clinical.models.Patient.objects.filter", return_value=patient_qs):
+            result = users_queries_module.Query().resolve_user_with_patients(info, "7")
+        self.assertEqual(result.patients_count, 1)
+
+    def test_session_query_filters_cycles_and_catalog_resolvers(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        session_qs = MagicMock()
+        session_qs.select_related.return_value = session_qs
+        session_qs.filter.return_value = session_qs
+        session_qs.order_by.return_value = session_qs
+        session_qs.count.return_value = 4
+        session_qs.__getitem__.return_value = [SimpleNamespace()]
+        with patch.object(session_queries_module.Session.objects, "select_related", return_value=session_qs):
+            result = session_queries_module.Query().resolve_sessions(
+                info, patient_id="1", therapist_id="1", session_type="individual",
+                payment_status="paid", session_status="completa", search="A",
+                date_from=date(2026, 1, 1), date_to=date(2026, 1, 2), include_no_date=True,
+                page=1, page_size=2,
+            )
+        self.assertEqual(result.total_count, 4)
+        cycle_qs = MagicMock()
+        cycle_qs.filter.return_value = cycle_qs
+        with patch.object(session_queries_module.Session.objects, "filter", return_value=cycle_qs), \
+             patch.object(session_queries_module, "_build_cycles", return_value=["cycle"]):
+            self.assertEqual(session_queries_module.Query().resolve_patient_cycles(info, "1"), ["cycle"])
+            self.assertEqual(session_queries_module.Query().resolve_all_patient_cycles(info), ["cycle"])
+        catalog_qs = MagicMock()
+        catalog_qs.filter.return_value = catalog_qs
+        catalog_qs.count.return_value = 1
+        with patch.object(session_queries_module.DigitalResource.objects, "all", return_value=catalog_qs), \
+             patch.object(session_queries_module.DigitalResource.objects, "get", return_value=SimpleNamespace()) as resource_get, \
+             patch.object(session_queries_module.InventoryItem.objects, "all", return_value=catalog_qs), \
+             patch.object(session_queries_module.InventoryItem.objects, "get", return_value=SimpleNamespace()):
+            self.assertEqual(session_queries_module.Query().resolve_digital_resources(info, type="audio", search="x").total_count, 1)
+            self.assertIsNotNone(session_queries_module.Query().resolve_digital_resource(info, "1"))
+            self.assertEqual(session_queries_module.Query().resolve_inventory_items(info, status="active", type="x", search="y").total_count, 1)
+            self.assertIsNotNone(session_queries_module.Query().resolve_inventory_item(info, "1"))
+
+    def test_session_cycle_builder_and_last_cycle_pagination(self):
+        patient = SimpleNamespace(first_name="Ana", last_name="Paciente")
+        therapist = SimpleNamespace(pk=2)
+        sessions = [
+            SimpleNamespace(patient_id=1, cycle_number=2, therapist_id=2, therapist=therapist,
+                            patient=patient, payment_status="paid", session_status="completa",
+                            session_date=date(2026, 1, 2)),
+            SimpleNamespace(patient_id=1, cycle_number=2, therapist_id=3, therapist=SimpleNamespace(pk=3),
+                            patient=patient, payment_status="pending", session_status="agendada",
+                            session_date=date(2026, 1, 3)),
+        ]
+        qs = MagicMock()
+        qs.select_related.return_value = qs
+        qs.prefetch_related.return_value = qs
+        qs.order_by.return_value = qs
+        qs.exists.return_value = True
+        qs.__iter__.return_value = iter(sessions)
+        cycles = session_queries_module._build_cycles(qs)
+        self.assertEqual(cycles[0].session_count, 2)
+        self.assertEqual(cycles[0].payment_summary.paid, 1)
+        empty = MagicMock()
+        empty.select_related.return_value = empty
+        empty.prefetch_related.return_value = empty
+        empty.order_by.return_value = empty
+        empty.exists.return_value = False
+        self.assertEqual(session_queries_module._build_cycles(empty), [])
+
+    def test_finance_payment_course_expense_and_discount_mutations(self):
+        self.assertEqual(finance_mutations_module._resolve_discount(None, 10)[1], 10)
+        discount = SimpleNamespace(type="fixed", value=Decimal("2"), save=MagicMock())
+        with patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
+            self.assertEqual(finance_mutations_module._resolve_discount("1", Decimal("10"))[1], 8)
+        with self.assertRaises(Exception):
+            finance_mutations_module._resolve_discount("bad", Decimal("10"))
+        sessions = finance_mutations_module._create_paid_sessions(1, 2, date(2026, 1, 1), 3, "individual", 4)
+        self.assertEqual([s.session_number for s in sessions], [5, 6])
+        payment = SimpleNamespace(total_amount=Decimal("10"), discount=None, amount_paid=0, save=MagicMock())
+        with patch.object(finance_mutations_module.Payment.objects, "get", return_value=payment):
+            self.assertIs(finance_mutations_module.UpdatePayment.mutate(None, None, "1", amount_paid=5).payment, payment)
+        expense = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        with patch.object(finance_mutations_module.Expense.objects, "create", return_value=expense), \
+             patch.object(finance_mutations_module.Expense.objects, "get", return_value=expense):
+            self.assertIs(finance_mutations_module.CreateExpense.mutate(None, None, "x", "food", 2, date(2026, 1, 1)).expense, expense)
+            self.assertIs(finance_mutations_module.UpdateExpenseStatus.mutate(None, None, "1", "paid").expense, expense)
+            self.assertTrue(finance_mutations_module.DeleteExpense.mutate(None, None, "1").success)
+        course = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        with patch.object(finance_mutations_module.Course.objects, "create", return_value=course), \
+             patch.object(finance_mutations_module.Course.objects, "get", return_value=course):
+            self.assertIs(finance_mutations_module.CreateCourse.mutate(None, None, "c", 10).course, course)
+            self.assertIs(finance_mutations_module.UpdateCourse.mutate(None, None, "1", price=12).course, course)
+            self.assertTrue(finance_mutations_module.DeleteCourse.mutate(None, None, "1").success)
+        with patch.object(finance_mutations_module.Discount.objects, "create", return_value=discount), \
+             patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
+            self.assertIs(finance_mutations_module.CreateDiscount.mutate(None, None, "d", "fixed", 2).discount, discount)
+            self.assertIs(finance_mutations_module.UpdateDiscount.mutate(None, None, "1", value=3).discount, discount)
+
+    def test_users_role_registration_and_password_mutations(self):
+        role = SimpleNamespace(name="old", save=MagicMock(), permissions=MagicMock(), delete=MagicMock())
+        with patch.object(users_mutations_module.Group.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(users_mutations_module.Group.objects, "create", return_value=role), \
+             patch.object(users_mutations_module, "get_permissions_for_modules", return_value=["p"]):
+            self.assertIs(users_mutations_module.CreateRole.mutate(None, None, "r", ["usuarios:view"]).role, role)
+        with patch.object(users_mutations_module.Group.objects, "get", return_value=role):
+            self.assertIs(users_mutations_module.UpdateRole.mutate(None, None, "1", name="new", permissions=[]).role, role)
+            self.assertTrue(users_mutations_module.DeleteRole.mutate(None, None, "1").success)
+        fake_user = MagicMock()
+        with patch.object(users_mutations_module, "User", return_value=fake_user) as user_model, \
+             patch.object(users_mutations_module.User.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(users_mutations_module, "send_welcome_credentials_email", return_value=True):
+            self.assertIs(users_mutations_module.CreateUser.mutate(None, None, "pw123456", "CI", "a@b.com", first_name="A").user, fake_user)
+            user_model.assert_called_once()
+        current = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1, check_password=lambda _: True, set_password=MagicMock(), save=MagicMock())
+        info = SimpleNamespace(context=SimpleNamespace(user=current))
+        target = SimpleNamespace(pk=1, save=MagicMock(), check_password=MagicMock(return_value=True), set_password=MagicMock())
+        with patch.object(users_mutations_module.User.objects, "get", return_value=target), \
+             patch.object(users_mutations_module, "revoke_user_refresh_tokens"):
+            self.assertIs(users_mutations_module.UpdateUser.mutate(None, info, "1", first_name="N").user, target)
+            self.assertTrue(users_mutations_module.ChangePassword.mutate(None, info, "old", "newpass123").success)
+        notification = SimpleNamespace(is_read=False, save=MagicMock())
+        with patch.object(users_mutations_module.Notification.objects, "get", return_value=notification):
+            self.assertIs(users_mutations_module.MarkNotificationRead.mutate(None, info, "1").notification, notification)
+        onboarding = SimpleNamespace()
+        with patch.object(users_mutations_module.OnboardingView.objects, "get_or_create", return_value=(onboarding, True)):
+            self.assertIs(users_mutations_module.MarkOnboardingViewSeen.mutate(None, info, "intro").onboarding_view, onboarding)
+
+    def test_legacy_user_and_patient_importer_branches(self):
+        logger = MagicMock()
+        user_importer = UserImporter(logger=logger, dry_run=True)
+        short = ["1"]
+        user_importer.import_users([short, ["bad"]])
+        row = ["1", "Ana", "Pérez", "", "+591 700", "", "0", "visible", "activo", "foto", "2026-01-01", ""]
+        result = user_importer.import_users([row])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(user_importer._normalize_value("unknown", user_importer.STATUS_MAP, "active"), "active")
+        self.assertEqual(user_importer._clean_and_validate_phone("abc+591", 20), "+591")
+        patient_importer = PatientImporter(logger=logger, dry_run=True)
+        patient_row = ["1", "Niño", "Paciente", "0", "2020-01-01", "", "notes", "dx", "home", "Tutor", "", "", "goal", "social", "cog", "fis", "emo", "method", "extra", "20", "2026-01-01"]
+        patients, info = patient_importer.import_patients([patient_row], {}, SimpleNamespace())
+        self.assertEqual(len(patients), 1)
+        self.assertEqual(len(info), 1)
+        self.assertEqual(patient_importer._split_name("Solo"), ("Solo", "Legacy"))
+        self.assertEqual(patient_importer._split_name(""), ("Tutor", "Legacy"))
+
+    def test_finance_marketing_and_clinical_query_resolvers(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        qs = MagicMock()
+        qs.filter.return_value = qs
+        qs.exclude.return_value = qs
+        qs.prefetch_related.return_value = qs
+        qs.select_related.return_value = qs
+        qs.all.return_value = qs
+        qs.order_by.return_value = qs
+        qs.count.return_value = 2
+        qs.exists.return_value = True
+        qs.__len__.return_value = 0
+        qs.__or__.return_value = qs
+        qs.__getitem__.return_value = []
+        for manager in (finance_queries_module.Discount.objects, finance_queries_module.Payment.objects, finance_queries_module.Expense.objects, finance_queries_module.Course.objects, finance_queries_module.CourseEnrollment.objects):
+            with patch.object(manager, "all", return_value=qs), patch.object(manager, "select_related", return_value=qs), patch.object(manager, "prefetch_related", return_value=qs), patch.object(manager, "get", return_value=SimpleNamespace()):
+                pass
+        with patch.object(finance_queries_module.Discount.objects, "all", return_value=qs), \
+             patch.object(finance_queries_module.Payment.objects, "select_related", return_value=qs), \
+             patch.object(finance_queries_module.Expense.objects, "all", return_value=qs), \
+             patch.object(finance_queries_module.Course.objects, "prefetch_related", return_value=qs), \
+             patch.object(finance_queries_module.CourseEnrollment.objects, "select_related", return_value=qs):
+            self.assertEqual(len(finance_queries_module.Query().resolve_discounts(info)), 0)
+            self.assertEqual(finance_queries_module.Query().resolve_payments(info, patient_id="1", payment_status="paid", search="A").total_count, 2)
+            self.assertEqual(finance_queries_module.Query().resolve_expenses(info, status="paid", category="x", search="y").total_count, 2)
+            self.assertEqual(finance_queries_module.Query().resolve_courses(info, state="draft", search="x").total_count, 2)
+            self.assertEqual(finance_queries_module.Query().resolve_course_enrollments(info, course_id="1").total_count, 2)
+        marketing_qs = qs
+        with patch.object(marketing_queries_module.BlogPost.objects, "all", return_value=marketing_qs), \
+             patch.object(marketing_queries_module.MarketingCampaign.objects, "prefetch_related", return_value=marketing_qs), \
+             patch.object(marketing_queries_module.Lead.objects, "select_related", return_value=marketing_qs), \
+             patch.object(marketing_queries_module.BlogPost.objects, "get", return_value=SimpleNamespace()), \
+             patch.object(marketing_queries_module.MarketingCampaign.objects, "prefetch_related", return_value=marketing_qs), \
+             patch.object(marketing_queries_module.Lead.objects, "select_related", return_value=marketing_qs):
+            self.assertEqual(marketing_queries_module.Query().resolve_blog_posts(info, status="published", search="x", type="md").total_count, 2)
+            self.assertEqual(marketing_queries_module.Query().resolve_marketing_campaigns(info, status="active", platform="x").total_count, 2)
+            self.assertEqual(marketing_queries_module.Query().resolve_leads(info, campaign_id="1", status="new", search="x").total_count, 2)
+        clinical_qs = qs
+        with patch.object(clinical_queries_module.Patient.objects, "select_related", return_value=clinical_qs), \
+             patch.object(clinical_queries_module.Patient.objects, "all", return_value=clinical_qs), \
+             patch.object(clinical_queries_module.InterventionPlan.objects, "select_related", return_value=clinical_qs), \
+             patch.object(clinical_queries_module.PatientClinicalNote.objects, "filter", return_value=clinical_qs), \
+             patch.object(clinical_queries_module.TherapyReport.objects, "select_related", return_value=clinical_qs), \
+             patch.object(clinical_queries_module.SessionPlanStep.objects, "select_related", return_value=clinical_qs):
+            self.assertEqual(clinical_queries_module.Query().resolve_patients(info, status="active", search="A").total_count, 2)
+            self.assertEqual(clinical_queries_module.Query().resolve_intervention_plans(info, patient_id="1", search="x").total_count, 2)
+            self.assertEqual(list(clinical_queries_module.Query().resolve_therapy_reports(info, patient_id="1")), [])
+            self.assertEqual(list(clinical_queries_module.Query().resolve_session_plan_steps(info, session_id="1", plan_step_id="2", plan_id="3", is_completed=True)), [])
     def test_movement_features_track_pose_and_proximity(self):
         landmarks = [{"x": 0.1, "y": 0.2, "visibility": 0.9}]
         first = {"timestamp_seconds": 0.0, "poses": [{"landmarks": landmarks}]}
