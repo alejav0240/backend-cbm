@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
@@ -21,6 +22,7 @@ from media import synchronize_pose_with_segments
 from media_pipeline import _PipelineSummaryContext, _build_pipeline_summary, persist_or_reuse_audio_artifact
 from movement_interaction import build_movement_interaction_features
 from pipeline_graph import write_pipeline_graph
+import pose as pose_module
 from pose import frame_timestamp_seconds, load_pose_landmarks
 from tracking import flatten_metrics
 from session_manifest import validate_session_manifest
@@ -261,6 +263,34 @@ class MlFeatureTests(TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "model asset"):
                 load_pose_landmarks(directory, "S1", directory / "missing.task", directory / "pose.json")
 
+    def test_pose_frame_processing_serializes_landmarks(self):
+        point = SimpleNamespace(x=0.1, y=0.2, z=0.3, visibility=0.9, presence=None)
+        result = SimpleNamespace(
+            pose_landmarks=[[point]], pose_world_landmarks=[[point]],
+        )
+        fake_cv2 = SimpleNamespace(imread=lambda _: object(), cvtColor=lambda image, _: image, COLOR_BGR2RGB=1)
+        fake_mp = SimpleNamespace(
+            ImageFormat=SimpleNamespace(SRGB="srgb"),
+            Image=lambda **kwargs: kwargs,
+        )
+        landmarker = SimpleNamespace(detect_for_video=lambda image, timestamp: result)
+        with tempfile.TemporaryDirectory() as temporary:
+            frame = Path(temporary) / "S1_0002.jpg"
+            frame.write_bytes(b"frame")
+            record, timestamp = pose_module._process_pose_frame(
+                frame, 0, 2, fake_cv2, fake_mp, landmarker, -1,
+            )
+        self.assertEqual(timestamp, 500)
+        self.assertEqual(record["poses"][0]["landmarks"][0]["x"], 0.1)
+
+    def test_pose_frame_processing_skips_unreadable_frame(self):
+        fake_cv2 = SimpleNamespace(imread=lambda _: None)
+        record, timestamp = pose_module._process_pose_frame(
+            Path("missing.jpg"), 0, 1, fake_cv2, None, None, 10,
+        )
+        self.assertIsNone(record)
+        self.assertEqual(timestamp, 10)
+
     def test_tracking_flattens_only_finite_report_metrics(self):
         result = flatten_metrics({
             "validation": {"micro_f1": 0.8, "exact_match_accuracy": float("nan"),
@@ -284,6 +314,20 @@ class MlFeatureTests(TestCase):
             with patch.object(media, "run_command", return_value=""):
                 with self.assertRaisesRegex(ValueError, "could not read"):
                     media.probe_stream_duration(root / "video.mp4", "v:0")
+
+    def test_media_stream_helpers_cover_fallback_and_concat_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "list.txt"
+            media._concat_file_list([root / "a'b.mp4", root / "b.wav"], output)
+            self.assertIn("a'\\''b.mp4", output.read_text())
+            with patch.object(media, "run_command", return_value=json.dumps({"format": {"duration": "2"}, "streams": [{}]})):
+                self.assertEqual(media._fallback_stream_duration(root / "x", "v:0"), 2)
+            with patch.object(media, "run_command", return_value="audio"):
+                self.assertTrue(media._has_audio_stream(root / "x"))
+            with patch.object(media, "run_command", return_value='{"format":{"duration":"2"},"streams":[{},{}]}'):
+                with self.assertRaisesRegex(ValueError, "could not read"):
+                    media._fallback_stream_duration(root / "x", "v:0")
 
     def test_segment_pipeline_reuses_existing_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
