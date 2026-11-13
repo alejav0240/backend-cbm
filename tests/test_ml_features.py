@@ -88,6 +88,26 @@ class MlFeatureTests(TestCase):
         self.assertEqual(pipeline_views_module._json_body(SimpleNamespace(body=b'{"x": 1}'))["x"], 1)
         with self.assertRaises(Exception):
             pipeline_views_module._json_body(SimpleNamespace(body=b"bad"))
+
+    def test_pipeline_dataset_and_annotation_helpers_matrix(self):
+        now = SimpleNamespace(isoformat=lambda: "now")
+        samples = MagicMock()
+        samples.all.return_value = samples
+        samples.count.return_value = 2
+        samples.filter.return_value.count.return_value = 1
+        dataset = SimpleNamespace(id=1, name="D", description="d", status="draft", training_authorized=False, authorized_at=None, created_at=now, updated_at=now, samples=samples)
+        self.assertEqual(pipeline_views_module._dataset_payload(dataset)["sample_count"], 2)
+        sample = SimpleNamespace(id=1, session_id="S", window_id="W", features={}, labels={}, reviewed=False, start_time=0, end_time=1, demuca_phase="MOVIMIENTO", sound_tags=[], movement_tags=[], interaction_tags=[], derived_features={}, pose_landmarks=[], artifact_payload={}, updated_at=now)
+        self.assertEqual(pipeline_views_module._sample_payload(sample)["session_id"], "S")
+        body = {"start_time": 0, "end_time": 1, "demuca_phase": " MOVIMIENTO ", "sound_tags": [], "movement_tags": [], "interaction_tags": []}
+        self.assertEqual(pipeline_views_module._annotation_values(body)["demuca_phase"], "MOVIMIENTO")
+        with patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample):
+            samples.filter.return_value.exists.return_value = False
+            created = pipeline_views_module._create_annotation_sample(dataset, "S", body)
+        self.assertIs(created, sample)
+        result = SimpleNamespace(resultado={"pose_landmarks": [1]})
+        with patch.object(pipeline_views_module.ResultadoAnalisis.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=result))):
+            self.assertEqual(pipeline_views_module._artifact_payload_for_session("S")[0], result.resultado)
     def test_therapeutic_and_evaluation_mutation_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
         info = SimpleNamespace(context=SimpleNamespace(user=user))
