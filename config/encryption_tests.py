@@ -72,6 +72,7 @@ class ApplicationEncryptionTests(SimpleTestCase):
             "ct": _b64encode(ciphertext),
         }, aes_key
 
+    @override_settings(APP_ENCRYPTION_ENABLED=True)
     def test_request_and_response_round_trip(self):
         request_envelope, aes_key = self._request_envelope(
             GRAPHQL_PATH, b'{"query":"{ me { username } }"}'
