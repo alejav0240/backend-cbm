@@ -2625,3 +2625,39 @@ class MlFeatureTests(TestCase):
                 manifest, None, None,
                 movement_payload={"windows": [{"window_id": "S1_W0000"}, {"window_id": "S1_W0000"}]},
             )
+
+    def test_media_duration_and_segment_helper_matrix(self):
+        with patch.object(media, "run_command", return_value="2.5"):
+            self.assertEqual(media.probe_duration(Path("clip.mp4")), 2.5)
+            self.assertEqual(media.probe_stream_duration(Path("clip.mp4"), "v:0"), 2.5)
+        with patch.object(media, "run_command", return_value="0"):
+            with self.assertRaises(ValueError):
+                media.probe_duration(Path("clip.mp4"))
+        with patch.object(media, "run_command", side_effect=["", json.dumps({"streams": [{}], "format": {"duration": "3"}})]):
+            self.assertEqual(media.probe_stream_duration(Path("clip.mkv"), "a:0"), 3.0)
+        with patch.object(media, "run_command", return_value=json.dumps({"streams": [{}, {}], "format": {"duration": "3"}})):
+            with self.assertRaisesRegex(ValueError, "could not read"):
+                media._fallback_stream_duration(Path("clip.mkv"), "a:0")
+        with patch.object(media, "run_command", return_value=""):
+            self.assertFalse(media._has_audio_stream(Path("clip.mp4")))
+        with patch.object(media, "run_command", return_value="audio"):
+            self.assertTrue(media._has_audio_stream(Path("clip.mp4")))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "concat.txt"
+            media._concat_file_list([root / "plain.mp4", root / "a'b.mp4"], output)
+            self.assertIn("a'\\''b.mp4", output.read_text())
+            manifest = root / "segments.json"
+            manifest.write_text(json.dumps({"window_seconds": 1, "drift_tolerance_seconds": 0.1, "max_tail_trim_seconds": 0.2, "segments": []}))
+            self.assertIsNone(media._reuse_segments(root, manifest, 2, 0.1, 0.2))
+            self.assertIsNotNone(media._reuse_segments(root, manifest, 1, 0.1, 0.2))
+            with patch.object(media, "probe_stream_duration", side_effect=[2.0, 2.5]):
+                self.assertEqual(media._segment_source_info(Path("v"), Path("a"), 1.0)[3], "audio")
+            with patch.object(media, "probe_stream_duration", side_effect=[2.5, 2.0]):
+                self.assertEqual(media._segment_source_info(Path("v"), Path("a"), 1.0)[3], "video")
+            with patch.object(media, "probe_stream_duration", side_effect=[2.0, 2.0]):
+                self.assertIsNone(media._segment_source_info(Path("v"), Path("a"), 1.0)[3])
+            with patch.object(media, "probe_stream_duration", side_effect=[2.0, 4.0]):
+                with self.assertRaises(ValueError):
+                    media._segment_source_info(Path("v"), Path("a"), 1.0)
