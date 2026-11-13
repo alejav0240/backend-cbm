@@ -65,10 +65,54 @@ import session_manifest as session_manifest_module
 import validate_multimodal_artifacts as artifact_validation_module
 import window_index as window_index_module
 import config.utils as config_utils_module
+import ml.create_window_index as create_window_index_module
+import evaluations.management.commands.seed_forms as seed_forms_module
+import evaluations.management.commands.seed_scales as seed_scales_module
+import config.management.commands.setup_rbac as setup_rbac_module
+import users.management.commands.importers.scale_importer as scale_importer_module
 from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_zero_coverage_commands_and_scale_importer_matrix(self):
+        command = seed_forms_module.Command()
+        form = SimpleNamespace(id=1, name="Form")
+        orphan = MagicMock(count=MagicMock(return_value=0))
+        with patch.object(seed_forms_module.Form.objects, "update_or_create", return_value=(form, True)), \
+             patch.object(seed_forms_module.FormQuestion.objects, "update_or_create", return_value=(SimpleNamespace(), True)), \
+             patch.object(seed_forms_module.FormQuestion.objects, "filter", return_value=MagicMock(exclude=MagicMock(return_value=orphan))):
+            command.handle()
+        scale = SimpleNamespace(id=1)
+        with patch.object(seed_scales_module.Scale.objects, "update_or_create", return_value=(scale, True)), \
+             patch.object(seed_scales_module.Subscale.objects, "update_or_create", return_value=(SimpleNamespace(), True)), \
+             patch.object(seed_scales_module.ScaleValue.objects, "update_or_create", return_value=(SimpleNamespace(), True)):
+            seed_scales_module.Command().handle()
+        group = MagicMock()
+        perms = MagicMock()
+        perms.__iter__.return_value = iter([])
+        with patch.object(setup_rbac_module.Group.objects, "get_or_create", return_value=(group, True)), \
+             patch.object(setup_rbac_module.Permission.objects, "all", return_value=perms), \
+             patch.object(setup_rbac_module.Permission.objects, "filter", return_value=perms):
+            setup_rbac_module.Command().handle()
+        importer = scale_importer_module.ScaleImporter(logger=MagicMock(), dry_run=True)
+        self.assertEqual(importer._find_subscale(SimpleNamespace(id=1), "X").name, "X")
+        self.assertEqual(importer._get_or_create_dynamic_scale("DEMUCA").name, "DEMUCA")
+        importer.import_scales_and_evaluations([["1", "audio", "Piano"]], [["1", "1", "Eval", "Sub", "", "2", "2026-01-01", "Cat"]], {1: {"patient": SimpleNamespace()}}, SimpleNamespace())
+        self.assertEqual(importer.stats["resources"], 1)
+
+    def test_create_window_index_writer_and_cli_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            output = session / "processed" / "windows" / "windows.json"
+            payload = {"session_id": "S1", "complete_windows": 1, "excluded_segments": []}
+            with patch.object(create_window_index_module, "build_window_index", return_value=payload), \
+                 patch.object(create_window_index_module, "validate_window_index", return_value=[]):
+                self.assertEqual(create_window_index_module.write_window_index(session, output), payload)
+                with self.assertRaises(FileExistsError):
+                    create_window_index_module.write_window_index(session, output)
+            with patch.object(create_window_index_module, "write_window_index", side_effect=ValueError("bad")), \
+                 patch.object(create_window_index_module.sys, "argv", ["create_window_index", str(session)]):
+                self.assertEqual(create_window_index_module.main(), 2)
     def test_laravel_remaining_payment_tutor_and_note_branches(self):
         command = laravel_command_module.Command()
         self.assertEqual(command._extract_payment_proofs([["short"], ["1", "7", "", "", "", "proof", "", "", "", ""]])[7], "proof")
