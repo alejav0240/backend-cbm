@@ -20,6 +20,7 @@ import media_pipeline as media_pipeline_module
 import config.management.commands.importar_laravel as laravel_command_module
 import analyze_video as analyze_video_module
 import multimodal_features as multimodal_features_module
+import therapeutic_sessions.queries as session_queries_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -806,6 +807,38 @@ class MlFeatureTests(TestCase):
             model.predict([{"audio_rms_mean": 1}])
         with self.assertRaisesRegex(ValueError, "unsupported_model_type"):
             MultilabelLogisticModel.from_dict({"model_type": "other"})
+
+    def test_session_query_helpers_group_cycles_and_apply_filters(self):
+        patient = SimpleNamespace(first_name="Ana", last_name="Uno")
+        sessions = [
+            SimpleNamespace(patient_id=1, cycle_number=2, therapist_id=4, therapist="T", patient=patient,
+                            payment_status="paid", session_status="completa", session_date="2026-01-02"),
+            SimpleNamespace(patient_id=1, cycle_number=2, therapist_id=4, therapist="T", patient=patient,
+                            payment_status="pending", session_status="agendada", session_date="2026-01-03"),
+        ]
+        queryset = MagicMock()
+        queryset.select_related.return_value = queryset
+        queryset.prefetch_related.return_value = queryset
+        queryset.order_by.return_value = queryset
+        queryset.exists.return_value = True
+        queryset.__iter__.return_value = iter(sessions)
+        cycles = session_queries_module._build_cycles(queryset)
+        self.assertEqual(cycles[0].session_count, 2)
+        self.assertEqual(cycles[0].payment_summary.paid, 1)
+        self.assertEqual(cycles[0].status, "Activo")
+
+        user = SimpleNamespace(is_staff=False, is_superuser=False, pk=4)
+        self.assertEqual(session_queries_module._restrict_to_user(user, None), "4")
+        with self.assertRaisesRegex(Exception, "No autorizado"):
+            session_queries_module._restrict_to_user(user, "999")
+        filtered = MagicMock()
+        filtered.filter.return_value = filtered
+        result = session_queries_module._apply_session_filters(
+            filtered, "1", "4", "individual", "paid", "completa", "Ana",
+            "2026-01-01", "2026-01-31", True,
+        )
+        self.assertIs(result, filtered)
+        self.assertGreaterEqual(filtered.filter.call_count, 5)
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
