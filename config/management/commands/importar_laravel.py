@@ -750,10 +750,12 @@ class Command(BaseCommand):
     def _map_plan_moment(self, legacy_moment):
         value = self._clean_text(legacy_moment).lower()
         if value in {"bienvenida", "inicio", "inicial"}:
-            return PlanStep.Moment.INITIAL
-        if value in {"relajacion", "relajacion.", "cierre"}:
-            return PlanStep.Moment.CLOSURE
-        return PlanStep.Moment.DEVELOPMENT
+            return PlanStep.Moment.BIENVENIDA
+        if value in {"relajacion", "relajacion."}:
+            return PlanStep.Moment.RELAJACION
+        if value == "cierre":
+            return PlanStep.Moment.DESPEDIDA
+        return PlanStep.Moment.BIENVENIDA
 
     def _score_from_legacy(self, escala_text, multiplicar_value, max_value):
         parsed = self._to_int(multiplicar_value)

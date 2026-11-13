@@ -652,6 +652,47 @@ class MlFeatureTests(TestCase):
         fetch.assert_called_once_with(connection)
         close.assert_called_once_with(connection, None)
 
+    def test_laravel_command_covers_plans_scales_and_score_mapping(self):
+        command = laravel_command_module.Command()
+        self.assertEqual(command._score_from_legacy("", "3", 2), 2)
+        self.assertEqual(command._score_from_legacy("MUCHO", "", 5), 4)
+        self.assertEqual(command._score_from_legacy("9", "", 5), 5)
+        self.assertEqual(command._score_from_legacy("unknown", "", 5), 0)
+        self.assertEqual(command._append_text("a", "b"), "a | b")
+        self.assertEqual(command._append_text("a", "a"), "a")
+        self.assertEqual(command._map_plan_moment("cierre").value, "DESPEDIDA")
+        self.assertEqual(command._map_plan_moment("otro").value, "BIENVENIDA")
+
+        fake_plan = MagicMock(id=10)
+        fake_step = MagicMock(musical_resources="")
+        intervention_model = MagicMock()
+        intervention_model.objects.create.return_value = fake_plan
+        planstep_model = MagicMock()
+        planstep_model.objects.create.return_value = fake_step
+        planstep_model.Moment = laravel_command_module.PlanStep.Moment
+        patient = SimpleNamespace(id=1)
+        plan_by_patient = {}
+        step_by_plan = {}
+        row = ["99", "1", "2", "inicio", "Objetivo", "Foco", "Metodo", "Enfoque", "30", "", "", ""]
+        with patch.object(laravel_command_module, "InterventionPlan", intervention_model), patch.object(laravel_command_module, "PlanStep", planstep_model):
+            self.assertTrue(command._import_plan_row(row, plan_by_patient, step_by_plan, {2: {"patient": patient}}, SimpleNamespace()))
+            command._apply_subplan_row(["", "99", "RECURSO", "Tambor", "", ""], step_by_plan)
+        self.assertEqual(step_by_plan[99], fake_step)
+        fake_step.save.assert_called_once()
+
+        scale = MagicMock()
+        scale_model = MagicMock()
+        scale_model.objects.get_or_create.return_value = (scale, True)
+        scale_model.ScaleType = laravel_command_module.Scale.ScaleType
+        subscale_model = MagicMock()
+        subscale_model.objects.get_or_create.return_value = (MagicMock(max_value=5), True)
+        with patch.object(laravel_command_module, "Scale", scale_model), patch.object(laravel_command_module, "Subscale", subscale_model):
+            scales, mapping = {}, {}
+            command._import_matrix_row(["1", "CAT", "SUB", "5", "", "", ""], scales, mapping)
+            command._import_submatrix_row(["", "1", "", "SUB2", "", ""], scales, mapping)
+        self.assertIn("CAT", scales)
+        self.assertEqual(mapping[1], "CAT")
+
     def test_multimodal_features_aggregate_acoustic_and_interaction_windows(self):
         with tempfile.TemporaryDirectory() as temporary:
             session = Path(temporary) / "S1"
