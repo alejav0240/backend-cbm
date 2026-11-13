@@ -73,103 +73,65 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Configuración de conexión remota
-        config = {
-            "host": options["host"],
-            "user": options["user"],
-            "password": options["password"],
-            "database": options["database"],
-            "port": options["port"],
-            "connect_timeout": 30,
-        }
+        datasets = self._load_legacy_datasets(options)
+        self._run_legacy_etl(datasets, options)
 
+    def _load_legacy_datasets(self, options):
+        config = {key: options[key] for key in ("host", "user", "password", "database", "port")}
+        config["connect_timeout"] = 30
         self.stdout.write(self.style.NOTICE(f"Conectando a {config['host']}:{config['port']} / {config['database']}..."))
-
-        ssh_tunnel = None
-        # Si el usuario indicó puerto 22, intentamos crear un túnel SSH local -> remote:3306
-        if options["port"] == 22:
-            if SSHTunnelForwarder is None:
-                self.stdout.write(self.style.WARNING("sshtunnel no está instalado; se intentará conexión SSH-fallback usando el cliente 'mysql' remoto."))
-            try:
-                self.stdout.write(self.style.NOTICE("Estableciendo túnel SSH (puerto 22) hacia el servidor remoto..."))
-                # Intentamos varias formas de bind remoto por si el servidor usa localhost o 127.0.0.1
-                tried = []
-                for remote_host in ("127.0.0.1", "localhost"):
-                    try:
-                        ssh_tunnel = SSHTunnelForwarder(
-                            (config["host"], 22),
-                            ssh_username=options["user"],
-                            ssh_password=options["password"],
-                            remote_bind_address=(remote_host, 3306),
-                        )
-                        ssh_tunnel.start()
-                        config["host"] = "127.0.0.1"
-                        config["port"] = ssh_tunnel.local_bind_port
-                        self.stdout.write(self.style.SUCCESS(f"Túnel SSH activo (remote_bind={remote_host}:3306) en localhost:{config['port']}"))
-                        break
-                    except Exception as e_inner:
-                        tried.append((remote_host, str(e_inner)))
-                        ssh_tunnel = None
-                if ssh_tunnel is None:
-                    self.stdout.write(self.style.WARNING(f"No se pudo establecer túnel SSH. Intentos: {tried}. Se seguirá con fallback SSH-cliente si es necesario."))
-            except Exception as err:
-                if ssh_tunnel:
-                    try:
-                        ssh_tunnel.stop()
-                    except Exception:
-                        pass
-                self.stdout.write(self.style.WARNING(f"Excepción creando túnel SSH: {err}. Se seguirá con fallback SSH-cliente si es necesario."))
-
-        conn_remote = None
-        # Si se pidió puerto 22 y no pudimos crear un túnel SSH, usar directamente SSH+mysql remoto
-        if options["port"] == 22 and ssh_tunnel is None:
-            self.stdout.write(self.style.WARNING("Usando modo SSH-fallback (cliente mysql en el servidor remoto)"))
-            conn_remote = {
-                "ssh": True,
-                "host": options["host"],
-                "user": options["user"],
-                "password": options["password"],
-                "database": options["database"],
-            }
-        else:
-            try:
-                conn_remote = self._connect_remote_db(config)
-            except mysql.connector.Error as err:
-                if ssh_tunnel:
-                    try:
-                        ssh_tunnel.stop()
-                    except Exception:
-                        pass
-                raise CommandError(f"Error de conexión a base de datos remota: {err}")
-
-        # Leer tablas desde BD remota
+        conn_remote, ssh_tunnel = self._open_legacy_connection(options, config)
         try:
-            datasets = {
-                "usuarios": self._query_remote_db(conn_remote, "usuarios"),
-                "clientes": self._query_remote_db(conn_remote, "clientes"),
-                "infoclientes": self._query_remote_db(conn_remote, "infoclientes"),
-                "pagos": self._query_remote_db(conn_remote, "pagos"),
-                "archivospagos": self._query_remote_db(conn_remote, "archivospagos"),
-                "ciclos": self._query_remote_db(conn_remote, "ciclos"),
-                "plandeintervencions": self._query_remote_db(conn_remote, "plandeintervencions"),
-                "subplandeintervencions": self._query_remote_db(conn_remote, "subplandeintervencions"),
-                "matrizescalas": self._query_remote_db(conn_remote, "matrizescalas"),
-                "submatrizescalas": self._query_remote_db(conn_remote, "submatrizescalas"),
-                "demucas": self._query_remote_db(conn_remote, "demucas"),
-            }
+            return self._fetch_legacy_datasets(conn_remote)
         finally:
+            self._close_legacy_resources(conn_remote, ssh_tunnel)
+
+    def _open_legacy_connection(self, options, config):
+        tunnel = self._open_ssh_tunnel(options, config) if options["port"] == 22 else None
+        if options["port"] == 22 and tunnel is None:
+            self.stdout.write(self.style.WARNING("Usando modo SSH-fallback (cliente mysql en el servidor remoto)"))
+            return {"ssh": True, **{key: options[key] for key in ("host", "user", "password", "database")}}, None
+        try:
+            return self._connect_remote_db(config), tunnel
+        except mysql.connector.Error as error:
+            if tunnel:
+                tunnel.stop()
+            raise CommandError(f"Error de conexión a base de datos remota: {error}")
+
+    def _open_ssh_tunnel(self, options, config):
+        if SSHTunnelForwarder is None:
+            self.stdout.write(self.style.WARNING("sshtunnel no está instalado; se usará fallback SSH."))
+            return None
+        for remote_host in ("127.0.0.1", "localhost"):
             try:
-                conn_remote.close()
+                tunnel = SSHTunnelForwarder((config["host"], 22), ssh_username=options["user"], ssh_password=options["password"], remote_bind_address=(remote_host, 3306))
+                tunnel.start()
+                config.update(host="127.0.0.1", port=tunnel.local_bind_port)
+                self.stdout.write(self.style.SUCCESS(f"Túnel SSH activo ({remote_host}:3306) en localhost:{config['port']}"))
+                return tunnel
             except Exception:
+                continue
+        self.stdout.write(self.style.WARNING("No se pudo establecer túnel SSH; se usará fallback."))
+        return None
+
+    def _fetch_legacy_datasets(self, connection):
+        tables = ("usuarios", "clientes", "infoclientes", "pagos", "archivospagos", "ciclos", "plandeintervencions", "subplandeintervencions", "matrizescalas", "submatrizescalas", "demucas")
+        return {table: self._query_remote_db(connection, table) for table in tables}
+
+    @staticmethod
+    def _close_legacy_resources(connection, tunnel):
+        try:
+            connection.close()
+        except (AttributeError, OSError):
+            pass
+        if tunnel:
+            try:
+                tunnel.stop()
+            except OSError:
                 pass
-            if ssh_tunnel:
-                try:
-                    ssh_tunnel.stop()
-                except Exception:
-                    pass
 
+    def _run_legacy_etl(self, datasets, options):
         dry_run = options["dry_run"]
-
         self.stdout.write(self.style.NOTICE("Iniciando ETL legacy..."))
 
         with transaction.atomic():
@@ -214,7 +176,8 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING("Dry-run activo: se hizo rollback de todos los cambios."))
                 return
 
-        self.stdout.write(self.style.SUCCESS("ETL completado."))
+            self.stdout.write(self.style.SUCCESS("ETL completado."))
+
 
     def _connect_remote_db(self, config):
         """Conecta a la base de datos remota MariaDB."""
@@ -227,146 +190,55 @@ class Command(BaseCommand):
             raise
 
     def _query_remote_db(self, connection, table_name):
-        """Consulta una tabla remota y retorna lista de listas (para compatibilidad con acceso por índice)."""
-        # Mapeo de columnas por tabla (en el mismo orden que estaban en los CSVs)
-        column_mappings = {
-            "usuarios": [
-                "id", "nombre", "apellido", "email", "empresa", "celular", "foto", "ci", 
-                "foto_grande", "estado", "password", "ciudad", "created_at", "visible", "updated_at", "remember_token"
-            ],
-            "clientes": [
-                "id", "nombre", "apellido", "email", "telefono", "empresa", "ciudad", "fecha_nacimiento",
-                "cedula", "foto", "estado", "notas", "created_at"
-            ],
-            "infoclientes": [
-                "id", "id_cliente", "diagnostico", "residencia", "notas", "telefonoresponsable", 
-                "nombreresponsable", "tutor", "objetivo_general", "area_fisica", "area_emocional",
-                "area_cognitiva", "area_social", "metodologia", "notas", "encuesta", 
-                "historia_clinica", "created_at", "updated_at"
-            ],
-            "pagos": [
-                "id", "id_infocliente", "monto_total", "fecha_pago", "monto_pagado", "observaciones",
-                "created_at", "updated_at", "metodo_pago", "referencia", "id_usuarios"
-            ],
-            "archivospagos": [
-                "id", "id_pagos", "archivo", "descripcion", "created_at", "ruta", "updated_at", 
-                "detalles", "notas", "user_id"
-            ],
-            "ciclos": [
-                "id", "id_pagos", "num_ciclo", "num_sesion", "estado_sesion", "fecha_sesion",
-                "estado_pago", "eri", "cim", "ejecucion", "apuntes", "created_at", "updated_at"
-            ],
-            "plandeintervencions": [
-                "id", "orden", "id_infocliente", "momento", "objetivo", "enfoque", "metodologia",
-                "indicaciones", "duracion", "notas", "created_at"
-            ],
-            "subplandeintervencions": [
-                "id", "id_plandeintervencions", "categoria", "descripcion", "created_at", "updated_at"
-            ],
-            "matrizescalas": [
-                "id", "categoria", "nombre_subescala", "valor_maximo", "created_at", "updated_at", "descripcion"
-            ],
-            "submatrizescalas": [
-                "id", "id_matrizescalas", "subescala", "nombre_subescala", "created_at", "updated_at"
-            ],
-            "demucas": [
-                "id", "id_infocliente", "nombre_evaluacion", "date_formato", "nombre_subescala", 
-                "escala", "multiplicar", "created_at", "categoria_escala", "notas", "user_id"
-            ],
-        }
-
-        columns = column_mappings.get(table_name, [])
-        if not columns:
-            raise CommandError(f"Tabla no permitida para importar: {table_name}")
-        
-        # Si la conexión es un dict con 'ssh', usamos el cliente mysql remoto via SSH
+        columns = self._remote_columns(table_name)
         if isinstance(connection, dict) and connection.get("ssh"):
-            import subprocess
+            return self._query_remote_ssh(connection, table_name, columns)
+        return self._query_remote_mysql(connection, table_name, columns)
 
-            host = connection["host"]
-            user = connection["user"]
-            password = connection["password"]
-            database = connection["database"]
+    @staticmethod
+    def _remote_columns(table_name):
+        columns = {
+            "usuarios": ["id", "nombre", "apellido", "email", "empresa", "celular", "foto", "ci", "foto_grande", "estado", "password", "ciudad", "created_at", "visible", "updated_at", "remember_token"],
+            "clientes": ["id", "nombre", "apellido", "email", "telefono", "empresa", "ciudad", "fecha_nacimiento", "cedula", "foto", "estado", "notas", "created_at"],
+            "infoclientes": ["id", "id_cliente", "diagnostico", "residencia", "notas", "telefonoresponsable", "nombreresponsable", "tutor", "objetivo_general", "area_fisica", "area_emocional", "area_cognitiva", "area_social", "metodologia", "notas", "encuesta", "historia_clinica", "created_at", "updated_at"],
+            "pagos": ["id", "id_infocliente", "monto_total", "fecha_pago", "monto_pagado", "observaciones", "created_at", "updated_at", "metodo_pago", "referencia", "id_usuarios"],
+            "archivospagos": ["id", "id_pagos", "archivo", "descripcion", "created_at", "ruta", "updated_at", "detalles", "notas", "user_id"],
+            "ciclos": ["id", "id_pagos", "num_ciclo", "num_sesion", "estado_sesion", "fecha_sesion", "estado_pago", "eri", "cim", "ejecucion", "apuntes", "created_at", "updated_at"],
+            "plandeintervencions": ["id", "orden", "id_infocliente", "momento", "objetivo", "enfoque", "metodologia", "indicaciones", "duracion", "notas", "created_at"],
+            "subplandeintervencions": ["id", "id_plandeintervencions", "categoria", "descripcion", "created_at", "updated_at"],
+            "matrizescalas": ["id", "categoria", "nombre_subescala", "valor_maximo", "created_at", "updated_at", "descripcion"],
+            "submatrizescalas": ["id", "id_matrizescalas", "subescala", "nombre_subescala", "created_at", "updated_at"],
+            "demucas": ["id", "id_infocliente", "nombre_evaluacion", "date_formato", "nombre_subescala", "escala", "multiplicar", "created_at", "categoria_escala", "notas", "user_id"],
+        }
+        if table_name not in columns:
+            raise CommandError(f"Tabla no permitida para importar: {table_name}")
+        return columns[table_name]
 
-            # Construir SELECT con columnas conocidas (si están) para mantener el orden
-            select_cols = ", ".join(columns) if columns else "*"
-            remote_mysql_cmd = [
-                "mysql",
-                "-u",
-                user,
-                f"-p{password}",
-                "-D",
-                database,
-                "-N",
-                "-B",
-                "-e",
-                f"SELECT {select_cols} FROM `{table_name}`;",
-            ]
-            remote_command = shlex.join([
-                "env",
-                f"MYSQL_PWD={password}",
-                *remote_mysql_cmd,
-            ])
-            ssh_cmd = [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "--",
-                f"{user}@{host}",
-                remote_command,
-            ]
+    def _query_remote_ssh(self, connection, table_name, columns):
+        command = ["mysql", "-u", connection["user"], f"-p{connection['password']}", "-D", connection["database"], "-N", "-B", "-e", f"SELECT {', '.join(columns)} FROM `{table_name}`;"]
+        ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=yes", "--", f"{connection['user']}@{connection['host']}", shlex.join(["env", f"MYSQL_PWD={connection['password']}", *command])]
+        try:
+            proc = subprocess.run(["sshpass", "-e", *ssh_cmd], shell=False, env={**os.environ, "SSHPASS": connection["password"]}, capture_output=True, text=True, timeout=60)
+            if proc.returncode != 0:
+                raise CommandError(f"SSH/mysql remoto falló: {proc.stderr.strip()}")
+            result = [line.split("\t") for line in proc.stdout.splitlines() if line.strip()]
+            self.stdout.write(self.style.SUCCESS(f"Tabla '{table_name}': {len(result)} registros (via SSH)."))
+            return result
+        except Exception as error:
+            self.stdout.write(self.style.ERROR(f"Error consultando '{table_name}' via SSH: {error}"))
+            raise
 
-            try:
-                # Usar sshpass para pasar la contraseña SSH si está disponible en el sistema
-                full_cmd = ["sshpass", "-e", *ssh_cmd]
-                proc = subprocess.run(
-                    full_cmd,
-                    shell=False,
-                    env={**os.environ, "SSHPASS": password},
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                if proc.returncode != 0:
-                    self.stdout.write(self.style.ERROR(f"Error ejecutando query remoto '{table_name}': {proc.stderr.strip()}"))
-                    raise CommandError(f"SSH/mysql remoto falló: {proc.stderr.strip()}")
-
-                lines = [l for l in proc.stdout.splitlines() if l.strip() != ""]
-                result = []
-                for line in lines:
-                    # mysql -B separa por tabulador
-                    parts = line.split('\t')
-                    row_list = [p for p in parts]
-                    result.append(row_list)
-
-                self.stdout.write(self.style.SUCCESS(f"Tabla '{table_name}': {len(result)} registros (via SSH)."))
-                return result
-            except Exception as err:
-                self.stdout.write(self.style.ERROR(f"Error consultando '{table_name}' via SSH: {err}"))
-                raise
-
+    def _query_remote_mysql(self, connection, table_name, columns):
         try:
             cursor = connection.cursor(dictionary=True)
-            query = f"SELECT * FROM `{table_name}`"
-            cursor.execute(query)
+            cursor.execute(f"SELECT * FROM `{table_name}`")
             rows = cursor.fetchall()
-            
-            # Convertir diccionarios a listas ordenadas por columnas conocidas
-            result = []
-            for row in rows:
-                if columns:
-                    # Usar mapeo conocido de columnas
-                    row_list = [str(row.get(col, "")) for col in columns]
-                else:
-                    # Fallback: si no hay mapeo, convertir diccionario a lista de valores
-                    row_list = [str(v) if v is not None else "" for v in row.values()]
-                result.append(row_list)
-            
-            self.stdout.write(self.style.SUCCESS(f"Tabla '{table_name}': {len(result)} registros."))
+            result = [[str(row.get(column, "")) for column in columns] for row in rows]
             cursor.close()
+            self.stdout.write(self.style.SUCCESS(f"Tabla '{table_name}': {len(result)} registros."))
             return result
-        except mysql.connector.Error as err:
-            self.stdout.write(self.style.ERROR(f"Error consultando '{table_name}': {err}"))
+        except mysql.connector.Error as error:
+            self.stdout.write(self.style.ERROR(f"Error consultando '{table_name}': {error}"))
             raise
 
     def _truncate_imported_data(self):
