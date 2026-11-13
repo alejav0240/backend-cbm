@@ -22,6 +22,7 @@ from media_pipeline import _PipelineSummaryContext, _build_pipeline_summary, per
 from movement_interaction import build_movement_interaction_features
 from pipeline_graph import write_pipeline_graph
 from pose import frame_timestamp_seconds, load_pose_landmarks
+from tracking import flatten_metrics
 from session_manifest import validate_session_manifest
 from validate_multimodal_artifacts import validate_multimodal_artifacts
 from window_index import build_window_index, validate_window_index
@@ -259,6 +260,30 @@ class MlFeatureTests(TestCase):
             directory = Path(temporary)
             with self.assertRaisesRegex(FileNotFoundError, "model asset"):
                 load_pose_landmarks(directory, "S1", directory / "missing.task", directory / "pose.json")
+
+    def test_tracking_flattens_only_finite_report_metrics(self):
+        result = flatten_metrics({
+            "validation": {"micro_f1": 0.8, "exact_match_accuracy": float("nan"),
+                           "per_label": {"MOVIMIENTO": {"f1": 0.7}, "bad": None}},
+            "test": {"split": {"micro_f1": 0.6, "per_label": {"AUDIO": {"f1": 0.5}}}},
+            "ignored": "not-a-report",
+        })
+        self.assertEqual(result, {
+            "validation_micro_f1": 0.8, "validation_MOVIMIENTO_f1": 0.7,
+            "test_split_micro_f1": 0.6, "test_split_AUDIO_f1": 0.5,
+        })
+
+    def test_media_validates_missing_extraction_and_invalid_probe_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaisesRegex(FileNotFoundError, "missing session metadata"):
+                media.run_existing_extraction("S1", root)
+            with patch.object(media, "run_command", return_value="0"):
+                with self.assertRaisesRegex(ValueError, "invalid media duration"):
+                    media.probe_duration(root / "video.mp4")
+            with patch.object(media, "run_command", return_value=""):
+                with self.assertRaisesRegex(ValueError, "could not read"):
+                    media.probe_stream_duration(root / "video.mp4", "v:0")
 
     def test_segment_pipeline_reuses_existing_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
