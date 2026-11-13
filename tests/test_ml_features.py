@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import soundfile as sf
+from django.test import override_settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1371,6 +1372,33 @@ class MlFeatureTests(TestCase):
             self.assertEqual(pipeline_views_module.session_artifacts(artifact_request, 1, "S1").status_code, 202)
         self.assertEqual(pipeline_views_module._load_pose_artifact("bad/id"), [])
 
+    def test_pipeline_export_and_video_service_error_branches(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        sample = SimpleNamespace(features={name: 1 for name in pipeline_models_module.DATASET_FEATURE_COLUMNS}, labels={"visual__MOVIMIENTO": 1}, reviewed=True)
+        dataset = SimpleNamespace(id=1, pk=1, status="draft", training_authorized=False, samples=MagicMock(all=MagicMock(return_value=[sample])))
+        request = SimpleNamespace(user=user, method="POST", headers={}, body=b"")
+        with tempfile.TemporaryDirectory() as temporary, override_settings(MEDIA_ROOT=temporary, MEDIA_URL="/media/"):
+            with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+                 patch.object(pipeline_views_module, "log_run", side_effect=RuntimeError("offline")):
+                response = pipeline_views_module.export_dataset(request, 1)
+            self.assertEqual(response.status_code, 200)
+            with patch.dict(os.environ, {"MLFLOW_REQUIRED": "true"}), \
+                 patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+                 patch.object(pipeline_views_module, "log_run", side_effect=RuntimeError("offline")):
+                self.assertEqual(pipeline_views_module.export_dataset(request, 1).status_code, 503)
+
+        base = {"user": user, "method": "POST", "headers": {"X-Request-ID": "r"}, "POST": {}, "FILES": {}}
+        with patch.object(pipeline_views_module, "_autorizado", return_value=True):
+            self.assertEqual(pipeline_views_module.analizar_video(SimpleNamespace(**base)).status_code, 400)
+        video = SimpleNamespace(name="video.txt", size=1, chunks=lambda: [b"x"])
+        invalid = SimpleNamespace(**{**base, "FILES": {"video": video}})
+        with patch.object(pipeline_views_module, "_autorizado", return_value=True):
+            self.assertEqual(pipeline_views_module.analizar_video(invalid).status_code, 400)
+        video.name = "video.mp4"
+        invalid.POST = {"session_id": "bad/id"}
+        with patch.object(pipeline_views_module, "_autorizado", return_value=True):
+            self.assertEqual(pipeline_views_module.analizar_video(invalid).status_code, 400)
+
     def test_pipeline_annotation_authorization_and_lineage_views(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
         sample = SimpleNamespace(
@@ -1548,6 +1576,26 @@ class MlFeatureTests(TestCase):
         self.assertGreaterEqual(note.call_count, 1)
         self.assertEqual(command._extract_payment_proofs([["", "10", "", "", "", "proof", "", "", "", ""]]), {10: "proof"})
         self.assertEqual(command._count_cycles_by_payment([["", "10"] + [""] * 11])[10], 1)
+
+    def test_laravel_import_command_connection_fallback_and_cleanup(self):
+        command = laravel_command_module.Command()
+        fake = SimpleNamespace(id=9, set_password=MagicMock(), save=MagicMock())
+        user_filter = MagicMock()
+        user_filter.first.side_effect = [None, None]
+        user_filter.order_by.return_value.first.return_value = None
+        with patch.object(laravel_command_module.User.objects, "filter", return_value=user_filter), \
+             patch.object(laravel_command_module.User.objects, "get_or_create", return_value=(fake, True)):
+            self.assertIs(command._ensure_default_therapist(), fake)
+        models = (laravel_command_module.ScaleEvaluationSubscaleResponse, laravel_command_module.ScaleEvaluation, laravel_command_module.Subscale, laravel_command_module.Scale, laravel_command_module.PlanStep, laravel_command_module.InterventionPlan, laravel_command_module.Session, laravel_command_module.Payment, laravel_command_module.PatientClinicalNote, laravel_command_module.Patient)
+        patches = [patch.object(model.objects, "all", return_value=MagicMock()) for model in models]
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8], patches[9], patch.object(laravel_command_module, "User") as user_model:
+            user_model.objects.filter.return_value.delete = MagicMock()
+            command._truncate_imported_data()
+        options = {"port": 22, "host": "h", "user": "u", "password": "p", "database": "d"}
+        with patch.object(laravel_command_module, "SSHTunnelForwarder", None):
+            connection, tunnel = command._open_legacy_connection(options, dict(options))
+        self.assertTrue(connection["ssh"])
+        self.assertIsNone(tunnel)
 
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
