@@ -1148,6 +1148,38 @@ class MlFeatureTests(TestCase):
             self.assertIs(clinical_mutations_module.UpdateStepPlan.mutate(None, info, "1", objective="x").step, step)
             self.assertTrue(clinical_mutations_module.DeleteStepPlan.mutate(None, info, "1").success)
 
+    def test_clinical_plan_and_session_step_mutations(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        plan = SimpleNamespace(patient_id=1, progress_percent=0, save=MagicMock(), delete=MagicMock())
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.InterventionPlan.objects, "create", return_value=plan):
+            self.assertIs(clinical_mutations_module.CreateInterventionPlan.mutate(None, info, "1", "1", "Objective").plan, plan)
+        step = SimpleNamespace()
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.InterventionPlan.objects, "get", return_value=plan), \
+             patch.object(clinical_mutations_module.PlanStep.objects, "filter", return_value=MagicMock(aggregate=MagicMock(return_value={"max_order": 2}))), \
+             patch.object(clinical_mutations_module.PlanStep.objects, "create", return_value=step):
+            self.assertIs(clinical_mutations_module.CreateStepPlan.mutate(None, info, "1", "M", "Goal").step, step)
+        note = SimpleNamespace()
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.PatientClinicalNote.objects, "update_or_create", return_value=(note, True)):
+            result = clinical_mutations_module.UpdateClinicalNotes.mutate(None, info, "1", "1", [SimpleNamespace(category="general_objective", content="x")])
+        self.assertEqual(result.notes_updated, [note])
+        sps = SimpleNamespace(session=SimpleNamespace(patient_id=1), is_completed=False, save=MagicMock())
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.Session.objects, "get", return_value=SimpleNamespace(patient_id=1)), \
+             patch.object(clinical_mutations_module.SessionPlanStep.objects, "get_or_create", return_value=(sps, True)):
+            self.assertIs(clinical_mutations_module.AddStepToSession.mutate(None, info, "1", "2", True, 10, "n").session_plan_step, sps)
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.SessionPlanStep.objects, "get", return_value=sps):
+            self.assertIs(clinical_mutations_module.UpdateSessionPlanStep.mutate(None, info, "1", "2", False, 5, "u").session_plan_step, sps)
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.Session.objects, "get", return_value=SimpleNamespace(patient_id=1)), \
+             patch.object(clinical_mutations_module.SessionPlanStep.objects, "filter", return_value=MagicMock(delete=MagicMock(return_value=(1, {})))):
+            self.assertTrue(clinical_mutations_module.RemoveStepFromSession.mutate(None, info, "1", "2").success)
+
     def test_evaluation_form_mutations_cover_create_delete_and_assign(self):
         info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
             is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
@@ -1371,6 +1403,24 @@ class MlFeatureTests(TestCase):
             artifact_request = SimpleNamespace(user=user, method="GET", headers={}, body=b"")
             self.assertEqual(pipeline_views_module.session_artifacts(artifact_request, 1, "S1").status_code, 202)
         self.assertEqual(pipeline_views_module._load_pose_artifact("bad/id"), [])
+
+    def test_pipeline_annotation_window_creation_success(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        sample = SimpleNamespace(
+            pk=1, session_id="S1", start_time=0, end_time=1, demuca_phase="MOVIMIENTO",
+            sound_tags=[], movement_tags=[], interaction_tags=[], pose_landmarks=[],
+            derived_features={}, updated_at=SimpleNamespace(isoformat=lambda: "now"),
+        )
+        samples = MagicMock()
+        samples.filter.return_value.count.return_value = 0
+        samples.filter.return_value.exists.return_value = False
+        dataset = SimpleNamespace(samples=samples)
+        body = {"start_time": 0, "end_time": 1, "demuca_phase": "MOVIMIENTO", "tags": {}, "features": {}, "landmarks": []}
+        request = SimpleNamespace(user=user, method="POST", headers={}, body=json.dumps(body).encode())
+        with patch.object(pipeline_views_module, "_annotation_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample):
+            response = pipeline_views_module.annotation_windows(request, "S1")
+        self.assertEqual(response.status_code, 201)
 
     def test_pipeline_export_and_video_service_error_branches(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
