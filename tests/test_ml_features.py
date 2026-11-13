@@ -1196,6 +1196,64 @@ class MlFeatureTests(TestCase):
             broken["schema_version"] = "0"
             self.assertIn("unsupported_schema_version", validate_window_index(broken, session))
 
+    def test_media_manifest_normalization_executes_and_reuses_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            session.mkdir()
+            manifest = session / "session_manifest.json"
+            source = session / "raw.mp4"
+            source.write_bytes(b"raw")
+            manifest.write_text(json.dumps({
+                "session_id": "S1", "source_version": "1", "duration_seconds": 1,
+                "timeline_policy": "contiguous", "fragments": [{
+                    "fragment_id": "f1", "global_start_seconds": 0,
+                    "duration_seconds": 1, "video_path": "raw.mp4", "audio_path": None,
+                }],
+            }))
+            with patch.object(media, "load_and_validate_session_manifest", return_value={"valid": True}), \
+                 patch.object(media, "_process_manifest_fragment", return_value=([], [], 1.0)), \
+                 patch.object(media, "probe_stream_duration", return_value=1.0):
+                def concat(staging, video_parts, audio_parts):
+                    video, audio = staging / "normalized.mp4", staging / "normalized.wav"
+                    video.write_bytes(b"v")
+                    audio.write_bytes(b"a")
+                    return video, audio
+                with patch.object(media, "_concat_manifest_parts", side_effect=concat):
+                    result = media.normalize_manifest_fragments(session, manifest)
+            self.assertEqual(result["status"], "executed")
+            self.assertTrue((session / "processed" / "manifest_processing.json").is_file())
+            with patch.object(media, "load_and_validate_session_manifest", return_value={"valid": True}):
+                reused = media.normalize_manifest_fragments(session, manifest)
+            self.assertEqual(reused["status"], "reused")
+
+    def test_laravel_import_command_remote_and_row_helpers(self):
+        command = laravel_command_module.Command()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"id": 1, "nombre": "Ana"}]
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        rows = command._query_remote_db(connection, "usuarios")
+        self.assertEqual(rows[0][0], "1")
+        cursor.close.assert_called_once()
+        with patch.object(laravel_command_module.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="1\tAna\n", stderr="")):
+            rows = command._query_remote_db({"ssh": True, "user": "u", "password": "p", "database": "d", "host": "h"}, "usuarios")
+        self.assertEqual(rows, [["1", "Ana"]])
+        with self.assertRaises(Exception):
+            command._remote_columns("not_allowed")
+
+        fake_user = SimpleNamespace(set_password=MagicMock(), save=MagicMock())
+        with patch.object(laravel_command_module.User.objects, "update_or_create", return_value=(fake_user, True)):
+            users = command._import_users([["1", "Ana", "Lopez", "", "", "700", "", "123", "", "activo", "", "", "", "visible", "", ""]])
+        self.assertIn("ana lopez", users)
+        payment = SimpleNamespace()
+        info = {"patient": SimpleNamespace()}
+        with patch.object(laravel_command_module.Payment.objects, "create", return_value=payment):
+            imported = command._import_payments(
+                [["10", "20", "100", "", "50", "", "", "", "", "", ""]],
+                {20: info}, {10: "proof.pdf"}, {10: 2},
+            )
+        self.assertIs(imported[10], payment)
+
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
