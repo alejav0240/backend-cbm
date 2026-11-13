@@ -64,10 +64,44 @@ from validate_multimodal_artifacts import validate_multimodal_artifacts
 import session_manifest as session_manifest_module
 import validate_multimodal_artifacts as artifact_validation_module
 import window_index as window_index_module
+import config.utils as config_utils_module
 from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_config_security_helpers_matrix(self):
+        import base64
+        self.assertIsNone(config_utils_module.get_db_id(None))
+        self.assertEqual(config_utils_module.get_db_id("12"), 12)
+        self.assertEqual(config_utils_module.get_db_id(base64.b64encode(b"User:7").decode().rstrip("=")), 7)
+        self.assertIsNone(config_utils_module.get_db_id("not-an-id"))
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=False, is_staff=False, is_superuser=False)))
+        with self.assertRaises(Exception):
+            config_utils_module.login_required(lambda *_: True)(None, info)
+        info.context.user.is_authenticated = True
+        info.context.user.is_staff = False
+        with self.assertRaises(Exception):
+            config_utils_module.staff_member_required(lambda *_: True)(None, info)
+        info.context.user.is_staff = True
+        self.assertTrue(config_utils_module.staff_member_required(lambda *_: True)(None, info))
+    def test_clinical_plan_step_and_report_lifecycle_matrix(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        plan = SimpleNamespace(patient_id=1, progress_percent=0, save=MagicMock(), delete=MagicMock())
+        step = SimpleNamespace(plan=plan, save=MagicMock(), delete=MagicMock())
+        with patch.object(clinical_mutations_module.InterventionPlan.objects, "get", return_value=plan), \
+             patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True):
+            self.assertIs(clinical_mutations_module.UpdatePlanProgress.mutate(None, info, "1", 150).plan, plan)
+            self.assertIs(clinical_mutations_module.UpdateInterventionPlan.mutate(None, info, "1", main_objective="new").plan, plan)
+            self.assertTrue(clinical_mutations_module.DeleteInterventionPlan.mutate(None, info, "1").success)
+        with patch.object(clinical_mutations_module.PlanStep.objects, "get", return_value=step), \
+             patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True):
+            self.assertIs(clinical_mutations_module.UpdateStepPlan.mutate(None, info, "1", objective="goal").step, step)
+            self.assertTrue(clinical_mutations_module.DeleteStepPlan.mutate(None, info, "1").success)
+        report = SimpleNamespace(patient_id=1, delete=MagicMock())
+        with patch.object(clinical_mutations_module.TherapyReport.objects, "get", return_value=report), \
+             patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True):
+            self.assertTrue(clinical_mutations_module.DeleteTherapyReport.mutate(None, info, "1").success)
     def test_pipeline_dataset_endpoints_and_authorization_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1)
         now = SimpleNamespace(isoformat=lambda: "now")
