@@ -63,10 +63,50 @@ from session_manifest import validate_session_manifest
 from validate_multimodal_artifacts import validate_multimodal_artifacts
 import session_manifest as session_manifest_module
 import validate_multimodal_artifacts as artifact_validation_module
+import window_index as window_index_module
 from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_window_index_validation_helpers_cover_invalid_cases(self):
+        with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([], "audio")
+        with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([1, 1], "audio")
+        with self.assertRaises(ValueError): window_index_module._validate_feature_series({"x": [1]}, "audio", 2)
+        with self.assertRaises(ValueError): window_index_module._validate_feature_series({"x": [True]}, "audio", 1)
+        with self.assertRaises(ValueError): window_index_module._feature_range([0, 2], 1, 2, "x")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "processed" / "segments").mkdir(parents=True)
+            (root / "processed" / "segments" / "v.mp4").write_bytes(b"v")
+            self.assertEqual(window_index_module._safe_segment_path(root, "v.mp4", "video"), "processed/segments/v.mp4")
+            for value in (None, "../bad", "missing.mp4"):
+                with self.assertRaises(ValueError): window_index_module._safe_segment_path(root, value, "video")
+            with self.assertRaises(ValueError): window_index_module._validate_segment_entry({}, 0, 0, 5, .1)
+            valid = {"index": 0, "start_seconds": 0, "end_seconds": 5, "duration_seconds": 5, "sync_drift_seconds": 0}
+            self.assertEqual(window_index_module._validate_segment_entry(valid, 0, 0, 5, .1)[:2], (0.0, 5.0))
+            self.assertEqual(window_index_module._validate_segment_references(root, {}, 0), ["segment_reference_missing:0:video_path", "segment_reference_missing:0:audio_path"])
+            self.assertEqual(window_index_module._validate_feature_range(root, None, "audio", 0, 0, 1), ["feature_range_missing:0:audio"])
+            self.assertEqual(window_index_module._validate_source_artifacts(root, None), ["source_artifacts_missing"])
+            self.assertEqual(window_index_module._validate_window_entry(root, None, 0, "S1", 0, 5)[0], ["invalid_window:0"])
+
+    def test_session_manifest_helper_matrix_and_loader(self):
+        self.assertTrue(session_manifest_module._is_finite_number(1.5))
+        self.assertFalse(session_manifest_module._is_finite_number(True))
+        errors = []
+        session_manifest_module._resolve_source_path("../bad", Path("/tmp/S1"), "video", errors, False)
+        self.assertTrue(errors)
+        errors = []
+        session_manifest_module._validate_participant({}, "participants[0]", set(), errors)
+        self.assertTrue(errors)
+        errors = []
+        session_manifest_module._validate_fragment_schema({}, "fragments[0]", errors)
+        self.assertTrue(errors)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "S1"
+            root.mkdir()
+            manifest = root / "session_manifest.json"
+            manifest.write_text(json.dumps({}))
+            self.assertFalse(session_manifest_module.load_and_validate_session_manifest(manifest, check_files=False)["valid"])
     def test_laravel_command_connection_queries_and_import_matrix(self):
         command = laravel_command_module.Command()
         parser = MagicMock()
