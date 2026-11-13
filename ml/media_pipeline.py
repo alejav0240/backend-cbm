@@ -166,6 +166,40 @@ def _process_movement_stage(session_dir, pose_result, window_index, overwrite):
     return payload, movement_path, "executed"
 
 
+def _artifact_record(session_dir, path, **extra):
+    return {"path": str(path.relative_to(session_dir)), "sha256": sha256_feature_file(path), **extra}
+
+
+def _build_pipeline_summary(session_dir, session_id, extraction, segments, window_seconds, max_tail_trim_seconds, skip_pose, pose_result, pose_path, audio_payload, vocalization_payload, audio_path, vocalization_path, movement_payload, movement_path, movement_status, demuca_estimates, demuca_path, multimodal_path):
+    return {
+        "schema_version": "1.0", "session_id": session_id, "status": "completed",
+        "extraction_stages": extraction, "segments_created": len(segments["segments"]),
+        "window_seconds": window_seconds, "effective_duration_seconds": segments["effective_duration_seconds"],
+        "max_segment_drift_seconds": segments["max_segment_drift_seconds"], "source_drift_seconds": segments["source_drift_seconds"],
+        "trimmed_stream": segments["trimmed_stream"], "tail_trim_seconds": segments["tail_trim_seconds"],
+        "max_tail_trim_seconds": max_tail_trim_seconds, "pose_enabled": not skip_pose,
+        "pose_frames_processed": pose_result["frames_processed"] if pose_result else 0,
+        "acoustic_windows": len(audio_payload["windows"]), "vocalization_candidates": vocalization_payload["candidate_count"],
+        "acoustic_features_path": str(audio_path.relative_to(session_dir)),
+        "vocalization_candidates_path": str(vocalization_path.relative_to(session_dir)),
+        "movement_interaction_status": movement_status,
+        "movement_interaction_path": str(movement_path.relative_to(session_dir)) if movement_status != "skipped_pose_not_available" else None,
+        "demuca_estimates": len(demuca_estimates["estimates"]) if demuca_estimates else 0,
+        "demuca_estimates_path": str(demuca_path.relative_to(session_dir)) if demuca_estimates else None,
+        "derived_artifacts": {
+            "stable_window_index": {"path": "processed/windows/WINDOWS_FILENAME", "sha256": sha256_feature_file(session_dir / "processed" / "windows" / WINDOWS_FILENAME)},
+            "pose_landmarks": _artifact_record(session_dir, pose_path, training_authorized=False) if pose_result else None,
+            "acoustic_features": _artifact_record(session_dir, audio_path, training_authorized=False),
+            "vocalization_candidates": _artifact_record(session_dir, vocalization_path, training_authorized=False),
+            "movement_interaction": _artifact_record(session_dir, movement_path, training_authorized=False) if movement_payload else None,
+            "demuca_estimates": _artifact_record(session_dir, demuca_path, training_authorized=False, calibration_status="not_calibrated") if demuca_estimates else None,
+            "multimodal_manifest": _artifact_record(session_dir, multimodal_path),
+        },
+        "multimodal_manifest": str(multimodal_path.relative_to(session_dir)),
+        "multimodal_manifest_sha256": sha256_feature_file(multimodal_path),
+    }
+
+
 def process_session(
     session_id: str,
     project_root: Path,
@@ -241,86 +275,13 @@ def process_session(
         encoding="utf-8",
     )
 
-    summary = {
-        "schema_version": "1.0",
-        "session_id": session_id,
-        "status": "completed",
-        "extraction_stages": extraction,
-        "segments_created": len(segments["segments"]),
-        "window_seconds": window_seconds,
-        "effective_duration_seconds": segments["effective_duration_seconds"],
-        "max_segment_drift_seconds": segments["max_segment_drift_seconds"],
-        "source_drift_seconds": segments["source_drift_seconds"],
-        "trimmed_stream": segments["trimmed_stream"],
-        "tail_trim_seconds": segments["tail_trim_seconds"],
-        "max_tail_trim_seconds": max_tail_trim_seconds,
-        "pose_enabled": not skip_pose,
-        "pose_frames_processed": pose_result["frames_processed"] if pose_result else 0,
-        "acoustic_windows": len(audio_feature_payload["windows"]),
-        "vocalization_candidates": vocalization_payload["candidate_count"],
-        "acoustic_features_path": str(audio_feature_path.relative_to(session_dir)),
-        "vocalization_candidates_path": str(vocalization_path.relative_to(session_dir)),
-        "movement_interaction_status": movement_status,
-        "movement_interaction_path": (
-            str(movement_path.relative_to(session_dir)) if movement_status != "skipped_pose_not_available" else None
-        ),
-        "demuca_estimates": len(demuca_estimates["estimates"]) if demuca_estimates else 0,
-        "demuca_estimates_path": (
-            str(demuca_estimates_path.relative_to(session_dir)) if demuca_estimates else None
-        ),
-        "derived_artifacts": {
-            "stable_window_index": {
-                "path": "processed/windows/WINDOWS_FILENAME",
-                "sha256": sha256_feature_file(
-                    session_dir / "processed" / "windows" / WINDOWS_FILENAME
-                ),
-            },
-            "pose_landmarks": (
-                {
-                    "path": str(pose_path.relative_to(session_dir)),
-                    "sha256": sha256_feature_file(pose_path),
-                    "training_authorized": False,
-                }
-                if pose_result is not None
-                else None
-            ),
-            "acoustic_features": {
-                "path": str(audio_feature_path.relative_to(session_dir)),
-                "sha256": sha256_feature_file(audio_feature_path),
-                "training_authorized": False,
-            },
-            "vocalization_candidates": {
-                "path": str(vocalization_path.relative_to(session_dir)),
-                "sha256": sha256_feature_file(vocalization_path),
-                "training_authorized": False,
-            },
-            "movement_interaction": (
-                {
-                    "path": str(movement_path.relative_to(session_dir)),
-                    "sha256": sha256_feature_file(movement_path),
-                    "training_authorized": False,
-                }
-                if movement_payload is not None
-                else None
-            ),
-            "demuca_estimates": (
-                {
-                    "path": str(demuca_estimates_path.relative_to(session_dir)),
-                    "sha256": sha256_feature_file(demuca_estimates_path),
-                    "training_authorized": False,
-                    "calibration_status": "not_calibrated",
-                }
-                if demuca_estimates is not None
-                else None
-            ),
-            "multimodal_manifest": {
-                "path": str(multimodal_manifest_path.relative_to(session_dir)),
-                "sha256": sha256_feature_file(multimodal_manifest_path),
-            },
-        },
-        "multimodal_manifest": str(multimodal_manifest_path.relative_to(session_dir)),
-        "multimodal_manifest_sha256": sha256_feature_file(multimodal_manifest_path),
-    }
+    summary = _build_pipeline_summary(
+        session_dir, session_id, extraction, segments, window_seconds,
+        max_tail_trim_seconds, skip_pose, pose_result, pose_path,
+        audio_feature_payload, vocalization_payload, audio_feature_path,
+        vocalization_path, movement_payload, movement_path, movement_status,
+        demuca_estimates, demuca_estimates_path, multimodal_manifest_path,
+    )
     summary_path = session_dir / "processed" / "segments" / "media_pipeline_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     artifact_issues = validate_multimodal_artifacts(session_dir)

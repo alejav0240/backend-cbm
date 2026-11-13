@@ -555,47 +555,15 @@ def synchronize_pose_with_segments(
         vocalization_payload.get("candidates", []) if vocalization_payload else []
     )
     movement_windows = movement_payload.get("windows", []) if movement_payload else []
-    synchronized_segments = []
-    for segment in segment_manifest.get("segments", []):
-        start = float(segment["start_seconds"])
-        end = float(segment["end_seconds"])
-        pose_indices = [
-            index
-            for index, frame in enumerate(pose_frames)
-            if start <= float(frame["timestamp_seconds"]) < end
-        ]
-        acoustic_indices = [
-            index
-            for index, window in enumerate(acoustic_windows)
-            if start <= float(window["timestamp_seconds"]) < end
-        ]
-        vocalization_indices = [
-            index
-            for index, candidate in enumerate(vocalization_candidates)
-            if float(candidate["start_seconds"]) < end
-            and float(candidate["end_seconds"]) > start
-        ]
-        expected_window_id = f"{segment_manifest['session_id']}_W{int(segment['index']):04d}"
-        movement_indices = [
-            index
-            for index, window in enumerate(movement_windows)
-            if window.get("window_id") == expected_window_id
-        ]
-        if len(movement_indices) > 1:
-            raise ValueError(f"duplicate_movement_window:{expected_window_id}")
-        synchronized_segments.append({
-            **segment,
-            "pose_features_path": pose_features_path if pose_payload else None,
-            "pose_frame_indices": pose_indices,
-            "acoustic_features_path": acoustic_features_path if acoustic_payload else None,
-            "acoustic_window_indices": acoustic_indices,
-            "vocalization_features_path": (
-                vocalization_features_path if vocalization_payload else None
-            ),
-            "vocalization_candidate_indices": vocalization_indices,
-            "movement_features_path": movement_features_path if movement_payload else None,
-            "movement_window_index": movement_indices[0] if movement_indices else None,
-        })
+    synchronized_segments = [
+        _synchronize_segment(
+            segment, segment_manifest["session_id"], pose_frames, acoustic_windows,
+            vocalization_candidates, movement_windows, pose_features_path,
+            acoustic_features_path, vocalization_features_path, movement_features_path,
+            bool(pose_payload), bool(acoustic_payload), bool(vocalization_payload), bool(movement_payload),
+        )
+        for segment in segment_manifest.get("segments", [])
+    ]
     return {
         "schema_version": "1.0",
         "session_id": segment_manifest["session_id"],
@@ -613,4 +581,24 @@ def synchronize_pose_with_segments(
         ),
         "movement_features_path": movement_features_path if movement_payload else None,
         "segments": synchronized_segments,
+    }
+
+
+def _synchronize_segment(segment, session_id, pose_frames, acoustic_windows, vocalization_candidates, movement_windows, pose_path, acoustic_path, vocalization_path, movement_path, has_pose, has_acoustic, has_vocalization, has_movement):
+    start, end = float(segment["start_seconds"]), float(segment["end_seconds"])
+    pose_indices = [i for i, frame in enumerate(pose_frames) if start <= float(frame["timestamp_seconds"]) < end]
+    acoustic_indices = [i for i, window in enumerate(acoustic_windows) if start <= float(window["timestamp_seconds"]) < end]
+    vocalization_indices = [i for i, candidate in enumerate(vocalization_candidates) if float(candidate["start_seconds"]) < end and float(candidate["end_seconds"]) > start]
+    expected_id = f"{session_id}_W{int(segment['index']):04d}"
+    movement_indices = [i for i, window in enumerate(movement_windows) if window.get("window_id") == expected_id]
+    if len(movement_indices) > 1:
+        raise ValueError(f"duplicate_movement_window:{expected_id}")
+    return {
+        **segment,
+        "pose_features_path": pose_path if has_pose else None, "pose_frame_indices": pose_indices,
+        "acoustic_features_path": acoustic_path if has_acoustic else None, "acoustic_window_indices": acoustic_indices,
+        "vocalization_features_path": vocalization_path if has_vocalization else None,
+        "vocalization_candidate_indices": vocalization_indices,
+        "movement_features_path": movement_path if has_movement else None,
+        "movement_window_index": movement_indices[0] if movement_indices else None,
     }
