@@ -18,6 +18,7 @@ from config.application_encryption import (
     _b64encode,
     decrypt_envelope,
     encrypt_payload,
+    key_id,
     private_key,
 )
 from config.encryption_middleware import ApplicationEncryptionMiddleware
@@ -66,7 +67,7 @@ class ApplicationEncryptionTests(SimpleTestCase):
         return {
             "v": 1,
             "alg": "RSA-OAEP-256+A256GCM",
-            "kid": "app-key-v1",
+            "kid": key_id(),
             "iv": _b64encode(iv),
             "ek": _b64encode(wrapped_key),
             "ct": _b64encode(ciphertext),
