@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "ml"))
 from demuca_estimates import build_demuca_estimates, write_demuca_estimates
 import media
 import media_pipeline as media_pipeline_module
+import config.management.commands.importar_laravel as laravel_command_module
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
 from media import synchronize_pose_with_segments
@@ -540,6 +541,111 @@ class MlFeatureTests(TestCase):
         self.assertEqual(importer.stats["sessions"], 0)
         self.assertTrue(any("insuficientes" in message for message in messages))
         self.assertTrue(any("payment no encontrado" in message for message in messages))
+
+    def test_laravel_command_parses_remote_rows_and_safe_tables(self):
+        command = laravel_command_module.Command()
+        self.assertEqual(command._remote_columns("usuarios")[0], "id")
+        with self.assertRaisesRegex(Exception, "Tabla no permitida"):
+            command._remote_columns("drop_table")
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"id": 1, "nombre": "Ana"}]
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        rows = command._query_remote_mysql(connection, "usuarios", ["id", "nombre"])
+        self.assertEqual(rows[0][0], "1")
+        cursor.execute.assert_called_once()
+
+        process = SimpleNamespace(returncode=0, stdout="1\tAna\n", stderr="")
+        with patch.object(laravel_command_module.subprocess, "run", return_value=process):
+            ssh_rows = command._query_remote_ssh(
+                {"user": "u", "password": "p", "database": "d", "host": "h"},
+                "usuarios", ["id", "nombre"],
+            )
+        self.assertEqual(ssh_rows, [["1", "Ana"]])
+        with patch.object(laravel_command_module.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
+            with self.assertRaisesRegex(Exception, "SSH/mysql remoto falló"):
+                command._query_remote_ssh({"user": "u", "password": "p", "database": "d", "host": "h"}, "usuarios", ["id"])
+
+    def test_laravel_command_imports_users_patients_payments_and_sessions(self):
+        command = laravel_command_module.Command()
+        fake_user = MagicMock(id=7)
+        fake_patient = MagicMock(id=8, diagnosis="", residence="", notes="")
+        fake_payment = MagicMock(patient=fake_patient)
+        user_model = MagicMock()
+        user_model.objects.update_or_create.return_value = (fake_user, True)
+        patient_model = MagicMock()
+        patient_model.objects.update_or_create.return_value = (fake_patient, True)
+        payment_model = MagicMock()
+        payment_model.objects.create.return_value = fake_payment
+        payment_model.PaymentStatus = SimpleNamespace(COMPLETED="completed", PENDING="pending", PARTIAL="partial")
+        payment_model.PaymentMethod = SimpleNamespace(QR="qr", CASH="cash")
+        session_model = MagicMock()
+        session_model.objects.create.return_value = MagicMock()
+        session_model.SessionType = SimpleNamespace(INDIVIDUAL="individual")
+        session_model.SessionStatus = SimpleNamespace(AGENDADA="agendada", COMPLETADA="completada", CONFIRMADA="confirma", REPROGRAMA="reprograma", CANCELADA="cancelada")
+        session_model.PaymentStatus = SimpleNamespace(PAID="paid", EXEMPT="exempt", PENDING="pending")
+        with patch.object(laravel_command_module, "User", user_model), \
+             patch.object(laravel_command_module, "Patient", patient_model), \
+             patch.object(laravel_command_module, "Payment", payment_model), \
+             patch.object(laravel_command_module, "Session", session_model):
+            users = command._import_users([["1", "Ana", "Lopez", "", "", "123", "", "CI", "", "activo", "", "", "", "visible", "", ""]])
+            patients, info = command._import_patients_and_info([], [], users, fake_user)
+            payments = command._import_payments(
+                [["10", "20", "100", "", "100", "", "", "", "", "", ""]],
+                {20: {"patient": fake_patient}}, {10: "proof.pdf"}, {10: 2},
+            )
+            command._import_sessions(
+                [["1", "10", "1", "1", "REALIZADO", "2026-01-01", "PAGADO", "ERI", "CIM", "", "", "", ""]],
+                payments, fake_user,
+            )
+        self.assertIn("ana lopez", users)
+        self.assertIn(10, payments)
+        payment_model.objects.create.assert_called_once()
+        session_model.objects.create.assert_called_once()
+
+    def test_laravel_command_helpers_cover_notes_proofs_and_cycles(self):
+        command = laravel_command_module.Command()
+        self.assertEqual(command._extract_payment_proofs([["", "3", "", "", "", "proof", "", "", "", ""]]), {3: "proof"})
+        self.assertEqual(command._count_cycles_by_payment([["", "3"] * 7 + ["", "", "", "", "", ""]]), {3: 1})
+        with patch.object(laravel_command_module, "Patient", SimpleNamespace(Status=SimpleNamespace(ACTIVE="active", PENDING="pending"))):
+            self.assertEqual(command._map_patient_status("activo"), "active")
+            self.assertEqual(command._map_patient_status("otro"), "pending")
+        note = MagicMock(content="old")
+        with patch.object(laravel_command_module.PatientClinicalNote.objects, "get_or_create", return_value=(note, False)):
+            command._upsert_clinical_note(MagicMock(), MagicMock(), "GENERAL", "new")
+        note.save.assert_called_once()
+        self.assertEqual(command._split_name("Ana María López"), ("Ana", "María López"))
+
+    def test_laravel_command_runs_dry_etl_and_connection_lifecycle(self):
+        command = laravel_command_module.Command()
+        datasets = {name: [] for name in (
+            "usuarios", "clientes", "infoclientes", "pagos", "archivospagos", "ciclos",
+            "plandeintervencions", "subplandeintervencions", "matrizescalas", "submatrizescalas", "demucas",
+        )}
+        therapist = SimpleNamespace(id=1)
+        with patch.object(command, "_truncate_imported_data"), \
+             patch.object(command, "_ensure_default_therapist", return_value=therapist), \
+             patch.object(command, "_import_users", return_value={}), \
+             patch.object(command, "_import_patients_and_info", return_value=({}, {})), \
+             patch.object(command, "_extract_payment_proofs", return_value={}), \
+             patch.object(command, "_count_cycles_by_payment", return_value={}), \
+             patch.object(command, "_import_payments", return_value={}), \
+             patch.object(command, "_import_sessions"), \
+             patch.object(command, "_import_intervention_plans"), \
+             patch.object(command, "_import_scales_and_evaluations"), \
+             patch.object(laravel_command_module.transaction, "atomic") as atomic, \
+             patch.object(laravel_command_module.transaction, "set_rollback") as rollback:
+            atomic.return_value.__enter__.return_value = None
+            command._run_legacy_etl(datasets, {"dry_run": True, "truncate": True})
+        rollback.assert_called_once_with(True)
+
+        connection = MagicMock()
+        with patch.object(command, "_open_legacy_connection", return_value=(connection, None)), \
+             patch.object(command, "_fetch_legacy_datasets", return_value=datasets) as fetch, \
+             patch.object(command, "_close_legacy_resources") as close:
+            self.assertEqual(command._load_legacy_datasets({"host": "h", "user": "u", "password": "p", "database": "d", "port": 3306}), datasets)
+        fetch.assert_called_once_with(connection)
+        close.assert_called_once_with(connection, None)
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
