@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -166,11 +167,53 @@ def _process_movement_stage(session_dir, pose_result, window_index, overwrite):
     return payload, movement_path, "executed"
 
 
+@dataclass(frozen=True)
+class _PipelineSummaryContext:
+    session_dir: Path
+    session_id: str
+    extraction: dict[str, Any]
+    segments: dict[str, Any]
+    window_seconds: float
+    max_tail_trim_seconds: float
+    skip_pose: bool
+    pose_result: dict[str, Any] | None
+    pose_path: Path
+    audio_payload: dict[str, Any]
+    vocalization_payload: dict[str, Any]
+    audio_path: Path
+    vocalization_path: Path
+    movement_payload: dict[str, Any] | None
+    movement_path: Path
+    movement_status: str
+    demuca_estimates: dict[str, Any] | None
+    demuca_path: Path
+    multimodal_path: Path
+
+
 def _artifact_record(session_dir, path, **extra):
     return {"path": str(path.relative_to(session_dir)), "sha256": sha256_feature_file(path), **extra}
 
 
-def _build_pipeline_summary(session_dir, session_id, extraction, segments, window_seconds, max_tail_trim_seconds, skip_pose, pose_result, pose_path, audio_payload, vocalization_payload, audio_path, vocalization_path, movement_payload, movement_path, movement_status, demuca_estimates, demuca_path, multimodal_path):
+def _build_pipeline_summary(context: _PipelineSummaryContext):
+    session_dir = context.session_dir
+    session_id = context.session_id
+    extraction = context.extraction
+    segments = context.segments
+    window_seconds = context.window_seconds
+    max_tail_trim_seconds = context.max_tail_trim_seconds
+    skip_pose = context.skip_pose
+    pose_result = context.pose_result
+    pose_path = context.pose_path
+    audio_payload = context.audio_payload
+    vocalization_payload = context.vocalization_payload
+    audio_path = context.audio_path
+    vocalization_path = context.vocalization_path
+    movement_payload = context.movement_payload
+    movement_path = context.movement_path
+    movement_status = context.movement_status
+    demuca_estimates = context.demuca_estimates
+    demuca_path = context.demuca_path
+    multimodal_path = context.multimodal_path
     return {
         "schema_version": "1.0", "session_id": session_id, "status": "completed",
         "extraction_stages": extraction, "segments_created": len(segments["segments"]),
@@ -275,13 +318,27 @@ def process_session(
         encoding="utf-8",
     )
 
-    summary = _build_pipeline_summary(
-        session_dir, session_id, extraction, segments, window_seconds,
-        max_tail_trim_seconds, skip_pose, pose_result, pose_path,
-        audio_feature_payload, vocalization_payload, audio_feature_path,
-        vocalization_path, movement_payload, movement_path, movement_status,
-        demuca_estimates, demuca_estimates_path, multimodal_manifest_path,
-    )
+    summary = _build_pipeline_summary(_PipelineSummaryContext(
+        session_dir=session_dir,
+        session_id=session_id,
+        extraction=extraction,
+        segments=segments,
+        window_seconds=window_seconds,
+        max_tail_trim_seconds=max_tail_trim_seconds,
+        skip_pose=skip_pose,
+        pose_result=pose_result,
+        pose_path=pose_path,
+        audio_payload=audio_feature_payload,
+        vocalization_payload=vocalization_payload,
+        audio_path=audio_feature_path,
+        vocalization_path=vocalization_path,
+        movement_payload=movement_payload,
+        movement_path=movement_path,
+        movement_status=movement_status,
+        demuca_estimates=demuca_estimates,
+        demuca_path=demuca_estimates_path,
+        multimodal_path=multimodal_manifest_path,
+    ))
     summary_path = session_dir / "processed" / "segments" / "media_pipeline_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     artifact_issues = validate_multimodal_artifacts(session_dir)
