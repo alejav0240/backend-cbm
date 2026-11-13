@@ -100,6 +100,55 @@ class MlFeatureTests(TestCase):
         importer.import_scales_and_evaluations([["1", "audio", "Piano"]], [["1", "1", "Eval", "Sub", "", "2", "2026-01-01", "Cat"]], {1: {"patient": SimpleNamespace()}}, SimpleNamespace())
         self.assertEqual(importer.stats["resources"], 1)
 
+    def test_scale_importer_persistence_and_matching_branches(self):
+        logger = MagicMock()
+        importer = scale_importer_module.ScaleImporter(logger=logger)
+        existing_scale = SimpleNamespace(id=2)
+        existing_subscale = SimpleNamespace(id=3, scale_id=2, name="Piano Forte")
+        with patch.object(scale_importer_module.Subscale.objects, "all", return_value=[existing_subscale]):
+            self.assertEqual(importer._load_subscale_cache(), {(2, "piano forte"): existing_subscale})
+
+        importer._subscale_cache = {(2, "piano forte"): existing_subscale}
+        self.assertIs(importer._find_subscale(existing_scale, "Piano Forte"), existing_subscale)
+        self.assertIs(importer._find_subscale(existing_scale, "piano"), existing_subscale)
+        created_subscale = SimpleNamespace(id=4)
+        with patch.object(scale_importer_module.Subscale.objects, "get_or_create", return_value=(created_subscale, True)):
+            self.assertIs(importer._find_subscale(existing_scale, "New").id, 4)
+        scale_one = SimpleNamespace(id=1)
+        self.assertIsNone(importer._find_subscale(scale_one, "Unknown"))
+        persisted_scale = SimpleNamespace(id=5)
+        with patch.object(scale_importer_module.Scale.objects, "get_or_create", return_value=(persisted_scale, False)):
+            self.assertIs(importer._get_or_create_dynamic_scale("Dynamic"), persisted_scale)
+
+        with patch.object(scale_importer_module.DigitalResource.objects, "get_or_create", side_effect=[(SimpleNamespace(), True), (SimpleNamespace(), False)]) as resource_create:
+            importer._process_resource_row(["1", "Music", " Song "])
+            importer._process_resource_row(["2", "Music", "Song"])
+            importer._process_resource_row(["3", "Music", ""])
+            self.assertEqual(resource_create.call_count, 2)
+            self.assertEqual(importer.stats["resources"], 1)
+
+        evaluation = SimpleNamespace(pk=8)
+        eval_cache = {}
+        demuca_row = ["1", "7", "Assessment", "Piano", "", "2", "2026-01-01", "Music", "2026-01-01 10:00:00"]
+        info_map = {7: {"patient": SimpleNamespace(id=9)}}
+        with patch.object(scale_importer_module.ScaleEvaluation.objects, "create", return_value=evaluation) as eval_create, \
+             patch.object(scale_importer_module.ScaleEvaluation.objects, "filter", return_value=MagicMock()) as eval_filter, \
+             patch.object(scale_importer_module.ScaleEvaluationSubscaleResponse.objects, "update_or_create") as response_upsert:
+            importer._subscale_cache = {(2, "piano"): existing_subscale}
+            importer._process_demuca_row(demuca_row, info_map, SimpleNamespace(), existing_scale, eval_cache)
+            importer._process_demuca_row(demuca_row, info_map, SimpleNamespace(), existing_scale, eval_cache)
+            self.assertEqual(eval_create.call_count, 1)
+            self.assertEqual(eval_filter.call_count, 1)
+            self.assertEqual(response_upsert.call_count, 2)
+            self.assertEqual(importer.stats["responses"], 2)
+
+        importer._process_demuca_row(demuca_row, {}, SimpleNamespace(), existing_scale, {})
+        importer._process_demuca_row(demuca_row, info_map, SimpleNamespace(), scale_one, {})
+        with patch.object(importer, "_process_demuca_row", side_effect=RuntimeError("bad")), \
+             patch.object(scale_importer_module.Scale.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=existing_scale))):
+            importer.import_scales_and_evaluations([["short"]], [["short"] , demuca_row], info_map, SimpleNamespace())
+            logger.assert_any_call("❌ Error procesando DEMUCA en fila 2: bad")
+
     def test_create_window_index_writer_and_cli_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             session = Path(temporary) / "S1"
