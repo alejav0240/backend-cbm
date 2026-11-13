@@ -1,10 +1,11 @@
 import json
 import sys
 import tempfile
+import types
 from types import SimpleNamespace
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import soundfile as sf
@@ -25,6 +26,10 @@ from pipeline_graph import write_pipeline_graph
 import pose as pose_module
 from pose import frame_timestamp_seconds, load_pose_landmarks
 from tracking import flatten_metrics
+from users.management.commands.importers.base_importer import BaseImporter
+import users.management.commands.importers.session_importer as session_importer_module
+from users.management.commands.importers.session_importer import SessionImporter
+from users.management.commands.importers.user_importer import UserImporter
 from session_manifest import validate_session_manifest
 from validate_multimodal_artifacts import validate_multimodal_artifacts
 from window_index import build_window_index, validate_window_index
@@ -230,6 +235,92 @@ class MlFeatureTests(TestCase):
                     target, {"windows": []}, source_audio_sha256="new", overwrite=False,
                 )
 
+    def test_media_pipeline_stage_guards_and_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            windows = session / "processed" / "windows"
+            windows.mkdir(parents=True)
+            index_path = windows / "windows.json"
+            index_payload = {"windows": [{"index": 0}]}
+            index_path.write_text(json.dumps(index_payload))
+            with patch.object(media_pipeline_module, "validate_window_index", return_value=[]):
+                self.assertEqual(media_pipeline_module.load_or_create_window_index(session, overwrite=False), index_payload)
+            with patch.object(media_pipeline_module, "validate_window_index", return_value=["bad"]):
+                with self.assertRaisesRegex(ValueError, "window_index_validation_failed"):
+                    media_pipeline_module.load_or_create_window_index(session, overwrite=False)
+
+            with self.assertRaisesRegex(ValueError, "provide --pose-model"):
+                media_pipeline_module._process_pose_stage(session, "S1", None, False, False)
+            pose, pose_path = media_pipeline_module._process_pose_stage(session, "S1", None, True, False)
+            self.assertIsNone(pose)
+            self.assertEqual(pose_path.name, "pose_landmarks.json")
+
+            audio_dir = session / "processed" / "audio"
+            audio_dir.mkdir(parents=True)
+            (audio_dir / "S1_16khz_mono.wav").write_bytes(b"audio")
+            with patch.object(media_pipeline_module, "extract_audio_modalities", return_value=({"windows": []}, {"candidate_count": 0})), \
+                 patch.object(media_pipeline_module, "sha256_audio_file", return_value="hash"), \
+                 patch.object(media_pipeline_module, "persist_or_reuse_audio_artifact", side_effect=lambda path, payload, **kwargs: payload):
+                audio, vocal, audio_path, vocal_path = media_pipeline_module._process_audio_stage(
+                    session, "S1", {"windows": []}, 1, False
+                )
+            self.assertEqual(audio, {"windows": []})
+            self.assertEqual(vocal["candidate_count"], 0)
+            self.assertEqual(audio_path.name, "acoustic_features.json")
+
+            movement_path = session / "processed" / "features" / "movement_interaction.json"
+            self.assertEqual(
+                media_pipeline_module._process_movement_stage(session, None, index_payload, False)[2],
+                "skipped_pose_not_available",
+            )
+            missing_session = Path(temporary) / "missing"
+            with self.assertRaises(FileNotFoundError):
+                media_pipeline_module._process_movement_stage(missing_session, {"source_frames_sha256": "x"}, index_payload, False)
+            movement_path.parent.mkdir(parents=True, exist_ok=True)
+            movement_path.write_text(json.dumps({"pose_source_sha256": "x", "window_index_sha256": media_pipeline_module.sha256_feature_file(index_path)}))
+            reused = media_pipeline_module._process_movement_stage(session, {"source_frames_sha256": "x"}, index_payload, False)
+            self.assertEqual(reused[2], "reused")
+
+    def test_media_pipeline_executes_pose_movement_and_stale_checks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            frames = session / "processed" / "frames"
+            features = session / "processed" / "features"
+            windows = session / "processed" / "windows"
+            for directory in (frames, features, windows):
+                directory.mkdir(parents=True)
+            pose_path = features / "pose_landmarks.json"
+            pose_path.write_text("{}")
+            with patch.object(media_pipeline_module, "load_pose_landmarks", return_value={"frames_processed": 1}) as loader:
+                result, path = media_pipeline_module._process_pose_stage(session, "S1", Path("pose.task"), False, False)
+            self.assertEqual(result["frames_processed"], 1)
+            loader.assert_called_once()
+
+            pose_path.unlink()
+            with patch.object(media_pipeline_module, "extract_pose_landmarks", return_value={"frames_processed": 2}) as extractor:
+                result, _ = media_pipeline_module._process_pose_stage(session, "S1", Path("pose.task"), False, True)
+            self.assertEqual(result["frames_processed"], 2)
+            extractor.assert_called_once()
+
+            index_path = windows / "windows.json"
+            index_path.write_text(json.dumps({"windows": []}))
+            pose_result = {"frames": [], "source_frames_sha256": "pose"}
+            with patch.object(media_pipeline_module, "build_movement_interaction_features", return_value={"frames": []}) as builder:
+                payload, path, status = media_pipeline_module._process_movement_stage(session, pose_result, {"windows": []}, True)
+            self.assertEqual(status, "executed")
+            self.assertEqual(payload, {"frames": []})
+            builder.assert_called_once()
+
+            self.assertTrue(media_pipeline_module._audio_artifact_is_stale(
+                {"source_audio_sha256": "old"}, {}, "new", None, None,
+            ))
+            self.assertTrue(media_pipeline_module._audio_artifact_is_stale(
+                {"source_audio_sha256": "new", "window_seconds": "bad"}, {}, "new", 1, None,
+            ))
+            self.assertTrue(media_pipeline_module._audio_artifact_is_stale(
+                {"source_audio_sha256": "new", "windows": []}, {"candidates": []}, "new", None, 1,
+            ))
+
     def test_window_writer_and_pipeline_graph_create_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             session = Path(temporary) / "S1"
@@ -291,6 +382,54 @@ class MlFeatureTests(TestCase):
         self.assertIsNone(record)
         self.assertEqual(timestamp, 10)
 
+    def test_pose_extraction_writes_payload_and_loads_matching_artifact(self):
+        point = SimpleNamespace(x=0.1, y=0.2, z=0.3, visibility=0.9, presence=0.8)
+        detection = SimpleNamespace(pose_landmarks=[[point]], pose_world_landmarks=[])
+
+        class FakeLandmarker:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def detect_for_video(self, image, timestamp):
+                return detection
+
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.COLOR_BGR2RGB = 1
+        fake_cv2.imread = lambda _: object()
+        fake_cv2.cvtColor = lambda image, _: image
+        fake_mp = types.ModuleType("mediapipe")
+        fake_mp.ImageFormat = SimpleNamespace(SRGB="SRGB")
+        fake_mp.Image = lambda **kwargs: kwargs
+        fake_mp.tasks = SimpleNamespace(
+            BaseOptions=lambda **kwargs: kwargs,
+            vision=SimpleNamespace(
+                RunningMode=SimpleNamespace(VIDEO="VIDEO"),
+                PoseLandmarkerOptions=lambda **kwargs: kwargs,
+                PoseLandmarker=SimpleNamespace(create_from_options=lambda options: FakeLandmarker()),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            frames = root / "frames"
+            frames.mkdir()
+            (frames / "S1_0001.jpg").write_bytes(b"one")
+            (frames / "S1_0002.jpg").write_bytes(b"two")
+            model = root / "pose.task"
+            model.write_bytes(b"model")
+            output = root / "features" / "pose.json"
+            with patch.dict(sys.modules, {"cv2": fake_cv2, "mediapipe": fake_mp}):
+                payload = pose_module.extract_pose_landmarks(frames, "S1", model, output)
+            self.assertEqual(payload["frames_processed"], 2)
+            self.assertEqual(payload["frames"][0]["poses"][0]["world_landmarks"], [])
+            self.assertEqual(pose_module.load_pose_landmarks(frames, "S1", model, output), payload)
+            payload["num_poses"] = 2
+            output.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "configuration_mismatch"):
+                pose_module.load_pose_landmarks(frames, "S1", model, output, num_poses=4)
+
     def test_tracking_flattens_only_finite_report_metrics(self):
         result = flatten_metrics({
             "validation": {"micro_f1": 0.8, "exact_match_accuracy": float("nan"),
@@ -302,6 +441,105 @@ class MlFeatureTests(TestCase):
             "validation_micro_f1": 0.8, "validation_MOVIMIENTO_f1": 0.7,
             "test_split_micro_f1": 0.6, "test_split_AUDIO_f1": 0.5,
         })
+
+    def test_importer_base_normalizes_legacy_values(self):
+        importer = BaseImporter()
+        self.assertEqual(importer._clean_text(" <p>Hola&nbsp;</p><br> mundo "), "Hola\nmundo")
+        self.assertEqual(importer._clean_text("null"), "")
+        self.assertEqual(importer._to_int("12.8"), 12)
+        self.assertEqual(importer._to_int("bad", 7), 7)
+        self.assertEqual(str(importer._to_decimal("12,50")), "12.50")
+        self.assertIsNone(importer._to_date("2026-99-99"))
+        self.assertIsNotNone(importer._to_date("31/12/2026"))
+        self.assertIsNotNone(importer._to_datetime("2026-01-02 03:04:05"))
+        self.assertEqual(importer._limit_text("abcdef", 3), "abc")
+        self.assertEqual(importer._normalize_name("  Ana   Pérez "), "ana pérez")
+
+    def test_user_importer_validates_rows_and_dry_runs_users(self):
+        messages = []
+        importer = UserImporter(logger=messages.append, dry_run=True)
+        self.assertEqual(importer.import_users([["1"]]), {})
+        self.assertEqual(importer.stats["skipped"], 1)
+        invalid = ["bad", "Ana", "Pérez", "", "123", "", "", "", "", "", "", ""]
+        importer.import_users([invalid])
+        self.assertEqual(importer.stats["skipped"], 1)
+        row = ["10", "<b>Ana</b>", "Pérez", "", "+54 (11) 123", "", "0", "public"]
+        with patch.object(importer, "_create_or_update_user", return_value=SimpleNamespace(username="legacy_10")):
+            users = importer.import_users([row])
+        self.assertEqual(list(users), ["ana pérez"])
+        self.assertEqual(importer._clean_and_validate_phone("+54 (11)", 20), "+5411")
+        self.assertEqual(importer._clean_and_validate_ci("0", 20, 10), "LEGACY-USR-10")
+        self.assertEqual(importer._normalize_value("unknown", {"known": "x"}, "default"), "default")
+        self.assertTrue(any("RESUMEN" in message for message in messages))
+
+    def test_user_importer_maps_existing_users_and_collision_names(self):
+        importer = UserImporter(dry_run=True)
+        importer._cache_groups = {"therapist": None}
+        with patch("users.management.commands.importers.user_importer.User") as user_model:
+            user_model.objects.filter.return_value.exists.side_effect = [True, False, True]
+            self.assertEqual(importer._generate_unique_username(4), "legacy_user_4_1")
+            self.assertIn("@legacy.com", importer._generate_email("Ana", "Pérez", 4))
+        self.assertEqual(importer._clean_and_validate_name("Ana!", 20), "Ana")
+        self.assertEqual(importer._clean_and_validate_name(None, 20), "")
+        self.assertEqual(importer._clean_and_validate_ci("999999", 20, 4), "LEGACY-USR-4")
+
+    def test_user_importer_processes_long_row_and_progress_logging(self):
+        messages = []
+        importer = UserImporter(logger=messages.append, dry_run=True)
+        row = ["11", "Ana", "Lopez", "", "123", "", "456", "public", "inactive", "foto.jpg", "2026-01-01", ""]
+        with patch.object(importer, "_create_or_update_user", return_value=SimpleNamespace()):
+            importer.import_users([row] * 50)
+        self.assertTrue(any("50/50" in message for message in messages))
+
+    def test_session_importer_maps_statuses_and_skips_missing_payments(self):
+        importer = SessionImporter(logger=lambda _: None, dry_run=True)
+        self.assertEqual(importer._map_session_status("PENDIENTE").value, "agendada")
+        self.assertEqual(importer._map_session_status("CONFIRMADO").value, "confirma")
+        self.assertEqual(importer._map_session_status("REPROGRAMADO").value, "reprograma")
+        self.assertEqual(importer._map_session_status("CANCELADO").value, "cancelada")
+        self.assertEqual(importer._map_session_payment_status("PAGADO").value, "paid")
+        self.assertEqual(importer._map_session_payment_status("PRESTADO").value, "exempt")
+        self.assertEqual(importer._map_session_payment_status("otro").value, "pending")
+        row = ["1", "999", "1", "1", "REALIZADO", "2026-01-02", "PAGADO", "", "", "", "", "2026-01-02"]
+        self.assertEqual(importer._process_row(row, {}, SimpleNamespace()), "no_payment")
+
+    def test_session_importer_dry_run_counts_evaluations(self):
+        importer = SessionImporter(logger=lambda _: None, dry_run=True)
+        payment = SimpleNamespace(patient=SimpleNamespace())
+        row = ["1", "10", "2", "3", "REALIZADO", "2026-01-02", "PAGADO", "Bueno", "Regular", "Ejercicio", "Nota", "2026-01-02 10:00:00"]
+        importer._cache_scale_values = {}
+        fake_session_model = MagicMock(return_value=SimpleNamespace())
+        fake_session_model.SessionStatus = session_importer_module.Session.SessionStatus
+        fake_session_model.PaymentStatus = session_importer_module.Session.PaymentStatus
+        with patch.object(session_importer_module, "Session", fake_session_model):
+            importer._process_row(row, {10: payment}, SimpleNamespace())
+        self.assertEqual(importer.stats, {"sessions": 1, "evaluations": 2})
+
+    def test_session_importer_loads_scale_cache_and_links_matching_response(self):
+        importer = SessionImporter(logger=lambda _: None)
+        scale_value = SimpleNamespace(scale_id=2, label="1: Excelente")
+        with patch.object(session_importer_module.ScaleValue.objects, "filter", return_value=[scale_value]):
+            cache = importer._load_scale_values()
+        importer._cache_scale_values = cache
+        self.assertIn((2, "excelente"), cache)
+        fake_evaluation = SimpleNamespace()
+        with patch.object(session_importer_module.ScaleEvaluation.objects, "create", return_value=fake_evaluation) as create_evaluation, \
+             patch.object(session_importer_module.ScaleEvaluationValueResponse.objects, "create") as create_response:
+            importer._create_evaluation_response(
+                SimpleNamespace(patient=SimpleNamespace(), therapist=SimpleNamespace()),
+                2, "Excelente", None,
+            )
+        create_evaluation.assert_called_once()
+        create_response.assert_called_once_with(evaluation=fake_evaluation, scale_value=scale_value)
+
+    def test_session_importer_reports_short_and_unpaid_rows(self):
+        messages = []
+        importer = SessionImporter(logger=messages.append, dry_run=True)
+        rows = [["1"], ["1", "99", "1", "1", "REALIZADO", "2026-01-01", "PAGADO", "", "", "", "", ""]]
+        importer.import_sessions(rows, {}, SimpleNamespace())
+        self.assertEqual(importer.stats["sessions"], 0)
+        self.assertTrue(any("insuficientes" in message for message in messages))
+        self.assertTrue(any("payment no encontrado" in message for message in messages))
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -328,6 +566,110 @@ class MlFeatureTests(TestCase):
             with patch.object(media, "run_command", return_value='{"format":{"duration":"2"},"streams":[{},{}]}'):
                 with self.assertRaisesRegex(ValueError, "could not read"):
                     media._fallback_stream_duration(root / "x", "v:0")
+
+    def test_media_extraction_and_segmentation_helpers_cover_reuse_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = root / "dataset" / "dataset" / "sessions" / "S1"
+            metadata = session / "metadata"
+            video_dir = session / "processed" / "video"
+            audio_dir = session / "processed" / "audio"
+            features = session / "processed" / "features"
+            frames = session / "processed" / "frames"
+            for directory in (metadata, video_dir, audio_dir, features, frames):
+                directory.mkdir(parents=True)
+            (metadata / "session.json").write_text("{}")
+            (video_dir / "S1_1280x720_10fps.mp4").write_bytes(b"v")
+            (audio_dir / "S1_16khz_mono.wav").write_bytes(b"a")
+            (features / "audio_features.json").write_text("{}")
+            (features / "visual_motion.json").write_text("{}")
+            (frames / "S1_0000.jpg").write_bytes(b"f")
+            with patch.object(media, "_run_extraction_stages", return_value=({"stage": "reused"}, False)):
+                self.assertEqual(media.run_existing_extraction("S1", root), {"stage": "reused"})
+
+            invoke = patcher = patch.object(media, "run_command", return_value="")
+            with invoke as run:
+                gap_video, gap_audio = media._create_gap_parts(root, 0, 0.5)
+                self.assertTrue(gap_video.name.endswith("gap.mp4"))
+                self.assertTrue(gap_audio.name.endswith("gap.wav"))
+                self.assertEqual(run.call_count, 2)
+
+            staging = root / "staging"
+            staging.mkdir()
+            source_video = root / "source.mp4"
+            source_audio = root / "source.wav"
+            source_video.write_bytes(b"v")
+            source_audio.write_bytes(b"a")
+            with patch.object(media, "run_command") as run:
+                video_part = media._create_video_part(staging, 1, source_video, 1.0)
+                audio_part = media._create_audio_part(staging, 1, source_audio, 1.0, False, 0.1)
+                self.assertEqual(video_part.name, "part-000001-video.mp4")
+                self.assertEqual(audio_part.name, "part-000001-audio.wav")
+                self.assertEqual(run.call_count, 2)
+
+            with patch.object(media, "_segment_window", return_value=({"index": 0}, 0.02)):
+                records, drift = media._build_segments(staging, source_video, source_audio, 1, 1.5, 0.1)
+            self.assertEqual(len(records), 2)
+            self.assertEqual(drift, 0.02)
+
+            with patch.object(media, "probe_stream_duration", side_effect=[1.0, 1.1]):
+                info = media._segment_source_info(source_video, source_audio, 0.2)
+            self.assertEqual(info[3], "audio")
+            self.assertEqual(info[-1], 1.0)
+
+    def test_media_manifest_and_segment_helpers_reject_invalid_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"session_id": "S2"}))
+            with self.assertRaisesRegex(ValueError, "manifest session_id"):
+                media._normalize_extraction(
+                    "S1", root, root / "manifest.json", True, root / "v", root / "a", False,
+                    lambda _: None,
+                )
+            manifest.write_text(json.dumps({"session_id": "S1"}))
+            with self.assertRaisesRegex(ValueError, "manifest session_id"):
+                media._normalize_extraction(
+                    "S2", root, manifest, True, root / "v", root / "a", False,
+                    lambda _: None,
+                )
+            with patch.object(media, "run_command"), patch.object(media, "probe_stream_duration", side_effect=[1.0, 1.5]):
+                with self.assertRaisesRegex(ValueError, "window drift"):
+                    media._segment_window(root, root / "v", root / "a", 0, 0, 1, 0.1)
+
+    def test_media_normalizes_valid_manifest_without_running_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            session.mkdir()
+            manifest = session / "session_manifest.json"
+            source_video = session / "raw.mp4"
+            source_audio = session / "raw.wav"
+            source_video.write_bytes(b"video")
+            source_audio.write_bytes(b"audio")
+            manifest.write_text(json.dumps({
+                "session_id": "S1", "source_version": "v1", "duration_seconds": 1,
+                "timeline_policy": "contiguous",
+                "fragments": [{
+                    "fragment_id": "F1", "global_start_seconds": 0,
+                    "duration_seconds": 1, "video_path": "raw.mp4", "audio_path": "raw.wav",
+                }],
+            }))
+
+            def concat(staging, video_parts, audio_parts):
+                video = staging / "normalized.mp4"
+                audio = staging / "normalized.wav"
+                video.write_bytes(b"normalized video")
+                audio.write_bytes(b"normalized audio")
+                return video, audio
+
+            with patch.object(media, "load_and_validate_session_manifest", return_value={"valid": True}), \
+                 patch.object(media, "_process_manifest_fragment", return_value=([], [], 1.0)), \
+                 patch.object(media, "_concat_manifest_parts", side_effect=concat), \
+                 patch.object(media, "probe_stream_duration", side_effect=[1.0, 1.0]):
+                result = media.normalize_manifest_fragments(session, manifest)
+            self.assertEqual(result["status"], "executed")
+            self.assertTrue((session / "processed" / "video" / "S1_1280x720_10fps.mp4").is_file())
+            self.assertTrue((session / "processed" / "manifest_processing.json").is_file())
 
     def test_segment_pipeline_reuses_existing_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
