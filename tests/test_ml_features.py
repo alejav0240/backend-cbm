@@ -262,6 +262,29 @@ class MlFeatureTests(TestCase):
         with access_denied, patch.object(clinical_mutations_module.SessionPlanStep.objects, "get", return_value=sps):
             with self.assertRaises(Exception):
                 clinical_mutations_module.UpdateSessionPlanStep.mutate(None, info, "1", "2")
+
+    def test_clinical_patient_and_tutor_helper_matrix(self):
+        self.assertEqual(clinical_mutations_module.get_next_weekday(date(2026, 1, 5), "invalid"), date(2026, 1, 5))
+        self.assertEqual(clinical_mutations_module.get_next_weekday(date(2026, 1, 5), "Lunes"), date(2026, 1, 12))
+        with patch.object(clinical_mutations_module.random, "choices", return_value=list("123456")):
+            with patch.object(clinical_mutations_module.User.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))):
+                username = clinical_mutations_module._generate_username("Doe Smith", None)
+            password = clinical_mutations_module._generate_password("Doe Smith", None)
+        self.assertEqual(username, "doe_smith_123456")
+        self.assertTrue(password.endswith("1234562026"))
+        with patch.object(clinical_mutations_module.User.objects, "filter", return_value=MagicMock(exists=MagicMock(side_effect=[True, False]))):
+            self.assertEqual(clinical_mutations_module._generate_username("Doe", "7"), "doe_7_1")
+        self.assertEqual(clinical_mutations_module._resolve_tutor(None, None, None, None, "Doe"), (None, None, None, False))
+        existing = SimpleNamespace(username="tutor")
+        with patch.object(clinical_mutations_module.User.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=existing))):
+            self.assertEqual(clinical_mutations_module._resolve_tutor("Tutor", "", "7", "", "Doe")[0], existing)
+        with self.assertRaises(Exception):
+            clinical_mutations_module._resolve_tutor(None, "new@example.com", None, None, "Doe")
+        created = SimpleNamespace(username="doe_7")
+        with patch.object(clinical_mutations_module.User.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=None), exists=MagicMock(return_value=False))), \
+             patch.object(clinical_mutations_module.User.objects, "create", return_value=created):
+            result = clinical_mutations_module._resolve_tutor("Jane Doe", "jane@example.com", "7", "555", "Doe")
+        self.assertEqual(result[0], created)
     def test_pipeline_dataset_endpoints_and_authorization_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1)
         now = SimpleNamespace(isoformat=lambda: "now")
