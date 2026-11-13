@@ -67,6 +67,87 @@ from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_pipeline_view_input_helpers_matrix(self):
+        self.assertEqual(pipeline_views_module._video_extension("clip.MP4"), ".mp4")
+        self.assertIsNone(pipeline_views_module._video_extension("clip.exe"))
+        self.assertEqual(pipeline_views_module._session_id(" S1 "), "S1")
+        self.assertIsNone(pipeline_views_module._session_id("bad/id"))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model = root / "model.bin"
+            model.write_bytes(b"model")
+            with override_settings(MEDIA_ROOT=root, BASE_DIR=root):
+                self.assertEqual(pipeline_views_module._managed_media_path(str(model)), model)
+                self.assertEqual(pipeline_views_module._safe_model_path(str(model)), model)
+                self.assertIsNone(pipeline_views_module._managed_media_path(""))
+                self.assertIsNone(pipeline_views_module._safe_model_path("/tmp/nope"))
+                lineage = pipeline_views_module._mlops_lineage({"mlflow": {"run_id": "r"}, "model_predictions": {"model_path": str(model), "model_type": "x"}})
+                self.assertEqual(lineage["mlflow_run_id"], "r")
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False), headers={})
+        self.assertFalse(pipeline_views_module._authenticate_request(request))
+        self.assertEqual(pipeline_views_module._json_body(SimpleNamespace(body=b'{"x": 1}'))["x"], 1)
+        with self.assertRaises(Exception):
+            pipeline_views_module._json_body(SimpleNamespace(body=b"bad"))
+    def test_therapeutic_and_evaluation_mutation_matrix(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        session = SimpleNamespace(pk=1, patient_id=1, patient=SimpleNamespace(), therapist=user, save=MagicMock(), delete=MagicMock())
+        with patch.object(therapeutic_mutations_module.Session.objects, "create", return_value=session), \
+             patch.object(therapeutic_mutations_module.Session.objects, "get", return_value=session), \
+             patch.object(therapeutic_mutations_module.Session.objects, "filter", return_value=MagicMock(aggregate=MagicMock(return_value={"last_num": 4}))), \
+             patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module, "user_can_access_patient", return_value=True):
+            self.assertIs(therapeutic_mutations_module.CreateSession.mutate(None, info, patient_id="1", therapist_id="1", session_date=date(2026, 1, 1), session_type="individual").session, session)
+            self.assertIs(therapeutic_mutations_module.UpdateSession.mutate(None, info, "1", notes="n", duration_minutes=5, video_url="v", session_status="completa", therapist_id="1", session_date=date(2026, 1, 2), session_type="group").session, session)
+            self.assertIs(therapeutic_mutations_module.UpdateSessionPaymentStatus.mutate(None, info, "1", "paid").session, session)
+            self.assertTrue(therapeutic_mutations_module.DeleteSession.mutate(None, info, "1").success)
+        item = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        resource = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        with patch.object(therapeutic_mutations_module.InventoryItem.objects, "create", return_value=item), \
+             patch.object(therapeutic_mutations_module.InventoryItem.objects, "get", return_value=item), \
+             patch.object(therapeutic_mutations_module.DigitalResource.objects, "create", return_value=resource), \
+             patch.object(therapeutic_mutations_module.DigitalResource.objects, "get", return_value=resource), \
+             patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True):
+            self.assertIs(therapeutic_mutations_module.CreateInventoryItem.mutate(None, info, "i", "t", "good", "room").item, item)
+            self.assertIs(therapeutic_mutations_module.UpdateInventoryItem.mutate(None, info, "1", name="n").item, item)
+            self.assertTrue(therapeutic_mutations_module.DeleteInventoryItem.mutate(None, info, "1").success)
+            self.assertIs(therapeutic_mutations_module.CreateDigitalResource.mutate(None, info, "r", "audio", "url").resource, resource)
+            self.assertIs(therapeutic_mutations_module.UpdateDigitalResource.mutate(None, info, "1", title="n").resource, resource)
+            self.assertTrue(therapeutic_mutations_module.DeleteDigitalResource.mutate(None, info, "1").success)
+        form = SimpleNamespace()
+        assignment = SimpleNamespace(assigned_by_id=1, assigned_to_id=1, save=MagicMock(), delete=MagicMock())
+        with patch.object(evaluations_mutations_module.Form.objects, "create", return_value=form), \
+             patch.object(evaluations_mutations_module.FormQuestion.objects, "create"), \
+             patch.object(evaluations_mutations_module.FormAssignment.objects, "create", return_value=assignment), \
+             patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment), \
+             patch.object(evaluations_mutations_module.FormResponse.objects, "update_or_create", return_value=(SimpleNamespace(), True)):
+            question = SimpleNamespace(question="q", question_type="text", is_required=None, order_index=None)
+            self.assertIs(evaluations_mutations_module.CreateForm.mutate(None, info, "F", [question]).form, form)
+            self.assertIs(evaluations_mutations_module.AssignForm.mutate(None, info, "1", "1", "1", "1", "1").assignment, assignment)
+            self.assertIs(evaluations_mutations_module.UpdateFormAssignment.mutate(None, info, "1", assigned_to_id="2").assignment, assignment)
+            self.assertTrue(evaluations_mutations_module.DeleteFormAssignment.mutate(None, info, "1").success)
+            self.assertTrue(evaluations_mutations_module.SubmitFormResponse.mutate(None, info, "1", "1", "answer").success)
+        scale = SimpleNamespace(delete=MagicMock())
+        with patch.object(evaluations_mutations_module.Scale.objects, "create", return_value=scale), \
+             patch.object(evaluations_mutations_module.Subscale.objects, "create"), \
+             patch.object(evaluations_mutations_module.ScaleValue.objects, "create"), \
+             patch.object(evaluations_mutations_module.Scale.objects, "get", return_value=scale):
+            subscale = SimpleNamespace(name="s", description=None, max_value=5)
+            value = SimpleNamespace(label="yes", value=1)
+            self.assertIs(evaluations_mutations_module.CreateScale.mutate(None, info, "S", evaluations_mutations_module.Scale.ScaleType.SUBSCALE, subscales=[subscale]).scale, scale)
+            self.assertIs(evaluations_mutations_module.CreateScale.mutate(None, info, "V", evaluations_mutations_module.Scale.ScaleType.VALUE_LIST, values=[value]).scale, scale)
+            self.assertTrue(evaluations_mutations_module.DeleteScale.mutate(None, info, "1").success)
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment), \
+             patch.object(evaluations_mutations_module.FormResponse.objects, "update_or_create", return_value=(SimpleNamespace(), True)):
+            response = SimpleNamespace(question_id="1", response_text="answer")
+            self.assertTrue(evaluations_mutations_module.SubmitFullForm.mutate(None, info, "1", [response]).success)
+        evaluation = SimpleNamespace()
+        with patch.object(evaluations_mutations_module.ScaleEvaluation.objects, "create", return_value=evaluation), \
+             patch.object(evaluations_mutations_module.Subscale.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=True))), \
+             patch.object(evaluations_mutations_module.ScaleEvaluationSubscaleResponse.objects, "create"), \
+             patch.object(evaluations_mutations_module.ScaleEvaluationValueResponse.objects, "create"):
+            sub = SimpleNamespace(subscale_id="1", score=2)
+            self.assertTrue(evaluations_mutations_module.AddScaleResponse.mutate(None, info, "1", "1", "1", subscales=[sub], value_id="2").success)
     def test_phase2_prediction_and_demuca_draft_matrix(self):
         with self.assertRaisesRegex(ValueError, "invalid_session_id"):
             demuca_draft_module.build_demuca_draft("")
@@ -94,6 +175,66 @@ class MlFeatureTests(TestCase):
              patch.object(multimodal_views_module.settings, "DEBUG", True):
             request = SimpleNamespace(method="POST", headers={}, FILES={}, POST={})
             self.assertEqual(multimodal_views_module.analizar_video(request).status_code, 400)
+
+    def test_pipeline_service_validation_and_process_contracts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            media_root = Path(temporary)
+            executable = media_root / "python"
+            executable.write_text("x")
+            source = media_root / "video.mp4"
+            source.write_bytes(b"video")
+            service = pipeline_services_module.ServicioPipelineMultimodal(media_root, executable)
+            with override_settings(MEDIA_ROOT=media_root):
+                with self.assertRaisesRegex(pipeline_services_module.ErrorPipelineMultimodal, "Identificador"):
+                    service.ejecutar(source, "bad/id")
+                with self.assertRaisesRegex(pipeline_services_module.ErrorPipelineMultimodal, "Archivo"):
+                    service.ejecutar(Path("/tmp/outside.mp4"), "S1")
+                with patch("pipeline_multimodal.servicios.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout='{"status":"completed"}', stderr="")):
+                    self.assertEqual(service.ejecutar(source, "S1")["status"], "completed")
+                with patch("pipeline_multimodal.servicios.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="bad", stderr="err")), \
+                     self.assertRaisesRegex(pipeline_services_module.ErrorPipelineMultimodal, "err"):
+                    service.ejecutar(source, "S1")
+
+    def test_window_index_full_build_and_validation_matrix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            segments_dir = session / "processed" / "segments"
+            features_dir = session / "processed" / "features"
+            segments_dir.mkdir(parents=True)
+            features_dir.mkdir(parents=True)
+            (segments_dir / "video.mp4").write_bytes(b"v")
+            (segments_dir / "audio.wav").write_bytes(b"a")
+            segments = {"session_id": "S1", "window_seconds": 5, "clock": "session_elapsed_seconds", "segments": [{"index": 0, "start_seconds": 0, "end_seconds": 5, "duration_seconds": 5, "sync_drift_seconds": 0, "video": "video.mp4", "audio": "audio.wav"}], "effective_duration_seconds": 5}
+            audio = {"timestamps": [0, 1, 2, 3, 4], "rms_energy": [1, 2, 3, 4, 5]}
+            visual = {"timestamps": [0, 1, 2, 3, 4], "motion_intensity": [1, 2, 3, 4, 5]}
+            (segments_dir / "segments.json").write_text(json.dumps(segments))
+            (features_dir / "audio_features.json").write_text(json.dumps(audio))
+            (features_dir / "visual_motion.json").write_text(json.dumps(visual))
+            index = build_window_index(session)
+            self.assertEqual(index["complete_windows"], 1)
+            self.assertEqual(validate_window_index(index, session), [])
+            broken = dict(index)
+            broken["session_id"] = "wrong"
+            self.assertIn("session_id_mismatch", validate_window_index(broken, session))
+
+    def test_media_extraction_stage_and_audio_branch_matrix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = root / "dataset" / "dataset" / "sessions" / "S1"
+            (session / "metadata").mkdir(parents=True)
+            (session / "processed" / "video").mkdir(parents=True)
+            (session / "processed" / "audio").mkdir(parents=True)
+            (session / "processed" / "features").mkdir(parents=True)
+            (session / "metadata" / "session.json").write_text("{}")
+            paths = [session / "processed" / "video" / "S1_1280x720_10fps.mp4", session / "processed" / "audio" / "S1_16khz_mono.wav", session / "processed" / "features" / "audio_features.json", session / "processed" / "features" / "visual_motion.json"]
+            for path in paths:
+                path.write_text("{}")
+            with patch.object(media, "_run_extraction_stages", return_value=({"x": "reused"}, False)):
+                self.assertEqual(media.run_existing_extraction("S1", root), {"x": "reused"})
+            with patch.object(media, "probe_stream_duration", return_value=2), patch.object(media, "run_command"):
+                self.assertTrue(media._create_audio_part(root, 1, root / "audio.wav", 1, False, 0.1).name.endswith("audio.wav"))
+                self.assertTrue(media._create_audio_part(root, 2, root / "audio.wav", 1, True, 0.1).name.endswith("audio.wav"))
+                self.assertEqual(len(media._create_gap_parts(root, 3, 1)), 2)
     def test_user_utils_and_permissions_matrix(self):
         self.assertEqual(users_utils_module.clean_text(" José-Luis!"), "JOSELUIS")
         self.assertEqual(users_utils_module.clean_text(None), "")
