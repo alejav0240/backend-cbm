@@ -67,6 +67,45 @@ from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_laravel_command_connection_queries_and_import_matrix(self):
+        command = laravel_command_module.Command()
+        parser = MagicMock()
+        command.add_arguments(parser)
+        self.assertGreaterEqual(parser.add_argument.call_count, 7)
+        with self.assertRaises(Exception):
+            command._remote_columns("unknown")
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"id": 1, "nombre": "A"}]
+        connection = MagicMock(cursor=MagicMock(return_value=cursor))
+        self.assertEqual(len(command._query_remote_mysql(connection, "usuarios", ["id", "nombre"])), 1)
+        with patch.object(laravel_command_module.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="1\tA\n", stderr="")):
+            self.assertEqual(command._query_remote_ssh({"user": "u", "password": "p", "database": "d", "host": "h"}, "usuarios", ["id"]), [["1", "A"]])
+        patient = SimpleNamespace(diagnosis="", residence="", notes="", save=MagicMock(), tutor=None)
+        with patch.object(laravel_command_module.Patient.objects, "update_or_create", return_value=(patient, True)):
+            patients = {}
+            command._import_client_row(["1", "A", "B", "", "", "", "", "2020-01-01", "0", "", "activo", "", ""], patients)
+        self.assertIn(1, patients)
+        user = SimpleNamespace(set_password=MagicMock(), save=MagicMock())
+        with patch.object(laravel_command_module.User.objects, "update_or_create", return_value=(user, True)):
+            users = command._import_users([["1", "A", "B", "", "", "1", "", "CI", "", "activo", "", "", "", "visible", "", ""]])
+        self.assertTrue(users)
+
+    def test_video_service_prepare_and_reuse_errors(self):
+        service = ServicioAnalisisVideo(lambda _: 1.0, MagicMock())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            video = root / "input.mp4"
+            video.write_bytes(b"video")
+            with self.assertRaises(FileNotFoundError):
+                service._prepare_session(root / "missing.mp4", "S1", root, None, True)
+            prepared = service._prepare_session(video, "S1", root, None, True)
+            self.assertEqual(prepared[-1], 1.0)
+            response_path = root / "dataset" / "dataset" / "sessions" / "S1" / "processed" / "analysis_response.json"
+            response_path.parent.mkdir(parents=True, exist_ok=True)
+            response_path.write_text(json.dumps({"status": "completed"}))
+            self.assertEqual(service._prepare_session(video, "S1", root, None, True), {"status": "completed"})
+        with self.assertRaises(ValueError):
+            service.ejecutar(Path("x"), session_id="bad/id", project_root=Path("."), window_seconds=5, max_tail_trim_seconds=1, pose_model=None, skip_pose=True, session_id_pattern=__import__("re").compile(r"^[A-Z]+$"))
     def test_pipeline_view_input_helpers_matrix(self):
         self.assertEqual(pipeline_views_module._video_extension("clip.MP4"), ".mp4")
         self.assertIsNone(pipeline_views_module._video_extension("clip.exe"))
