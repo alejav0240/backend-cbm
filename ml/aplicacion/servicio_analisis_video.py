@@ -24,6 +24,64 @@ class ServicioAnalisisVideo:
         self._probe_duration = probe_duration
         self._process_session = process_session
 
+    def _prepare_session(self, video_path, session_id, project_root, pose_model, skip_pose):
+        if not video_path.is_file():
+            raise FileNotFoundError(f"video file not found: {video_path}")
+        session_dir = project_root / "dataset" / "dataset" / "sessions" / session_id
+        default_model = project_root / "ml" / "artifacts" / "models" / "pose_landmarker.task"
+        selected_model = pose_model.resolve() if pose_model is not None else default_model
+        should_skip_pose = skip_pose is True or pose_model is None
+        if not should_skip_pose and not selected_model.is_file():
+            raise FileNotFoundError(f"pose model not found: {selected_model}")
+        suffix = video_path.suffix.lower() if video_path.suffix else ".mp4"
+        staged_video = session_dir / "raw" / f"input{suffix}"
+        manifest_path = session_dir / "session_manifest.json"
+        response_path = session_dir / "processed" / "analysis_response.json"
+        repository = RepositorioArtefactos()
+        source_sha256 = repository.huella(video_path)
+        duration_or_response = self._reuse_or_stage(
+            session_dir, response_path, staged_video, manifest_path,
+            video_path, source_sha256, repository,
+        )
+        if isinstance(duration_or_response, dict):
+            return duration_or_response
+        duration = duration_or_response
+        if not manifest_path.is_file():
+            self._write_session_metadata(session_dir, staged_video, manifest_path, session_id, duration, repository)
+        return session_dir, selected_model, should_skip_pose, response_path, repository, source_sha256, duration
+
+    def _reuse_or_stage(self, session_dir, response_path, staged_video, manifest_path, video_path, source_sha256, repository):
+        if session_dir.exists():
+            if response_path.is_file():
+                return repository.leer_json(response_path)
+            if not staged_video.is_file() or not manifest_path.is_file():
+                raise FileExistsError(f"session already exists: {session_dir}")
+            if repository.huella(staged_video) != source_sha256:
+                raise FileExistsError(f"session already exists with different input: {session_dir}")
+            return float(repository.leer_json(manifest_path)["duration_seconds"])
+        duration = self._probe_duration(video_path)
+        staged_video.parent.mkdir(parents=True)
+        shutil.copy2(video_path, staged_video)
+        return duration
+
+    @staticmethod
+    def _write_session_metadata(session_dir, staged_video, manifest_path, session_id, duration, repository):
+        relative_video = staged_video.relative_to(session_dir).as_posix()
+        metadata = {
+            "session_id": session_id, "dataset_version": "1.0", "participants": [],
+            "recording": {"original_video": relative_video}, "technical": {"duration_seconds": duration},
+            "processing": {"video_processed": False, "audio_processed": False, "frames_extracted": False, "features_extracted": False},
+            "annotation": {"visual": False, "audio": False, "interaction": False, "demuca": False},
+        }
+        manifest = {
+            "schema_version": "1.0", "session_id": session_id,
+            "source_version": repository.huella(staged_video), "clock": "session_elapsed_seconds",
+            "timeline_policy": "contiguous", "duration_seconds": duration, "participants": [],
+            "fragments": [{"fragment_id": f"{session_id}-video-0000", "order": 0, "global_start_seconds": 0.0, "duration_seconds": duration, "video_path": relative_video}],
+        }
+        repository.escribir_json_atomico(session_dir / "metadata" / "session.json", metadata)
+        repository.escribir_json_atomico(manifest_path, manifest)
+
     def ejecutar(
         self,
         video_path: Path,
@@ -41,66 +99,14 @@ class ServicioAnalisisVideo:
     ) -> dict[str, Any]:
         video_path = video_path.resolve()
         project_root = project_root.resolve()
-        if not video_path.is_file():
-            raise FileNotFoundError(f"video file not found: {video_path}")
         if not session_id_pattern.fullmatch(session_id):
             raise ValueError("session_id must use 1-64 letters, numbers, underscores, or hyphens")
-        session_dir = project_root / "dataset" / "dataset" / "sessions" / session_id
-        default_model = project_root / "ml" / "artifacts" / "models" / "pose_landmarker.task"
-        selected_model = pose_model.resolve() if pose_model is not None else default_model
-        should_skip_pose = skip_pose is True or pose_model is None
-        if not should_skip_pose and not selected_model.is_file():
-            raise FileNotFoundError(f"pose model not found: {selected_model}")
-
-        suffix = video_path.suffix.lower() if video_path.suffix else ".mp4"
-        staged_video = session_dir / "raw" / f"input{suffix}"
-        manifest_path = session_dir / "session_manifest.json"
-        response_path = session_dir / "processed" / "analysis_response.json"
-        repositorio = RepositorioArtefactos()
-        source_sha256 = repositorio.huella(video_path)
-        if session_dir.exists():
-            if response_path.is_file():
-                return repositorio.leer_json(response_path)
-            if not staged_video.is_file() or not manifest_path.is_file():
-                raise FileExistsError(f"session already exists: {session_dir}")
-            if repositorio.huella(staged_video) != source_sha256:
-                raise FileExistsError(f"session already exists with different input: {session_dir}")
-            manifest = repositorio.leer_json(manifest_path)
-            duration_seconds = float(manifest["duration_seconds"])
-        else:
-            duration_seconds = self._probe_duration(video_path)
-            staged_video.parent.mkdir(parents=True)
-            shutil.copy2(video_path, staged_video)
-
-        manifest = {
-            "schema_version": "1.0",
-            "session_id": session_id,
-            "source_version": source_sha256,
-            "clock": "session_elapsed_seconds",
-            "timeline_policy": "contiguous",
-            "duration_seconds": duration_seconds,
-            "participants": [],
-            "fragments": [{
-                "fragment_id": f"{session_id}-video-0000",
-                "order": 0,
-                "global_start_seconds": 0.0,
-                "duration_seconds": duration_seconds,
-                "video_path": staged_video.relative_to(session_dir).as_posix(),
-            }],
-        }
-        if not manifest_path.is_file():
-            metadata = {
-                "session_id": session_id,
-                "dataset_version": "1.0",
-                "participants": [],
-                "recording": {"original_video": staged_video.relative_to(session_dir).as_posix()},
-                "technical": {"duration_seconds": duration_seconds},
-                "processing": {"video_processed": False, "audio_processed": False,
-                                "frames_extracted": False, "features_extracted": False},
-                "annotation": {"visual": False, "audio": False, "interaction": False, "demuca": False},
-            }
-            repositorio.escribir_json_atomico(session_dir / "metadata" / "session.json", metadata)
-            repositorio.escribir_json_atomico(manifest_path, manifest)
+        prepared = self._prepare_session(
+            video_path, session_id, project_root, pose_model, skip_pose
+        )
+        if isinstance(prepared, dict):
+            return prepared
+        session_dir, selected_model, should_skip_pose, response_path, repositorio, source_sha256, duration_seconds = prepared
 
         with self._pipeline_progress_to_stderr():
             pipeline_args = (

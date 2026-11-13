@@ -336,18 +336,23 @@ def _artifact_payload_for_session(session_id):
     payload = result.resultado if result and isinstance(result.resultado, dict) else {}
     pose_landmarks = payload.get("pose_landmarks", [])
     if not isinstance(pose_landmarks, (dict, list)) or not pose_landmarks:
-        configured_root = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
-        if "/" not in session_id and "\\" not in session_id:
-            roots = [configured_root, configured_root.parent, Path(settings.BASE_DIR)]
-            for root in dict.fromkeys(roots):
-                artifact = root / "dataset" / "dataset" / "sessions" / session_id / "processed" / "features" / "pose_landmarks.json"
-                try:
-                    if artifact.is_file():
-                        pose_landmarks = json.loads(artifact.read_text(encoding="utf-8"))
-                        break
-                except (OSError, json.JSONDecodeError):
-                    pose_landmarks = []
+        pose_landmarks = _load_pose_artifact(session_id)
     return payload, pose_landmarks
+
+
+def _load_pose_artifact(session_id):
+    if "/" in session_id or "\\" in session_id:
+        return []
+    configured_root = Path(os.environ.get("MULTIMODAL_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+    roots = [configured_root, configured_root.parent, Path(settings.BASE_DIR)]
+    for root in dict.fromkeys(roots):
+        artifact = root / "dataset" / "dataset" / "sessions" / session_id / "processed" / "features" / "pose_landmarks.json"
+        try:
+            if artifact.is_file():
+                return json.loads(artifact.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return []
 
 
 def _create_annotation_sample(dataset, session_id, body):
@@ -433,19 +438,7 @@ def update_dataset_sample(request, dataset_id, sample_id):
         return JsonResponse({"error": "sample_not_found"}, status=404)
     try:
         body = _json_body(request)
-        unknown = set(body) - {"features", "labels", "reviewed", "start_time", "end_time", "demuca_phase", "sound_tags", "movement_tags", "interaction_tags", "derived_features", "pose_landmarks", "artifact_payload"}
-        if unknown:
-            raise ValidationError("unknown sample fields")
-        features = body.get("features", sample.features)
-        labels = body.get("labels", sample.labels)
-        validate_dataset_values(features, labels)
-        if "reviewed" in body and not isinstance(body["reviewed"], bool):
-            raise ValidationError("reviewed must be boolean")
-        annotation_fields = {field: body[field] for field in ("start_time", "end_time", "demuca_phase", "sound_tags", "movement_tags", "interaction_tags", "derived_features", "pose_landmarks", "artifact_payload") if field in body}
-        if annotation_fields:
-            merged = {field: getattr(sample, field) for field in ("start_time", "end_time", "demuca_phase", "sound_tags", "movement_tags", "interaction_tags", "derived_features", "pose_landmarks", "artifact_payload")}
-            merged.update(annotation_fields)
-            _annotation_values(merged)
+        features, labels, annotation_fields = _validated_sample_update(body, sample)
         sample.features, sample.labels = features, labels
         if "reviewed" in body:
             sample.reviewed = body["reviewed"]
@@ -455,6 +448,23 @@ def update_dataset_sample(request, dataset_id, sample_id):
     except ValidationError as error:
         return _invalid_request(error)
     return JsonResponse(_sample_payload(sample))
+
+
+def _validated_sample_update(body, sample):
+    allowed = {"features", "labels", "reviewed", "start_time", "end_time", "demuca_phase", "sound_tags", "movement_tags", "interaction_tags", "derived_features", "pose_landmarks", "artifact_payload"}
+    if set(body) - allowed:
+        raise ValidationError("unknown sample fields")
+    features, labels = body.get("features", sample.features), body.get("labels", sample.labels)
+    validate_dataset_values(features, labels)
+    if "reviewed" in body and not isinstance(body["reviewed"], bool):
+        raise ValidationError("reviewed must be boolean")
+    annotation_names = ("start_time", "end_time", "demuca_phase", "sound_tags", "movement_tags", "interaction_tags", "derived_features", "pose_landmarks", "artifact_payload")
+    annotation_fields = {field: body[field] for field in annotation_names if field in body}
+    if annotation_fields:
+        merged = {field: getattr(sample, field) for field in annotation_names}
+        merged.update(annotation_fields)
+        _annotation_values(merged)
+    return features, labels, annotation_fields
 
 
 @_api_login_required
