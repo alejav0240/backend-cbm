@@ -21,6 +21,8 @@ import config.management.commands.importar_laravel as laravel_command_module
 import analyze_video as analyze_video_module
 import multimodal_features as multimodal_features_module
 import therapeutic_sessions.queries as session_queries_module
+import pipeline_multimodal.views as pipeline_views_module
+import clinical.mutations as clinical_mutations_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -839,6 +841,53 @@ class MlFeatureTests(TestCase):
         )
         self.assertIs(result, filtered)
         self.assertGreaterEqual(filtered.filter.call_count, 5)
+
+    def test_pipeline_view_helpers_validate_payloads_and_lineage(self):
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False), headers={})
+        self.assertFalse(pipeline_views_module._authenticate_request(request))
+        with self.assertRaisesRegex(Exception, "invalid_json"):
+            pipeline_views_module._json_body(SimpleNamespace(body=b"{"))
+        with self.assertRaisesRegex(Exception, "json_object_required"):
+            pipeline_views_module._json_body(SimpleNamespace(body=b"[]"))
+        self.assertEqual(pipeline_views_module._mlops_lineage(None), {})
+        with tempfile.TemporaryDirectory() as temporary:
+            model = Path(temporary) / "model.json"
+            model.write_text("model")
+            with patch.object(pipeline_views_module, "_safe_model_path", return_value=model):
+                lineage = pipeline_views_module._mlops_lineage({
+                    "dataset_hash": "data", "mlflow": {"run_id": "r", "experiment": "e"},
+                    "model_predictions": {"model_path": str(model), "model_type": "demo", "model_version": "1"},
+                })
+        self.assertEqual(lineage["mlflow_run_id"], "r")
+        self.assertEqual(len(lineage["model_sha256"]), 64)
+        sample = SimpleNamespace(
+            id=1, session_id="S1", window_id="W1", features={}, labels={}, reviewed=False,
+            start_time=0, end_time=1, demuca_phase="", sound_tags=[], movement_tags=[],
+            interaction_tags=[], derived_features={}, pose_landmarks=[], artifact_payload={},
+            updated_at=SimpleNamespace(isoformat=lambda: "now"),
+        )
+        self.assertFalse(pipeline_views_module._sample_payload(sample)["training_authorized"])
+        with self.assertRaisesRegex(Exception, "annotation window fields"):
+            pipeline_views_module._annotation_values({})
+
+    def test_clinical_mutation_helpers_resolve_tutors_and_sessions(self):
+        self.assertEqual(clinical_mutations_module._generate_username("Lopez", "123"), "lopez_123")
+        self.assertTrue(clinical_mutations_module._generate_password("Lopez", "123"))
+        user_filter = MagicMock()
+        user_filter.first.return_value = None
+        user_filter.exists.return_value = False
+        with patch.object(clinical_mutations_module.User.objects, "filter", return_value=user_filter):
+            with patch.object(clinical_mutations_module.User.objects, "create", return_value=SimpleNamespace(id=1)) as create:
+                tutor, username, password, created = clinical_mutations_module._resolve_tutor("Ana Lopez", "", "123", "", "Lopez")
+        self.assertTrue(created)
+        self.assertTrue(username.startswith("lopez_"))
+        create.assert_called_once()
+        patient = SimpleNamespace(id=1)
+        fake_session = MagicMock()
+        with patch.object(clinical_mutations_module, "Session", fake_session), \
+             patch.object(fake_session.objects, "bulk_create") as bulk:
+            clinical_mutations_module._create_initial_sessions(patient, 2, "monday", "10:30")
+        self.assertEqual(len(bulk.call_args.args[0]), 4)
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
