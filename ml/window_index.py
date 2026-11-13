@@ -99,6 +99,45 @@ def _safe_segment_path(session_dir: Path, relative: Any, field: str) -> str:
     return full_path.relative_to(session_dir).as_posix()
 
 
+def _validate_segment_entry(segment, index, previous_end, window_seconds, drift_tolerance):
+    if not isinstance(segment, dict):
+        raise ValueError(f"invalid_segment:{index}")
+    start, end, duration = (segment.get(key) for key in ("start_seconds", "end_seconds", "duration_seconds"))
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (start, end, duration)):
+        raise ValueError(f"invalid_segment_time:{index}")
+    start, end, duration = float(start), float(end), float(duration)
+    if abs(start - previous_end) > 1e-6 or abs(end - start - duration) > 1e-6:
+        raise ValueError(f"segment_timeline_gap_or_duration_mismatch:{index}")
+    if abs(start - index * window_seconds) > 1e-6 or segment.get("index") != index:
+        raise ValueError(f"segment_index_or_grid_invalid:{index}")
+    sync_drift = segment.get("sync_drift_seconds")
+    if isinstance(sync_drift, bool) or not isinstance(sync_drift, (int, float)) or not math.isfinite(sync_drift) or sync_drift > drift_tolerance:
+        raise ValueError(f"segment_sync_drift_invalid:{index}")
+    return start, end, duration, float(sync_drift)
+
+
+def _window_from_segment(session_dir, segment, index, session_id, start, end, duration, sync_drift, window_seconds, audio_timestamps, visual_timestamps):
+    video_ref = _safe_segment_path(session_dir, segment.get("video"), f"{index}:video")
+    audio_ref = _safe_segment_path(session_dir, segment.get("audio"), f"{index}:audio")
+    if duration < window_seconds - 1e-6:
+        return None, {
+            "segment_index": index, "start_seconds": start, "end_seconds": end,
+            "duration_seconds": duration, "reason": "partial_window_shorter_than_configured_window",
+            "video_path": video_ref, "audio_path": audio_ref,
+        }
+    if abs(duration - window_seconds) > 1e-6:
+        raise ValueError(f"segment_longer_than_configured_window:{index}")
+    return {
+        "window_id": f"{session_id}_W{index:04d}", "index": index, "session_id": session_id,
+        "start_seconds": start, "end_seconds": end, "duration_seconds": duration,
+        "segment": {"index": index, "video_path": video_ref, "audio_path": audio_ref, "sync_drift_seconds": sync_drift},
+        "feature_samples": {
+            "audio": _feature_range(audio_timestamps, start, end, AUDIO_FEATURES_PATH.as_posix()),
+            "visual": _feature_range(visual_timestamps, start, end, VISUAL_FEATURES_PATH.as_posix()),
+        },
+    }, None
+
+
 def build_window_index(session_dir: Path) -> dict[str, Any]:
     """Build a window index; retain only full windows and report partial tails."""
     segments_payload = _read_json(session_dir / SEGMENTS_PATH)
@@ -121,79 +160,24 @@ def build_window_index(session_dir: Path) -> dict[str, Any]:
 
     audio_timestamps = _timestamps(audio_payload, "audio")
     visual_timestamps = _timestamps(visual_payload, "visual")
-    audio_path = AUDIO_FEATURES_PATH.as_posix()
-    visual_path = VISUAL_FEATURES_PATH.as_posix()
-    tolerance = 1e-6
     windows: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     previous_end = 0.0
 
+    drift_tolerance = float(segments_payload.get("drift_tolerance_seconds", 0.15))
     for index, segment in enumerate(segments):
-        if not isinstance(segment, dict):
-            raise ValueError(f"invalid_segment:{index}")
-        start = segment.get("start_seconds")
-        end = segment.get("end_seconds")
-        duration = segment.get("duration_seconds")
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            for value in (start, end, duration)
-        ):
-            raise ValueError(f"invalid_segment_time:{index}")
-        start, end, duration = float(start), float(end), float(duration)
-        if abs(start - previous_end) > tolerance or abs((end - start) - duration) > tolerance:
-            raise ValueError(f"segment_timeline_gap_or_duration_mismatch:{index}")
-        if abs(start - index * float(window_seconds)) > tolerance:
-            raise ValueError(f"segment_not_on_window_grid:{index}")
+        start, end, duration, sync_drift = _validate_segment_entry(
+            segment, index, previous_end, float(window_seconds), drift_tolerance
+        )
         previous_end = end
-
-        segment_index = segment.get("index")
-        if segment_index != index:
-            raise ValueError(f"segment_index_not_contiguous:{index}")
-        sync_drift = segment.get("sync_drift_seconds")
-        if (
-            isinstance(sync_drift, bool)
-            or not isinstance(sync_drift, (int, float))
-            or not math.isfinite(sync_drift)
-            or sync_drift > float(segments_payload.get("drift_tolerance_seconds", 0.15))
-        ):
-            raise ValueError(f"segment_sync_drift_invalid:{index}")
-
-        video_ref = _safe_segment_path(session_dir, segment.get("video"), f"{index}:video")
-        audio_ref = _safe_segment_path(session_dir, segment.get("audio"), f"{index}:audio")
-        if duration < float(window_seconds) - tolerance:
-            excluded.append({
-                "segment_index": index,
-                "start_seconds": start,
-                "end_seconds": end,
-                "duration_seconds": duration,
-                "reason": "partial_window_shorter_than_configured_window",
-                "video_path": video_ref,
-                "audio_path": audio_ref,
-            })
-            continue
-        if abs(duration - float(window_seconds)) > tolerance:
-            raise ValueError(f"segment_longer_than_configured_window:{index}")
-
-        windows.append({
-            "window_id": f"{session_id}_W{index:04d}",
-            "index": index,
-            "session_id": session_id,
-            "start_seconds": start,
-            "end_seconds": end,
-            "duration_seconds": duration,
-            "segment": {
-                "index": index,
-                "video_path": video_ref,
-                "audio_path": audio_ref,
-                "sync_drift_seconds": float(sync_drift),
-            },
-            "feature_samples": {
-                "audio": _feature_range(audio_timestamps, start, end, audio_path),
-                "visual": _feature_range(visual_timestamps, start, end, visual_path),
-            },
-        })
+        window, partial = _window_from_segment(
+            session_dir, segment, index, session_id, start, end, duration, sync_drift,
+            float(window_seconds), audio_timestamps, visual_timestamps,
+        )
+        if window is not None:
+            windows.append(window)
+        else:
+            excluded.append(partial)
 
     source_paths = (SEGMENTS_PATH, AUDIO_FEATURES_PATH, VISUAL_FEATURES_PATH)
     duration = float(segments_payload.get("effective_duration_seconds", previous_end))
@@ -217,6 +201,82 @@ def build_window_index(session_dir: Path) -> dict[str, Any]:
         "training_authorized": False,
         "notice": "Window index only; this does not authorize training or validate labels.",
     }
+
+
+def _validate_segment_references(session_dir, segment, index):
+    issues = []
+    for field in ("video_path", "audio_path"):
+        value = segment.get(field)
+        if not isinstance(value, str):
+            issues.append(f"segment_reference_missing:{index}:{field}")
+            continue
+        try:
+            path = PurePosixPath(value)
+            resolved = (session_dir / Path(*path.parts)).resolve()
+            resolved.relative_to(session_dir.resolve())
+            if not resolved.is_file():
+                issues.append(f"segment_file_missing:{index}:{field}")
+        except (ValueError, OSError):
+            issues.append(f"unsafe_segment_reference:{index}:{field}")
+    return issues
+
+
+def _validate_feature_range(session_dir, sample_range, modality, index, start, end):
+    if not isinstance(sample_range, dict):
+        return [f"feature_range_missing:{index}:{modality}"]
+    path = sample_range.get("path")
+    start_index, end_index = sample_range.get("start_index"), sample_range.get("end_index_exclusive")
+    if not isinstance(path, str) or not isinstance(start_index, int) or not isinstance(end_index, int) or start_index < 0 or end_index <= start_index or sample_range.get("sample_count") != end_index - start_index:
+        return [f"feature_range_invalid:{index}:{modality}"]
+    try:
+        feature_path = session_dir / path
+        feature_path.resolve().relative_to(session_dir.resolve())
+        timestamps = _timestamps(_read_json(feature_path), modality)
+        if end_index > len(timestamps):
+            return [f"feature_range_out_of_bounds:{index}:{modality}"]
+        if not (float(start) <= timestamps[start_index] < float(end) and float(start) <= timestamps[end_index - 1] < float(end)):
+            return [f"feature_timestamp_outside_window:{index}:{modality}"]
+    except (OSError, ValueError):
+        return [f"feature_source_invalid:{index}:{modality}"]
+    return []
+
+
+def _validate_window_entry(session_dir, window, index, session_id, expected_start, window_seconds):
+    issues = []
+    if not isinstance(window, dict):
+        return [f"invalid_window:{index}"], expected_start + window_seconds
+    start, end = window.get("start_seconds"), window.get("end_seconds")
+    if window.get("window_id") != f"{session_id}_W{index:04d}":
+        issues.append(f"unstable_window_id:{index}")
+    if window.get("index") != index:
+        issues.append(f"window_index_not_contiguous:{index}")
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or abs(float(start) - expected_start) > 1e-6 or abs(float(end) - float(start) - float(window_seconds)) > 1e-6:
+        issues.append(f"window_timeline_invalid:{index}")
+    segment, features = window.get("segment"), window.get("feature_samples")
+    if not isinstance(segment, dict) or not isinstance(features, dict):
+        return issues + [f"window_references_missing:{index}"], expected_start + float(window_seconds)
+    issues.extend(_validate_segment_references(session_dir, segment, index))
+    for modality in ("audio", "visual"):
+        issues.extend(_validate_feature_range(session_dir, features.get(modality), modality, index, start, end))
+    return issues, expected_start + float(window_seconds)
+
+
+def _validate_source_artifacts(session_dir, source_artifacts):
+    if not isinstance(source_artifacts, dict):
+        return ["source_artifacts_missing"]
+    issues = []
+    for relative_path, record in source_artifacts.items():
+        if not isinstance(record, dict) or not isinstance(record.get("sha256"), str):
+            issues.append(f"source_hash_missing:{relative_path}")
+            continue
+        relative = PurePosixPath(relative_path)
+        if relative.is_absolute() or ".." in relative.parts or "\\" in relative_path:
+            issues.append(f"unsafe_source_path:{relative_path}")
+            continue
+        path = session_dir / Path(*relative.parts)
+        if not path.is_file() or _sha256(path) != record["sha256"]:
+            issues.append(f"source_hash_mismatch:{relative_path}")
+    return issues
 
 
 def validate_window_index(index: dict[str, Any], session_dir: Path) -> list[str]:
@@ -243,87 +303,10 @@ def validate_window_index(index: dict[str, Any], session_dir: Path) -> list[str]
 
     expected_start = 0.0
     for expected_index, window in enumerate(windows):
-        if not isinstance(window, dict):
-            issues.append(f"invalid_window:{expected_index}")
-            continue
-        start, end = window.get("start_seconds"), window.get("end_seconds")
-        if window.get("window_id") != f"{session_id}_W{expected_index:04d}":
-            issues.append(f"unstable_window_id:{expected_index}")
-        if window.get("index") != expected_index:
-            issues.append(f"window_index_not_contiguous:{expected_index}")
-        if (
-            not isinstance(start, (int, float))
-            or not isinstance(end, (int, float))
-            or abs(float(start) - expected_start) > 1e-6
-            or abs(float(end) - float(start) - float(window_seconds)) > 1e-6
-        ):
-            issues.append(f"window_timeline_invalid:{expected_index}")
-        expected_start += float(window_seconds)
+        entry_issues, expected_start = _validate_window_entry(
+            session_dir, window, expected_index, session_id, expected_start, window_seconds
+        )
+        issues.extend(entry_issues)
 
-        segment = window.get("segment")
-        features = window.get("feature_samples")
-        if not isinstance(segment, dict) or not isinstance(features, dict):
-            issues.append(f"window_references_missing:{expected_index}")
-            continue
-        for field in ("video_path", "audio_path"):
-            value = segment.get(field)
-            if not isinstance(value, str):
-                issues.append(f"segment_reference_missing:{expected_index}:{field}")
-                continue
-            try:
-                path = PurePosixPath(value)
-                resolved = (session_dir / Path(*path.parts)).resolve()
-                resolved.relative_to(session_dir.resolve())
-                if not resolved.is_file():
-                    issues.append(f"segment_file_missing:{expected_index}:{field}")
-            except (ValueError, OSError):
-                issues.append(f"unsafe_segment_reference:{expected_index}:{field}")
-        for modality in ("audio", "visual"):
-            sample_range = features.get(modality)
-            if not isinstance(sample_range, dict):
-                issues.append(f"feature_range_missing:{expected_index}:{modality}")
-                continue
-            path = sample_range.get("path")
-            start_index = sample_range.get("start_index")
-            end_index = sample_range.get("end_index_exclusive")
-            if (
-                not isinstance(path, str)
-                or not isinstance(start_index, int)
-                or not isinstance(end_index, int)
-                or start_index < 0
-                or end_index <= start_index
-                or sample_range.get("sample_count") != end_index - start_index
-            ):
-                issues.append(f"feature_range_invalid:{expected_index}:{modality}")
-                continue
-            feature_path = session_dir / path
-            try:
-                feature_path.resolve().relative_to(session_dir.resolve())
-                feature_payload = _read_json(feature_path)
-                timestamps = _timestamps(feature_payload, modality)
-                if end_index > len(timestamps):
-                    issues.append(f"feature_range_out_of_bounds:{expected_index}:{modality}")
-                elif not (
-                    float(start) <= timestamps[start_index] < float(end)
-                    and float(start) <= timestamps[end_index - 1] < float(end)
-                ):
-                    issues.append(f"feature_timestamp_outside_window:{expected_index}:{modality}")
-            except (OSError, ValueError):
-                issues.append(f"feature_source_invalid:{expected_index}:{modality}")
-
-    source_artifacts = index.get("source_artifacts")
-    if not isinstance(source_artifacts, dict):
-        issues.append("source_artifacts_missing")
-    else:
-        for relative_path, record in source_artifacts.items():
-            if not isinstance(record, dict) or not isinstance(record.get("sha256"), str):
-                issues.append(f"source_hash_missing:{relative_path}")
-                continue
-            relative = PurePosixPath(relative_path)
-            if relative.is_absolute() or ".." in relative.parts or "\\" in relative_path:
-                issues.append(f"unsafe_source_path:{relative_path}")
-                continue
-            path = session_dir / Path(*relative.parts)
-            if not path.is_file() or _sha256(path) != record["sha256"]:
-                issues.append(f"source_hash_mismatch:{relative_path}")
+    issues.extend(_validate_source_artifacts(session_dir, index.get("source_artifacts")))
     return issues
