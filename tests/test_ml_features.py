@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import soundfile as sf
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +65,9 @@ import session_manifest as session_manifest_module
 import validate_multimodal_artifacts as artifact_validation_module
 import window_index as window_index_module
 import config.utils as config_utils_module
+import config.views as config_views_module
+import users.admin as users_admin_module
+import users.management.commands.importar_laravel as users_laravel_module
 import ml.create_window_index as create_window_index_module
 import evaluations.management.commands.seed_forms as seed_forms_module
 import evaluations.management.commands.seed_scales as seed_scales_module
@@ -194,6 +197,48 @@ class MlFeatureTests(TestCase):
             config_utils_module.staff_member_required(lambda *_: True)(None, info)
         info.context.user.is_staff = True
         self.assertTrue(config_utils_module.staff_member_required(lambda *_: True)(None, info))
+
+    def test_config_views_user_admin_and_legacy_command_helpers(self):
+        request = RequestFactory().get("/health/")
+        self.assertEqual(config_views_module.health_view(request).status_code, 200)
+        self.assertEqual(config_views_module.csrf_token_view(request).status_code, 200)
+        with override_settings(APP_ENCRYPTION_ENABLED=False):
+            self.assertEqual(config_views_module.application_encryption_key_view(request).status_code, 404)
+        with override_settings(APP_ENCRYPTION_ENABLED=True), patch.object(config_views_module, "public_jwk", return_value={"kty": "RSA"}):
+            self.assertEqual(config_views_module.application_encryption_key_view(request).status_code, 200)
+
+        admin = users_admin_module.UserAdmin(users_admin_module.User, users_admin_module.admin.site)
+        user = SimpleNamespace(first_name="Jane", last_name="Doe", is_active=True, status="active", foto=None)
+        self.assertEqual(admin.full_name(user), "Jane Doe")
+        self.assertTrue(admin.display_active(user))
+        self.assertEqual(admin.display_status(user), "active")
+        user.groups = MagicMock(exists=MagicMock(return_value=False))
+        self.assertEqual(admin.get_groups(user), "Sin Rol")
+        user.foto = SimpleNamespace(url="/foto.jpg")
+        self.assertIn("img", str(admin.show_foto(user)))
+        class BrokenPhoto:
+            @property
+            def url(self):
+                raise ValueError
+        user.foto = BrokenPhoto()
+        self.assertEqual(admin.show_foto(user), "Sin imagen")
+        with patch.object(users_admin_module.User.objects, "filter", side_effect=[MagicMock(count=MagicMock(return_value=1)), MagicMock(count=MagicMock(return_value=2)), MagicMock(count=MagicMock(return_value=3))]), \
+             patch.object(users_admin_module.Group.objects, "count", return_value=4), \
+             patch.object(users_admin_module.BaseUserAdmin, "changelist_view", return_value="response"):
+            self.assertEqual(admin.changelist_view(request), "response")
+
+        command = users_laravel_module.Command()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(1, "Jane", None)]
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        rows = command._query_table(connection, "usuarios")
+        self.assertEqual(rows[0][0], "1")
+        self.assertEqual(rows[0][1], "Jane")
+        self.assertEqual(rows[0][2], "")
+        with patch.object(users_laravel_module.mysql.connector, "connect", side_effect=users_laravel_module.mysql.connector.Error("offline")):
+            with self.assertRaises(Exception):
+                command.handle(host="db", user="u", password="p", database="d", port=3306, truncate=False, dry_run=False)
     def test_clinical_plan_step_and_report_lifecycle_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
         info = SimpleNamespace(context=SimpleNamespace(user=user))
