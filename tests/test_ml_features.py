@@ -1164,6 +1164,39 @@ class MlFeatureTests(TestCase):
             response = pipeline_views_module.listar_modelos_mlops(request)
         self.assertEqual(response.status_code, 200)
 
+    def test_window_index_builds_full_windows_and_validates_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            segments_dir = session / "processed" / "segments"
+            features_dir = session / "processed" / "features"
+            segments_dir.mkdir(parents=True)
+            features_dir.mkdir(parents=True)
+            for relative in ("window_000000/video.mp4", "window_000000/audio.wav", "window_000001/video.mp4", "window_000001/audio.wav"):
+                path = segments_dir / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"segment")
+            segments = {
+                "session_id": "S1", "window_seconds": 1, "effective_duration_seconds": 1.5,
+                "clock": "seconds", "drift_tolerance_seconds": 0.1,
+                "segments": [
+                    {"index": 0, "start_seconds": 0, "end_seconds": 1, "duration_seconds": 1,
+                     "video": "window_000000/video.mp4", "audio": "window_000000/audio.wav", "sync_drift_seconds": 0},
+                    {"index": 1, "start_seconds": 1, "end_seconds": 1.5, "duration_seconds": 0.5,
+                     "video": "window_000001/video.mp4", "audio": "window_000001/audio.wav", "sync_drift_seconds": 0},
+                ],
+            }
+            (segments_dir / "segments.json").write_text(json.dumps(segments))
+            for name in ("audio_features.json", "visual_motion.json"):
+                (features_dir / name).write_text(json.dumps({"timestamps": [0, 0.5, 1, 1.5], "value": [1, 2, 3, 4]}))
+            index = build_window_index(session)
+            self.assertEqual(index["complete_windows"], 1)
+            self.assertEqual(len(index["excluded_segments"]), 1)
+            self.assertEqual(validate_window_index(index, session), [])
+            broken = dict(index)
+            broken["schema_version"] = "0"
+            self.assertIn("unsupported_schema_version", validate_window_index(broken, session))
+
+
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
