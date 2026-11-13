@@ -343,6 +343,7 @@ class MlFeatureTests(TestCase):
             self.assertEqual(clinical_queries_module.Query().resolve_intervention_plans(info, patient_id="1", search="x").total_count, 2)
             self.assertEqual(list(clinical_queries_module.Query().resolve_therapy_reports(info, patient_id="1")), [])
             self.assertEqual(list(clinical_queries_module.Query().resolve_session_plan_steps(info, session_id="1", plan_step_id="2", plan_id="3", is_completed=True)), [])
+
     def test_movement_features_track_pose_and_proximity(self):
         landmarks = [{"x": 0.1, "y": 0.2, "visibility": 0.9}]
         first = {"timestamp_seconds": 0.0, "poses": [{"landmarks": landmarks}]}
