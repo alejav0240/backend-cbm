@@ -1064,6 +1064,106 @@ class MlFeatureTests(TestCase):
         self.assertEqual(str(discount.value), "5")
         self.assertEqual(result.discount, discount)
 
+    def test_pipeline_sample_annotation_update_and_artifact_endpoints(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        features = {name: 1.0 for name in pipeline_models_module.DATASET_FEATURE_COLUMNS}
+        labels = {"visual__MOVIMIENTO": 1}
+        sample = SimpleNamespace(
+            id=1, pk=1, session_id="S1", window_id="W1", features=features, labels=labels,
+            reviewed=False, start_time=0, end_time=1, demuca_phase="MOVIMIENTO",
+            sound_tags=[], movement_tags=[], interaction_tags=[], derived_features={},
+            pose_landmarks=[], artifact_payload={}, updated_at=SimpleNamespace(isoformat=lambda: "now"),
+            save=MagicMock(),
+        )
+        samples = MagicMock()
+        samples.filter.return_value.first.return_value = sample
+        dataset = SimpleNamespace(id=1, samples=samples)
+        body = json.dumps({"session_id": "S1", "window_id": "W1", "features": features, "labels": labels}).encode()
+        request = SimpleNamespace(user=user, method="POST", headers={}, body=body)
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample):
+            response = pipeline_views_module.create_dataset_sample(request, 1)
+        self.assertEqual(response.status_code, 201)
+
+        annotation_body = {
+            "session_id": "S1", "window_id": "A1", "start_time": 0, "end_time": 1,
+            "demuca_phase": "MOVIMIENTO", "sound_tags": [], "movement_tags": [],
+            "interaction_tags": [], "derived_features": {}, "pose_landmarks": [],
+            "artifact_payload": {}, "features": features, "labels": labels,
+        }
+        request.body = json.dumps(annotation_body).encode()
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(pipeline_views_module.TherapistDatasetSample.objects, "create", return_value=sample):
+            response = pipeline_views_module.create_dataset_annotation(request, 1)
+        self.assertEqual(response.status_code, 201)
+
+        request.method = "PATCH"
+        request.body = json.dumps({"features": features, "labels": labels, "reviewed": True}).encode()
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset):
+            response = pipeline_views_module.update_dataset_sample(request, 1, 1)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(sample.reviewed)
+
+        request.method = "GET"
+        with patch.object(pipeline_views_module, "_artifact_payload_for_session", return_value=({"x": 1}, [])):
+            response = pipeline_views_module.session_artifacts_for_user(request, "S1")
+        self.assertEqual(response.status_code, 200)
+        result = SimpleNamespace(resultado={"pose_landmarks": [1]})
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=dataset), \
+             patch.object(pipeline_views_module.ResultadoAnalisis.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=result))):
+            response = pipeline_views_module.session_artifacts(request, 1, "S1")
+        self.assertEqual(response.status_code, 200)
+
+    def test_pipeline_annotation_authorization_and_lineage_views(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        sample = SimpleNamespace(
+            pk=2, session_id="S2", start_time=0, end_time=1, demuca_phase="MOVIMIENTO",
+            sound_tags=[], movement_tags=[], interaction_tags=[], pose_landmarks=[],
+            derived_features={}, updated_at=SimpleNamespace(isoformat=lambda: "now"),
+        )
+        sample_qs = MagicMock()
+        sample_qs.filter.return_value = sample_qs
+        sample_qs.order_by.return_value = [sample]
+        sample_qs.count.return_value = 0
+        sample_qs.exists.side_effect = [True, False]
+        dataset = SimpleNamespace(
+            id=1, name="D", description="", status="draft", training_authorized=False,
+            authorized_at=None, created_at=SimpleNamespace(isoformat=lambda: "c"),
+            updated_at=SimpleNamespace(isoformat=lambda: "u"), samples=sample_qs,
+        )
+        sample_qs.count.return_value = 1
+        sample_qs.filter.return_value.count.return_value = 0
+        sample_qs.all.return_value = sample_qs
+        request = SimpleNamespace(user=user, method="GET", headers={}, body=b"")
+        with patch.object(pipeline_views_module, "_annotation_dataset_for_user", return_value=dataset):
+            response = pipeline_views_module.annotation_windows(request, "S2")
+        self.assertEqual(response.status_code, 200)
+
+        dataset.training_authorized = False
+        dataset.status = "draft"
+        dataset.save = MagicMock()
+        dataset.authorized_at = None
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=dataset))):
+            response = pipeline_views_module.authorize_dataset(SimpleNamespace(user=user, method="POST", headers={}, body=b""), 1)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(dataset.training_authorized)
+
+        result = SimpleNamespace(
+            session_id="S2", estado="completed", mlflow_run_id="r", mlflow_experiment="e",
+            mlflow_model_name="m", mlflow_model_version="1", model_sha256="h",
+            dataset_hash="d", creado_en=SimpleNamespace(isoformat=lambda: "now"),
+        )
+        with patch.object(pipeline_views_module.ResultadoAnalisis.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=result))):
+            response = pipeline_views_module.obtener_lineage_mlops(request, "S2")
+        self.assertEqual(response.status_code, 200)
+        listed = MagicMock()
+        listed.__iter__.return_value = iter([result])
+        with patch.object(pipeline_views_module.ResultadoAnalisis.objects, "exclude", return_value=MagicMock(order_by=MagicMock(return_value=listed))):
+            response = pipeline_views_module.listar_modelos_mlops(request)
+        self.assertEqual(response.status_code, 200)
+
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
