@@ -1647,7 +1647,58 @@ class MlFeatureTests(TestCase):
         self.assertTrue(connection["ssh"])
         self.assertIsNone(tunnel)
 
+    def test_session_importer_dry_run_and_evaluation_paths(self):
+        logger = MagicMock()
+        importer = SessionImporter(logger=logger, dry_run=True)
+        payment = SimpleNamespace(patient=SimpleNamespace(),)
+        therapist = SimpleNamespace()
+        row = ["1", "10", "2", "3", "REALIZADO", "2026-01-02", "PAGADO", "ERI A", "CIM B", "exec", "notes", "2026-01-01 10:00:00", ""]
+        with patch.object(importer, "_load_scale_values", return_value={}), \
+             patch.object(session_importer_module, "Session", MagicMock()):
+            importer.import_sessions([["short"], row, ["1", "99"]], {10: payment}, therapist)
+        self.assertEqual(importer.stats["sessions"], 1)
+        self.assertEqual(importer.stats["evaluations"], 2)
+        self.assertTrue(logger.called)
 
+        importer = SessionImporter(logger=logger, dry_run=False)
+        created_session = SimpleNamespace(pk=4, patient=payment.patient, therapist=therapist)
+        scale_value = SimpleNamespace(scale_id=2, label="1: A")
+        fake_session = MagicMock()
+        with patch.object(importer, "_load_scale_values", return_value={(2, "a"): scale_value, (3, "b"): scale_value}), \
+             patch.object(session_importer_module, "Session", fake_session), \
+             patch.object(session_importer_module.ScaleEvaluation.objects, "create", return_value=SimpleNamespace()), \
+             patch.object(session_importer_module.ScaleEvaluationValueResponse.objects, "create"):
+            fake_session.objects.create.return_value = created_session
+            fake_session.objects.filter.return_value.update = MagicMock()
+            importer.import_sessions([row], {10: payment}, therapist)
+        self.assertEqual(importer.stats["evaluations"], 2)
+
+    def test_laravel_importer_plans_scales_and_demuca_rows(self):
+        command = laravel_command_module.Command()
+        patient = SimpleNamespace(id=1)
+        plan = SimpleNamespace()
+        step = SimpleNamespace(focus=None, musical_resources=None, musical_emphasis=None, mlt_method=None, approach=None, save=MagicMock())
+        with patch.object(laravel_command_module.InterventionPlan.objects, "create", return_value=plan), \
+             patch.object(laravel_command_module.PlanStep.objects, "create", return_value=step):
+            plan_map, step_map = {}, {}
+            self.assertTrue(command._import_plan_row(["10", "0", "1", "inicio", "Obj", "Focus", "MLT", "Approach", "30", "", ""], plan_map, step_map, {1: {"patient": patient}}, SimpleNamespace()))
+        command._apply_subplan_row(["", "10", "RECURSO", "Piano", "", ""], step_map)
+        self.assertEqual(step.musical_resources, "Piano")
+        scale = SimpleNamespace()
+        with patch.object(laravel_command_module.Scale.objects, "get_or_create", return_value=(scale, True)), \
+             patch.object(laravel_command_module.Subscale.objects, "get_or_create", return_value=(SimpleNamespace(max_value=5), True)):
+            scales, categories = {}, {}
+            command._import_matrix_row(["20", "ERI", "Item", "5", "", "", ""], scales, categories)
+            command._import_submatrix_row(["", "20", "", "Other", "", ""], scales, categories)
+        self.assertIn("ERI", scales)
+        evaluation = SimpleNamespace()
+        subscale = SimpleNamespace(max_value=5)
+        with patch.object(laravel_command_module.Scale.objects, "get_or_create", return_value=(scale, True)), \
+             patch.object(laravel_command_module.Subscale.objects, "get_or_create", return_value=(subscale, True)), \
+             patch.object(laravel_command_module.ScaleEvaluation.objects, "create", return_value=evaluation), \
+             patch.object(laravel_command_module.ScaleEvaluationSubscaleResponse.objects, "update_or_create"):
+            count = command._import_demuca_row(["1", "1", "ERI", "", "Item", "3", "1", "2026-01-01", "ERI", "", ""], {}, {1: {"patient": patient}}, SimpleNamespace(), {})
+        self.assertEqual(count, 1)
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
