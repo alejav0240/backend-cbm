@@ -67,7 +67,6 @@ def _validate_json_value(value, field_name, depth=0):
     if isinstance(value, (list, dict)):
         _validate_json_collection(value, field_name, depth)
         return
-        return
     raise ValidationError(f"invalid value: {field_name}")
 
 

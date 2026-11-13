@@ -64,8 +64,6 @@ class CreatePayment(graphene.Mutation):
             raise GraphQLError("ID de paciente inválido")
 
         base_total = Decimal(str(price_per_session)) * sessions_count
-        final_total = base_total
-        
         discount_obj, final_total = _resolve_discount(discount_id, base_total)
 
         paid = Decimal(str(amount_paid))

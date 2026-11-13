@@ -70,27 +70,78 @@ def _match_centroids(
     return matches
 
 
+def _raised_arm_values(pose, visibility_threshold):
+    landmarks = pose.get("landmarks", [])
+    if not isinstance(landmarks, list) or len(landmarks) <= 16:
+        return []
+    values = []
+    for shoulder_index, wrist_index in ((11, 15), (12, 16)):
+        try:
+            shoulder, wrist = landmarks[shoulder_index], landmarks[wrist_index]
+            visible = (
+                float(shoulder.get("visibility", 0.0)) >= visibility_threshold
+                and float(wrist.get("visibility", 0.0)) >= visibility_threshold
+            )
+            if visible:
+                values.append(float(wrist["y"]) < float(shoulder["y"]))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return values
+
+
+def _pose_measurement(pose, visibility_threshold):
+    points = _visible_points(pose, visibility_threshold)
+    centroid = _pose_centroid(pose, visibility_threshold)
+    if centroid is None:
+        return None
+    height = max(point[1] for point in points) - min(point[1] for point in points) if points else None
+    return centroid, len(points), height, _raised_arm_values(pose, visibility_threshold)
+
+
 def _pose_measurements(poses, visibility_threshold):
     centroids, visible_counts, body_heights, raised_arm_counts = [], [], [], []
     for pose in poses:
-        points = _visible_points(pose, visibility_threshold)
-        centroid = _pose_centroid(pose, visibility_threshold)
-        if centroid is None:
+        measurement = _pose_measurement(pose, visibility_threshold)
+        if measurement is None:
             continue
+        centroid, visible_count, height, arms = measurement
         centroids.append(centroid)
-        visible_counts.append(len(points))
-        if points:
-            body_heights.append(max(point[1] for point in points) - min(point[1] for point in points))
-        landmarks = pose.get("landmarks", [])
-        if isinstance(landmarks, list) and len(landmarks) > 16:
-            for shoulder_index, wrist_index in ((11, 15), (12, 16)):
-                try:
-                    shoulder, wrist = landmarks[shoulder_index], landmarks[wrist_index]
-                    if float(shoulder.get("visibility", 0.0)) >= visibility_threshold and float(wrist.get("visibility", 0.0)) >= visibility_threshold:
-                        raised_arm_counts.append(float(wrist["y"]) < float(shoulder["y"]))
-                except (AttributeError, KeyError, TypeError, ValueError):
-                    continue
+        visible_counts.append(visible_count)
+        if height is not None:
+            body_heights.append(height)
+        raised_arm_counts.extend(arms)
     return centroids, visible_counts, body_heights, raised_arm_counts
+
+
+def _track_updates(matches, centroids, next_track_id, fps):
+    matched_current, motion_values, current_tracks = set(), [], []
+    for track_id, current_index, distance in matches:
+        current_tracks.append((track_id, centroids[current_index]))
+        matched_current.add(current_index)
+        motion_values.append(distance * fps)
+    for current_index, centroid in enumerate(centroids):
+        if current_index not in matched_current:
+            current_tracks.append((next_track_id, centroid))
+            next_track_id += 1
+    return current_tracks, next_track_id, motion_values
+
+
+def _frame_record(timestamp, centroids, visible_counts, body_heights, arms, motion_values, proximity_threshold):
+    pair_distances = [
+        math.dist(left, right)
+        for left_index, left in enumerate(centroids)
+        for right in centroids[left_index + 1:]
+    ]
+    return {
+        "timestamp_seconds": timestamp, "pose_count": len(centroids),
+        "mean_visible_landmarks": sum(visible_counts) / len(visible_counts) if visible_counts else 0.0,
+        "mean_body_height_normalized": sum(body_heights) / len(body_heights) if body_heights else 0.0,
+        "raised_arm_fraction": sum(arms) / len(arms) if arms else None,
+        "anonymous_joint_centroid_motion_per_second": sum(motion_values) / len(motion_values) if motion_values else None,
+        "min_inter_pose_distance_normalized": min(pair_distances) if pair_distances else None,
+        "proximity_candidate": bool(pair_distances and min(pair_distances) <= proximity_threshold),
+        "participant_identity": "unknown",
+    }
 
 
 def _process_frame(frame, frame_index, previous, next_track_id, previous_timestamp, fps, visibility_threshold, proximity_threshold, max_displacement):
@@ -105,31 +156,13 @@ def _process_frame(frame, frame_index, previous, next_track_id, previous_timesta
         previous = []
     centroids, visible_counts, body_heights, raised_arm_counts = _pose_measurements(poses, visibility_threshold)
     matches = _match_centroids(previous, centroids, max_displacement)
-    matched_current, motion_values, current_tracks = set(), [], []
-    for track_id, current_index, distance in matches:
-        current_tracks.append((track_id, centroids[current_index]))
-        matched_current.add(current_index)
-        motion_values.append(distance * fps)
-    for current_index, centroid in enumerate(centroids):
-        if current_index not in matched_current:
-            current_tracks.append((next_track_id, centroid))
-            next_track_id += 1
-    pair_distances = [
-        math.dist(left, right)
-        for left_index, left in enumerate(centroids)
-        for right in centroids[left_index + 1:]
-    ]
-    record = {
-        "timestamp_seconds": timestamp,
-        "pose_count": len(centroids),
-        "mean_visible_landmarks": sum(visible_counts) / len(visible_counts) if visible_counts else 0.0,
-        "mean_body_height_normalized": sum(body_heights) / len(body_heights) if body_heights else 0.0,
-        "raised_arm_fraction": sum(raised_arm_counts) / len(raised_arm_counts) if raised_arm_counts else None,
-        "anonymous_joint_centroid_motion_per_second": sum(motion_values) / len(motion_values) if motion_values else None,
-        "min_inter_pose_distance_normalized": min(pair_distances) if pair_distances else None,
-        "proximity_candidate": bool(pair_distances and min(pair_distances) <= proximity_threshold),
-        "participant_identity": "unknown",
-    }
+    current_tracks, next_track_id, motion_values = _track_updates(
+        matches, centroids, next_track_id, fps
+    )
+    record = _frame_record(
+        timestamp, centroids, visible_counts, body_heights,
+        raised_arm_counts, motion_values, proximity_threshold,
+    )
     return record, current_tracks, next_track_id, timestamp
 
 

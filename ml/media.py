@@ -44,7 +44,7 @@ def run_existing_extraction(
 
     scripts_dir = project_root / "dataset" / "scripts"
 
-    stages, manifest_regenerated = _run_extraction_stages(
+    stages, _ = _run_extraction_stages(
         session_id, project_root, session_dir, manifest_path, manifest_mode,
         video, audio, frames_dir, audio_features, visual_features, scripts_dir, overwrite,
     )
@@ -127,7 +127,7 @@ def _create_video_part(staging, index, source_video, duration):
     return output
 
 
-def _create_audio_part(staging, index, source_video, source_audio, duration, has_audio, tolerance):
+def _create_audio_part(staging, index, source_audio, duration, has_audio, tolerance):
     output = staging / f"part-{index:06d}-audio.wav"
     if has_audio:
         if probe_stream_duration(source_audio, "a:0") + tolerance < duration:
@@ -167,7 +167,7 @@ def _process_manifest_fragment(staging, manifest_path, fragment, index, previous
     video_parts.append(_create_video_part(staging, index, source_video, duration))
     source_audio = manifest_path.parent / fragment["audio_path"] if fragment.get("audio_path") else source_video
     has_audio = bool(fragment.get("audio_path")) or _has_audio_stream(source_video)
-    audio_parts.append(_create_audio_part(staging, index, source_video, source_audio, duration, has_audio, tolerance))
+    audio_parts.append(_create_audio_part(staging, index, source_audio, duration, has_audio, tolerance))
     return video_parts, audio_parts, start + duration
 
 
@@ -447,7 +447,12 @@ def _segment_source_info(video, audio, max_tail_trim_seconds):
     source_drift = abs(video_duration - audio_duration)
     if source_drift > max_tail_trim_seconds:
         raise ValueError(f"source streams differ by {source_drift:.3f}s (maximum tail trim {max_tail_trim_seconds:.3f}s)")
-    trimmed_stream = "audio" if audio_duration > video_duration else "video" if video_duration > audio_duration else None
+    if audio_duration > video_duration:
+        trimmed_stream = "audio"
+    elif video_duration > audio_duration:
+        trimmed_stream = "video"
+    else:
+        trimmed_stream = None
     return video_duration, audio_duration, source_drift, trimmed_stream, min(video_duration, audio_duration)
 
 

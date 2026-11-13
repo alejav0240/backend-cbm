@@ -146,23 +146,78 @@ def _validate_timeline(normalized, duration, policy, tolerance, errors, warnings
     normalized.sort(key=lambda item: item[0])
     previous_end = None
     for _, start, fragment_duration, path in normalized:
-        end = start + fragment_duration
-        if end > float(duration) + tolerance:
-            errors.append(_issue("fragment_exceeds_session_duration", path, "fragment ends after duration_seconds"))
-        if previous_end is None:
-            if abs(start) > tolerance:
-                errors.append(_issue("timeline_does_not_start_at_zero", path, "first fragment must start at session time zero"))
-        else:
-            delta = start - previous_end
-            if delta < 0:
-                errors.append(_issue("fragment_overlap", path, f"fragment overlaps the previous fragment by {-delta:.3f}s"))
-            elif delta > 0:
-                issue = _issue("timeline_gap", path, f"timeline has a {delta:.3f}s gap before this fragment")
-                (errors if policy == "contiguous" and delta > tolerance else warnings).append(issue)
-        previous_end = end
+        previous_end = _validate_timeline_fragment(
+            start, fragment_duration, path, previous_end,
+            duration, policy, tolerance, errors, warnings,
+        )
     final_end = normalized[-1][1] + normalized[-1][2]
     if abs(float(duration) - final_end) > tolerance:
         errors.append(_issue("session_duration_mismatch", "duration_seconds", "duration must match the final fragment end"))
+
+
+def _validate_timeline_fragment(start, fragment_duration, path, previous_end, duration, policy, tolerance, errors, warnings):
+    end = start + fragment_duration
+    if end > float(duration) + tolerance:
+        errors.append(_issue("fragment_exceeds_session_duration", path, "fragment ends after duration_seconds"))
+    if previous_end is None:
+        if abs(start) > tolerance:
+            errors.append(_issue("timeline_does_not_start_at_zero", path, "first fragment must start at session time zero"))
+    else:
+        delta = start - previous_end
+        if delta < 0:
+            errors.append(_issue("fragment_overlap", path, f"fragment overlaps the previous fragment by {-delta:.3f}s"))
+        elif delta > 0:
+            issue = _issue("timeline_gap", path, f"timeline has a {delta:.3f}s gap before this fragment")
+            (errors if policy == "contiguous" and delta > tolerance else warnings).append(issue)
+    return end
+
+
+def _validate_manifest_schema(payload, errors):
+    required = {"schema_version", "session_id", "source_version", "clock", "timeline_policy", "duration_seconds", "participants", "fragments"}
+    for key in sorted(required - payload.keys()):
+        errors.append(_issue("required_field_missing", key, f"required field '{key}' is missing"))
+    for key in sorted(payload.keys() - required):
+        errors.append(_issue("unknown_field", key, f"field '{key}' is not in manifest schema 1.0"))
+    if errors:
+        return None, None
+    policy = payload["timeline_policy"]
+    _validate_manifest_metadata(payload, errors)
+    if not isinstance(policy, str) or policy not in TIMELINE_POLICIES:
+        errors.append(_issue("invalid_timeline_policy", "timeline_policy", "expected contiguous or preserve_gaps"))
+    duration = payload["duration_seconds"]
+    if not _is_finite_number(duration) or duration <= 0:
+        errors.append(_issue("invalid_session_duration", "duration_seconds", "duration must be a finite number greater than zero"))
+    return policy, duration
+
+
+def _validate_manifest_metadata(payload, errors):
+    checks = (
+        (payload["schema_version"] != SCHEMA_VERSION, "unsupported_schema_version", "schema_version", f"expected {SCHEMA_VERSION}"),
+        (not isinstance(payload["session_id"], str) or not payload["session_id"].strip(), "invalid_session_id", "session_id", "session_id must be a non-empty string"),
+        (not isinstance(payload["source_version"], str) or not payload["source_version"].strip(), "invalid_source_version", "source_version", "source_version must be a non-empty string"),
+        (payload["clock"] != CLOCK, "unsupported_clock", "clock", f"clock must be '{CLOCK}'"),
+    )
+    for invalid, code, path, message in checks:
+        if invalid:
+            errors.append(_issue(code, path, message))
+
+
+def _validate_manifest_arrays(payload, session_dir, check_files, errors):
+    participants = payload["participants"]
+    if not isinstance(participants, list):
+        errors.append(_issue("invalid_participants", "participants", "participants must be an array"))
+    else:
+        ids = set()
+        for index, participant in enumerate(participants):
+            _validate_participant(participant, f"participants[{index}]", ids, errors)
+    fragments = payload["fragments"]
+    if not isinstance(fragments, list) or not fragments:
+        errors.append(_issue("invalid_fragments", "fragments", "fragments must be a non-empty array"))
+        fragments = []
+    ids, orders, normalized = set(), [], []
+    for index, fragment in enumerate(fragments):
+        _validate_fragment(fragment, f"fragments[{index}]", ids, orders, normalized, errors, session_dir, check_files)
+    return fragments, orders, normalized
 
 
 def validate_session_manifest(
@@ -188,57 +243,10 @@ def validate_session_manifest(
             "warnings": [],
         }
 
-    required = {
-        "schema_version",
-        "session_id",
-        "source_version",
-        "clock",
-        "timeline_policy",
-        "duration_seconds",
-        "participants",
-        "fragments",
-    }
-    for key in sorted(required - payload.keys()):
-        errors.append(_issue("required_field_missing", key, f"required field '{key}' is missing"))
-    for key in sorted(payload.keys() - required):
-        errors.append(_issue("unknown_field", key, f"field '{key}' is not in manifest schema 1.0"))
+    policy, duration = _validate_manifest_schema(payload, errors)
     if errors:
         return {"valid": False, "errors": errors, "warnings": warnings}
-
-    if payload["schema_version"] != SCHEMA_VERSION:
-        errors.append(_issue("unsupported_schema_version", "schema_version", f"expected {SCHEMA_VERSION}"))
-    if not isinstance(payload["session_id"], str) or not payload["session_id"].strip():
-        errors.append(_issue("invalid_session_id", "session_id", "session_id must be a non-empty string"))
-    if not isinstance(payload["source_version"], str) or not payload["source_version"].strip():
-        errors.append(_issue("invalid_source_version", "source_version", "source_version must be a non-empty string"))
-    if payload["clock"] != CLOCK:
-        errors.append(_issue("unsupported_clock", "clock", f"clock must be '{CLOCK}'"))
-    policy = payload["timeline_policy"]
-    if not isinstance(policy, str) or policy not in TIMELINE_POLICIES:
-        errors.append(_issue("invalid_timeline_policy", "timeline_policy", "expected contiguous or preserve_gaps"))
-
-    duration = payload["duration_seconds"]
-    if not _is_finite_number(duration) or duration <= 0:
-        errors.append(_issue("invalid_session_duration", "duration_seconds", "duration must be a finite number greater than zero"))
-
-    participants = payload["participants"]
-    if not isinstance(participants, list):
-        errors.append(_issue("invalid_participants", "participants", "participants must be an array"))
-    else:
-        participant_ids: set[str] = set()
-        for index, participant in enumerate(participants):
-            _validate_participant(participant, f"participants[{index}]", participant_ids, errors)
-
-    fragments = payload["fragments"]
-    if not isinstance(fragments, list) or not fragments:
-        errors.append(_issue("invalid_fragments", "fragments", "fragments must be a non-empty array"))
-        fragments = []
-
-    ids: set[str] = set()
-    orders: list[int] = []
-    normalized: list[tuple[int, float, float, str]] = []
-    for index, fragment in enumerate(fragments):
-        _validate_fragment(fragment, f"fragments[{index}]", ids, orders, normalized, errors, session_dir, check_files)
+    fragments, orders, normalized = _validate_manifest_arrays(payload, session_dir, check_files, errors)
 
     if orders and sorted(orders) != list(range(len(fragments))):
         errors.append(_issue("fragment_order_not_contiguous", "fragments", "order values must be unique and contiguous starting at zero"))

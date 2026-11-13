@@ -651,7 +651,7 @@ def actualizar_demuca(request, session_id: str):
         demuca_actual = demuca_actual if isinstance(demuca_actual, dict) else {}
         datos_actuales = demuca_actual.get("data")
         datos = merge_demuca_data(datos_actuales, incoming, session_id=session_id)
-    except (UnicodeError, ValueError) as error:
+    except ValueError as error:
         _LOGGER.warning("Invalid DEMUCA update: %s", error)
         return _respuesta({"status": "failed", "error": "invalid_request"}, 400, request_id)
 
