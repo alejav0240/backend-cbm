@@ -478,6 +478,17 @@ def _build_segments(staging, video, audio, window_seconds, common_duration, drif
     return records, max_segment_drift
 
 
+def _segment_paths(session_dir, session_id, window_seconds, drift_tolerance_seconds, max_tail_trim_seconds):
+    values = (window_seconds, drift_tolerance_seconds, max_tail_trim_seconds)
+    if any(not math.isfinite(value) for value in values) or window_seconds <= 0 or drift_tolerance_seconds <= 0 or max_tail_trim_seconds < 0:
+        raise ValueError("window/drift tolerance must be positive and tail trim non-negative")
+    video = session_dir / "processed" / "video" / f"{session_id}_1280x720_10fps.mp4"
+    audio = session_dir / "processed" / "audio" / f"{session_id}_16khz_mono.wav"
+    if not video.is_file() or not audio.is_file():
+        raise FileNotFoundError("normalized video and audio are required before segmentation")
+    return video, audio
+
+
 def segment_and_synchronize(
     session_dir: Path,
     session_id: str,
@@ -487,12 +498,10 @@ def segment_and_synchronize(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Cut synchronized streams, trimming only a bounded trailing duration."""
-    if any(not math.isfinite(value) for value in (window_seconds, drift_tolerance_seconds, max_tail_trim_seconds)) or window_seconds <= 0 or drift_tolerance_seconds <= 0 or max_tail_trim_seconds < 0:
-        raise ValueError("window/drift tolerance must be positive and tail trim non-negative")
-    video = session_dir / "processed" / "video" / f"{session_id}_1280x720_10fps.mp4"
-    audio = session_dir / "processed" / "audio" / f"{session_id}_16khz_mono.wav"
-    if not video.is_file() or not audio.is_file():
-        raise FileNotFoundError("normalized video and audio are required before segmentation")
+    video, audio = _segment_paths(
+        session_dir, session_id, window_seconds,
+        drift_tolerance_seconds, max_tail_trim_seconds,
+    )
 
     output_root = session_dir / "processed" / "segments"
     manifest_path = output_root / "segments.json"
