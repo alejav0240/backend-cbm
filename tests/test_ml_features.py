@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import types
+from datetime import date
 from types import SimpleNamespace
 from pathlib import Path
 from unittest import TestCase
@@ -28,6 +29,7 @@ import clinical.mutations as clinical_mutations_module
 import finance.mutations as finance_mutations_module
 import institutions.mutations as institutions_mutations_module
 import evaluations.mutations as evaluations_mutations_module
+import therapeutic_sessions.mutations as therapeutic_mutations_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -46,6 +48,8 @@ from users.management.commands.importers.patient_importer import PatientImporter
 from aplicacion.servicio_analisis_video import ServicioAnalisisVideo
 from session_manifest import validate_session_manifest
 from validate_multimodal_artifacts import validate_multimodal_artifacts
+import session_manifest as session_manifest_module
+import validate_multimodal_artifacts as artifact_validation_module
 from window_index import build_window_index, validate_window_index
 
 
@@ -1074,6 +1078,35 @@ class MlFeatureTests(TestCase):
         with patch.object(finance_mutations_module.Discount.objects, "get", side_effect=finance_mutations_module.Discount.DoesNotExist):
             self.assertFalse(finance_mutations_module.DeleteDiscount.mutate(None, None, "1").success)
 
+    def test_finance_payment_creation_and_enrollment_paths(self):
+        discount = SimpleNamespace(type=finance_mutations_module.Discount.DiscountType.PERCENTAGE, value=10)
+        with patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
+            resolved, total = finance_mutations_module._resolve_discount("1", 100)
+        self.assertIs(resolved, discount)
+        self.assertEqual(total, 90)
+        base = SimpleNamespace(session_date=date(2026, 1, 1), therapist_id=1, session_type="individual", session_number=2)
+        sessions = finance_mutations_module._create_paid_sessions(1, 2, base.session_date, 1, "individual", 2)
+        self.assertEqual(len(sessions), 2)
+
+        expense = SimpleNamespace()
+        with patch.object(finance_mutations_module.Expense.objects, "create", return_value=expense):
+            self.assertIs(finance_mutations_module.CreateExpense.mutate(None, None, "x", "cat", 2, "2026-01-01").expense, expense)
+        course = SimpleNamespace()
+        with patch.object(finance_mutations_module.Course.objects, "create", return_value=course):
+            self.assertIs(finance_mutations_module.CreateCourse.mutate(None, None, "C", 10).course, course)
+        enrollment = SimpleNamespace()
+        with patch.object(finance_mutations_module.Course.objects, "get", return_value=course), \
+             patch.object(finance_mutations_module.CourseEnrollment.objects, "get_or_create", return_value=(enrollment, True)), \
+             patch.object(finance_mutations_module.CoursePayment.objects, "create") as payment_create:
+            self.assertIs(finance_mutations_module.EnrollInCourse.mutate(None, None, "1", "Ana", "cash", 10).enrollment, enrollment)
+        payment_create.assert_called_once()
+        payment = SimpleNamespace(amount_paid=0, payment_status="pending", total_amount=100, discount=None, save=MagicMock(), delete=MagicMock())
+        with patch.object(finance_mutations_module.Payment.objects, "get", return_value=payment):
+            result = finance_mutations_module.UpdatePayment.mutate(None, None, "1", amount_paid=50)
+        self.assertEqual(result.payment, payment)
+        with patch.object(finance_mutations_module.Payment.objects, "get", return_value=payment):
+            self.assertTrue(finance_mutations_module.DeletePayment.mutate(None, None, "1").success)
+
     def test_institution_mutations_cover_crud_and_not_found_paths(self):
         institution = SimpleNamespace(contact_phone="", save=MagicMock(), delete=MagicMock())
         with patch.object(institutions_mutations_module.Institution.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
@@ -1131,6 +1164,95 @@ class MlFeatureTests(TestCase):
         with patch.object(evaluations_mutations_module.FormAssignment.objects, "create", return_value=assignment):
             result = evaluations_mutations_module.AssignForm.mutate(None, info, "1", "1", assigned_to_id="2", patient_id="3", session_id="4")
         self.assertIs(result.assignment, assignment)
+
+    def test_evaluation_assignment_scales_and_responses(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        assignment = SimpleNamespace(assigned_by_id=1, assigned_to_id=2, save=MagicMock(), delete=MagicMock())
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment):
+            self.assertIs(evaluations_mutations_module.UpdateFormAssignment.mutate(None, info, "1", assigned_to_id="3").assignment, assignment)
+            self.assertTrue(evaluations_mutations_module.DeleteFormAssignment.mutate(None, info, "1").success)
+        scale = SimpleNamespace(delete=MagicMock())
+        sub = SimpleNamespace(name="S", description="", max_value=5)
+        with patch.object(evaluations_mutations_module.Scale.objects, "create", return_value=scale), \
+             patch.object(evaluations_mutations_module.Subscale.objects, "create") as create_sub:
+            result = evaluations_mutations_module.CreateScale.mutate(None, info, "Scale", evaluations_mutations_module.Scale.ScaleType.SUBSCALE, subscales=[sub])
+        self.assertIs(result.scale, scale)
+        create_sub.assert_called_once()
+        with patch.object(evaluations_mutations_module.Scale.objects, "get", return_value=scale):
+            self.assertTrue(evaluations_mutations_module.DeleteScale.mutate(None, info, "1").success)
+        response = SimpleNamespace()
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment), \
+             patch.object(evaluations_mutations_module.FormResponse.objects, "update_or_create", return_value=(response, True)):
+            self.assertTrue(evaluations_mutations_module.SubmitFormResponse.mutate(None, info, "1", "2", "yes").success)
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "get", return_value=assignment), \
+             patch.object(evaluations_mutations_module.FormResponse.objects, "update_or_create"):
+            self.assertTrue(evaluations_mutations_module.SubmitFullForm.mutate(None, info, "1", [SimpleNamespace(question_id="2", response_text="yes")]).success)
+
+    def test_therapeutic_inventory_and_resource_mutations(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        item = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        with patch.object(therapeutic_mutations_module.InventoryItem.objects, "create", return_value=item):
+            self.assertIs(therapeutic_mutations_module.CreateInventoryItem.mutate(None, info, "Mic", "audio", "good", "A").item, item)
+        with patch.object(therapeutic_mutations_module.InventoryItem.objects, "get", return_value=item):
+            self.assertIs(therapeutic_mutations_module.UpdateInventoryItem.mutate(None, info, "1", status="in_use").item, item)
+            self.assertTrue(therapeutic_mutations_module.DeleteInventoryItem.mutate(None, info, "1").success)
+        resource = SimpleNamespace(save=MagicMock(), delete=MagicMock())
+        with patch.object(therapeutic_mutations_module.DigitalResource.objects, "create", return_value=resource):
+            created = therapeutic_mutations_module.CreateDigitalResource.mutate(None, info, "Guide", "url", "audio")
+        self.assertIs(created.resource, resource)
+        with patch.object(therapeutic_mutations_module.DigitalResource.objects, "get", return_value=resource):
+            updated = therapeutic_mutations_module.UpdateDigitalResource.mutate(None, info, "1", title="New")
+            self.assertIs(updated.resource, resource)
+            self.assertTrue(therapeutic_mutations_module.DeleteDigitalResource.mutate(None, info, "1").success)
+
+    def test_therapeutic_session_mutations_cover_create_update_and_links(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        session = SimpleNamespace(pk=1, notes="", payment_status="pending", save=MagicMock())
+        with patch.object(therapeutic_mutations_module.Session.objects, "filter", return_value=MagicMock(aggregate=MagicMock(return_value={"last_num": 3}))), \
+             patch.object(therapeutic_mutations_module.Session.objects, "create", return_value=session):
+            result = therapeutic_mutations_module.CreateSession.mutate(None, info, patient_id="1", therapist_id="2", session_date="2026-01-01T00:00:00", session_type="individual")
+        self.assertIs(result.session, session)
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module.Session.objects, "get", return_value=session), \
+             patch.object(therapeutic_mutations_module.SessionResource.objects, "get_or_create"):
+            result = therapeutic_mutations_module.UpdateSession.mutate(None, info, "1", notes="n", duration_minutes=30, video_url="v", session_status="done", therapist_id="1", session_type="group")
+            self.assertIs(result.session, session)
+            self.assertIs(therapeutic_mutations_module.UpdateSessionPaymentStatus.mutate(None, info, "1", "paid").session, session)
+            self.assertTrue(therapeutic_mutations_module.AddSessionResource.mutate(None, info, "1", "2").session_resource)
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module.SessionInventory.objects, "get_or_create", return_value=(SimpleNamespace(), True)):
+            self.assertIsNotNone(therapeutic_mutations_module.AddSessionInventoryItem.mutate(None, info, "1", "2").session_inventory)
+
+    def test_artifact_validation_reports_all_safety_and_alignment_errors(self):
+        issues = []
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            session.mkdir()
+            issue, payload = artifact_validation_module._load_one_artifact(session, "x", {"path": "../escape"})
+            self.assertEqual(issue, "unsafe_artifact_path:x")
+            issue, payload = artifact_validation_module._load_one_artifact(session, "x", {"path": "missing.json", "sha256": ""})
+            self.assertEqual(issue, "artifact_missing:x")
+            artifact_validation_module._validate_estimates(issues, {
+                "training_authorized": True, "ground_truth": True, "calibration_status": "calibrated",
+                "estimates": [{"confidence_percent": 99}, {"confidence_percent": float("nan")}],
+            })
+        self.assertIn("demuca_confidence_invalid:0", issues)
+        self.assertIn("provisional_training_flag_invalid:demuca_estimates", issues)
+        self.assertIn("demuca_calibration_status_invalid", issues)
+        self.assertIn("invalid_window_arrays", artifact_validation_module._validate_loaded_artifacts(
+            Path("/tmp/S1"), {"stable_window_index": {"windows": []}, "acoustic_features": {"windows": {}}}
+        ))
+
+    def test_session_manifest_helper_rejects_invalid_structure(self):
+        report = session_manifest_module.validate_session_manifest({}, Path("/tmp/S1"), check_files=False)
+        self.assertFalse(report["valid"])
+        self.assertTrue(any(issue["code"] == "required_field_missing" for issue in report["errors"]))
 
     def test_pipeline_sample_annotation_update_and_artifact_endpoints(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
