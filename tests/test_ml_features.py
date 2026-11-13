@@ -18,6 +18,9 @@ from demuca_estimates import build_demuca_estimates, write_demuca_estimates
 import media
 import media_pipeline as media_pipeline_module
 import config.management.commands.importar_laravel as laravel_command_module
+import analyze_video as analyze_video_module
+import multimodal_features as multimodal_features_module
+from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
 from media import synchronize_pose_with_segments
@@ -31,6 +34,8 @@ from users.management.commands.importers.base_importer import BaseImporter
 import users.management.commands.importers.session_importer as session_importer_module
 from users.management.commands.importers.session_importer import SessionImporter
 from users.management.commands.importers.user_importer import UserImporter
+from users.management.commands.importers.patient_importer import PatientImporter
+from aplicacion.servicio_analisis_video import ServicioAnalisisVideo
 from session_manifest import validate_session_manifest
 from validate_multimodal_artifacts import validate_multimodal_artifacts
 from window_index import build_window_index, validate_window_index
@@ -646,6 +651,120 @@ class MlFeatureTests(TestCase):
             self.assertEqual(command._load_legacy_datasets({"host": "h", "user": "u", "password": "p", "database": "d", "port": 3306}), datasets)
         fetch.assert_called_once_with(connection)
         close.assert_called_once_with(connection, None)
+
+    def test_multimodal_features_aggregate_acoustic_and_interaction_windows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = Path(temporary) / "S1"
+            features = session / "processed" / "features"
+            features.mkdir(parents=True)
+            (features / "acoustic_features.json").write_text(json.dumps({
+                "windows": [
+                    {"timestamp_seconds": 0.2, "spectral_centroid_hz": 100, "pitch_median_hz": 200},
+                    {"timestamp_seconds": 0.8, "spectral_centroid_hz": 300, "pitch_median_hz": None},
+                ]
+            }))
+            (features / "movement_interaction.json").write_text(json.dumps({
+                "windows": [{"window_id": "S1_W0000", "pose_count_mean": 1, "pose_count_max": 2}]
+            }))
+            result = multimodal_features_module.derived_multimodal_features(session, window_seconds=1)
+        self.assertEqual(result["_W0000"]["acoustic_spectral_centroid_mean"], 200)
+        self.assertEqual(result["_W0000"]["acoustic_pitch_median_mean"], 200)
+        self.assertEqual(result["_W0000"]["pose_count_max"], 2)
+
+    def test_patient_importer_dry_run_handles_placeholder_and_duplicate_ci(self):
+        messages = []
+        importer = PatientImporter(logger=messages.append, dry_run=True)
+        row = ["1", "Ana", "Lopez", "0", "2020-01-01", "", "note", "diag", "res", "Tutor", "", "", "objective", "social", "cognitive", "physical", "emotional", "method", "additional", "5", "2026-01-01 10:00:00"]
+        duplicate_row = row.copy()
+        duplicate_row[3] = "ABC"
+        patients, info = importer.import_patients([row, duplicate_row, duplicate_row], {}, SimpleNamespace())
+        self.assertEqual(len(patients), 1)
+        self.assertEqual(importer.stats["patients"], 3)
+        self.assertEqual(importer._split_name(""), ("Tutor", "Legacy"))
+        self.assertTrue(any("CI duplicado" in message for message in messages))
+        self.assertEqual(importer._resolve_patient_ci("0000", 9, "A", "B"), "LEGACY-PAT-9")
+
+    def test_analyze_video_adapter_and_progress_reporter(self):
+        reporter = analyze_video_module.ProgressReporter(enabled=True)
+        reporter("extraccion", "start")
+        reporter("extraccion", "done")
+        reporter("unknown", "start")
+        disabled = analyze_video_module.ProgressReporter(enabled=False)
+        disabled("audio", "start")
+        fake_service = MagicMock()
+        fake_service.ejecutar.return_value = {"status": "completed"}
+        with patch.object(analyze_video_module, "ServicioAnalisisVideo", return_value=fake_service):
+            result = analyze_video_module.analyze_video(Path("video.mp4"), session_id="S1")
+        self.assertEqual(result["status"], "completed")
+        fake_service.ejecutar.assert_called_once()
+
+    def test_service_writes_metadata_and_reuses_staged_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = root / "S1"
+            staged = session / "raw" / "input.mp4"
+            staged.parent.mkdir(parents=True)
+            staged.write_bytes(b"video")
+            manifest = session / "session_manifest.json"
+            repository = ServicioAnalisisVideo.__dict__["_write_session_metadata"]
+            from infraestructura.persistencia_json import RepositorioArtefactos
+            repo = RepositorioArtefactos()
+            repository(session, staged, manifest, "S1", 2.5, repo)
+            self.assertEqual(json.loads(manifest.read_text())["duration_seconds"], 2.5)
+            service = ServicioAnalisisVideo(lambda _: 1, lambda *args, **kwargs: {})
+            self.assertEqual(service._reuse_or_stage(session, session / "response.json", staged, manifest, staged, repo.huella(staged), repo), 2.5)
+
+    def test_service_executes_pipeline_and_returns_safe_response_without_mlflow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            video = root / "input.mp4"
+            video.write_bytes(b"video")
+            session_dir = root / "dataset" / "dataset" / "sessions" / "S1"
+            session_dir.mkdir(parents=True)
+            response_path = session_dir / "processed" / "analysis_response.json"
+            repository = MagicMock()
+            repository.leer_json.side_effect = lambda path: json.loads(path.read_text())
+            summary = {
+                "status": "completed", "segments_created": 1, "pose_enabled": False,
+                "pose_frames_processed": 0, "acoustic_windows": 1,
+                "vocalization_candidates": 0, "movement_interaction_status": "skipped",
+                "artifact_validation": "passed", "max_segment_drift_seconds": 0,
+                "source_drift_seconds": 0, "tail_trim_seconds": 0,
+            }
+            service = ServicioAnalisisVideo(lambda _: 1.5, MagicMock(return_value=summary))
+            with patch.object(service, "_prepare_session", return_value=(
+                session_dir, root / "pose.task", True, response_path, repository, "a" * 64, 1.5,
+            )), patch("aplicacion.servicio_analisis_video.write_demuca_draft", return_value={"draft": True}), \
+                 patch("aplicacion.servicio_analisis_video.predict_session", return_value={"status": "unavailable", "training_authorized": False}), \
+                 patch("aplicacion.servicio_analisis_video.log_run", side_effect=RuntimeError("mlflow missing")):
+                result = service.ejecutar(
+                    video, session_id="S1", project_root=root, window_seconds=1,
+                    max_tail_trim_seconds=0.2, pose_model=None, skip_pose=True,
+                    session_id_pattern=analyze_video_module.SESSION_ID_PATTERN,
+                )
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["demuca"]["status"], "draft")
+            self.assertEqual(result["mlflow"]["status"], "unavailable")
+            repository.escribir_json_atomico.assert_called_once()
+
+    def test_multilabel_model_trains_predicts_and_restores_artifact(self):
+        rows = [
+            {"audio_rms_mean": 0, "audio_zcr_mean": 0, "visual_motion_mean": 0, "visual_motion_max": 0, "sound": 0, "movement": 1},
+            {"audio_rms_mean": 1, "audio_zcr_mean": 1, "visual_motion_mean": 1, "visual_motion_max": 1, "sound": 1, "movement": 1},
+            {"audio_rms_mean": 2, "audio_zcr_mean": 2, "visual_motion_mean": 2, "visual_motion_max": 2, "sound": 1, "movement": 0},
+        ]
+        model = MultilabelLogisticModel().fit(rows, ["sound", "movement"])
+        probabilities = model.predict_proba(rows)
+        self.assertEqual(len(probabilities), 3)
+        self.assertEqual(len(model.predict(rows)), 3)
+        restored = MultilabelLogisticModel.from_dict(model.to_dict())
+        self.assertEqual(restored.predict(rows), model.predict(rows))
+        constant = MultilabelLogisticModel().fit(rows, ["sound"])
+        self.assertIn("sound", constant.predict_proba(rows)[0])
+        with self.assertRaisesRegex(ValueError, "invalid_or_missing_model_feature"):
+            model.predict([{"audio_rms_mean": 1}])
+        with self.assertRaisesRegex(ValueError, "unsupported_model_type"):
+            MultilabelLogisticModel.from_dict({"model_type": "other"})
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
         with tempfile.TemporaryDirectory() as temporary:
