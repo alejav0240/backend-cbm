@@ -224,8 +224,8 @@ class MlFeatureTests(TestCase):
         self.assertEqual(admin.show_foto(user), "Sin imagen")
         with patch.object(users_admin_module.User.objects, "filter", side_effect=[MagicMock(count=MagicMock(return_value=1)), MagicMock(count=MagicMock(return_value=2)), MagicMock(count=MagicMock(return_value=3))]), \
              patch.object(users_admin_module.Group.objects, "count", return_value=4), \
-             patch.object(users_admin_module.BaseUserAdmin, "changelist_view", return_value="response"):
-            self.assertEqual(admin.changelist_view(request), "response")
+             patch.object(users_admin_module.BaseUserAdmin, "changelist_view", return_value=config_views_module.JsonResponse({})):
+            self.assertEqual(admin.changelist_view(request).status_code, 200)
 
         command = users_laravel_module.Command()
         cursor = MagicMock()
