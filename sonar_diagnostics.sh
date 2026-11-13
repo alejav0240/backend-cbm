@@ -6,6 +6,8 @@ HOST_URL="${SONAR_HOST_URL:-https://sonar.isilp.com}"
 PROJECT_KEY="${SONAR_PROJECT:-cbm-backend}"
 BRANCH="${SONAR_BRANCH:-feat/project-hardening}"
 PULL_REQUEST="${SONAR_PR:-}"
+USE_SCOPED_ANALYSIS="${SONAR_USE_SCOPED_ANALYSIS:-false}"
+INCLUDE_CE_TASKS="${SONAR_INCLUDE_CE_TASKS:-false}"
 
 clean_value() {
     printf '%s' "$1" | tr -d '\302\240\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -39,7 +41,10 @@ fi
 echo "SonarQube: $HOST_URL"
 echo "Proyecto:  <$PROJECT_KEY>"
 if [[ -n "$PULL_REQUEST" ]]; then
-    echo "Pull Request: $PULL_REQUEST"
+    echo "Pull Request solicitado: $PULL_REQUEST"
+    if [[ "$USE_SCOPED_ANALYSIS" != "true" ]]; then
+        echo "Aviso: se ignora el scope de PR; Community Build no soporta análisis de Pull Requests."
+    fi
 else
     echo "Rama:      <$BRANCH>"
 fi
@@ -56,24 +61,31 @@ query() {
     fi
 }
 
-if [[ -n "$PULL_REQUEST" ]]; then
+if [[ "$USE_SCOPED_ANALYSIS" == "true" && -n "$PULL_REQUEST" ]]; then
     query "QUALITY GATE" \
         "/api/qualitygates/project_status" \
         --data-urlencode "projectKey=${PROJECT_KEY}" \
         --data-urlencode "pullRequest=${PULL_REQUEST}"
-else
+elif [[ "$USE_SCOPED_ANALYSIS" == "true" ]]; then
     query "QUALITY GATE" \
         "/api/qualitygates/project_status" \
         --data-urlencode "projectKey=${PROJECT_KEY}" \
         --data-urlencode "branch=${BRANCH}"
+else
+    query "QUALITY GATE" \
+        "/api/qualitygates/project_status" \
+        --data-urlencode "projectKey=${PROJECT_KEY}"
 fi
 
-if [[ -n "$PULL_REQUEST" ]]; then
+if [[ "$USE_SCOPED_ANALYSIS" == "true" && -n "$PULL_REQUEST" ]]; then
     MEASURE_SCOPE=(--data-urlencode "pullRequest=${PULL_REQUEST}")
     ISSUE_SCOPE=(--data-urlencode "pullRequest=${PULL_REQUEST}")
-else
+elif [[ "$USE_SCOPED_ANALYSIS" == "true" ]]; then
     MEASURE_SCOPE=(--data-urlencode "branch=${BRANCH}")
     ISSUE_SCOPE=(--data-urlencode "branch=${BRANCH}")
+else
+    MEASURE_SCOPE=()
+    ISSUE_SCOPE=()
 fi
 
 query "METRICS" \
@@ -94,7 +106,12 @@ query "OPEN ISSUES" \
     --data-urlencode "resolved=false" \
     --data-urlencode "ps=500"
 
-query "COMPUTE ENGINE TASKS" \
-    "/api/ce/activity" \
-    --data-urlencode "component=${PROJECT_KEY}" \
-    --data-urlencode "ps=20"
+if [[ "$INCLUDE_CE_TASKS" == "true" ]]; then
+    query "COMPUTE ENGINE TASKS" \
+        "/api/ce/activity" \
+        --data-urlencode "component=${PROJECT_KEY}" \
+        --data-urlencode "ps=20"
+else
+    printf '\n=== COMPUTE ENGINE TASKS ===\n'
+    echo "Omitido: requiere privilegios administrativos (SONAR_INCLUDE_CE_TASKS=true para solicitarlo)."
+fi
