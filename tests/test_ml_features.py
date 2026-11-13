@@ -2661,3 +2661,43 @@ class MlFeatureTests(TestCase):
             with patch.object(media, "probe_stream_duration", side_effect=[2.0, 4.0]):
                 with self.assertRaises(ValueError):
                     media._segment_source_info(Path("v"), Path("a"), 1.0)
+
+    def test_pipeline_view_auth_json_and_lineage_helpers(self):
+        unauthenticated = SimpleNamespace(is_authenticated=False)
+        request = SimpleNamespace(user=unauthenticated, headers={})
+        self.assertFalse(pipeline_views_module._authenticate_request(request))
+        request.headers = {"Authorization": "Basic token"}
+        self.assertFalse(pipeline_views_module._authenticate_request(request))
+        authenticated = SimpleNamespace(is_authenticated=True)
+        with patch.object(pipeline_views_module.JSONWebTokenBackend, "authenticate", return_value=authenticated):
+            request.headers = {"Authorization": "Bearer token"}
+            self.assertTrue(pipeline_views_module._authenticate_request(request))
+        with patch.object(pipeline_views_module.JSONWebTokenBackend, "authenticate", side_effect=pipeline_views_module.JSONWebTokenError("bad")):
+            request.user = unauthenticated
+            self.assertFalse(pipeline_views_module._authenticate_request(request))
+
+        with self.assertRaises(Exception):
+            pipeline_views_module._json_body(SimpleNamespace(body=b"not-json"))
+        with self.assertRaises(Exception):
+            pipeline_views_module._json_body(SimpleNamespace(body=b"[]"))
+        self.assertEqual(pipeline_views_module._json_body(SimpleNamespace(body=b'{"ok": true}')), {"ok": True})
+        self.assertEqual(pipeline_views_module._mlops_lineage(None), {})
+        with tempfile.TemporaryDirectory() as temporary:
+            model = Path(temporary) / "model.bin"
+            model.write_bytes(b"model")
+            with patch.object(pipeline_views_module, "_safe_model_path", return_value=model):
+                lineage = pipeline_views_module._mlops_lineage({
+                    "mlflow": {"run_id": "r1", "experiment": "e1"},
+                    "model_predictions": {"model_path": str(model), "model_type": "clf", "model_version": "v1"},
+                    "dataset_hash": "d1",
+                })
+            self.assertEqual(lineage["mlflow_run_id"], "r1")
+            self.assertTrue(lineage["model_sha256"])
+
+        valid_annotation = {
+            "start_time": 0, "end_time": 1, "demuca_phase": " phase ",
+            "sound_tags": [], "movement_tags": [], "interaction_tags": [],
+        }
+        self.assertEqual(pipeline_views_module._annotation_values(valid_annotation)["demuca_phase"], "phase")
+        with self.assertRaises(Exception):
+            pipeline_views_module._annotation_values({})
