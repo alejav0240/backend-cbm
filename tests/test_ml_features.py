@@ -1229,6 +1229,29 @@ class MlFeatureTests(TestCase):
              patch.object(therapeutic_mutations_module.SessionInventory.objects, "get_or_create", return_value=(SimpleNamespace(), True)):
             self.assertIsNotNone(therapeutic_mutations_module.AddSessionInventoryItem.mutate(None, info, "1", "2").session_inventory)
 
+    def test_therapeutic_cycle_delete_and_bulk_mutations(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        with patch.object(therapeutic_mutations_module.Session.objects, "filter", return_value=MagicMock(aggregate=MagicMock(return_value={"last_num": 0}))), \
+             patch.object(therapeutic_mutations_module.Session.objects, "bulk_create") as bulk:
+            result = therapeutic_mutations_module.CreateCycle.mutate(None, info, "1", "2", date(2026, 1, 1), 2)
+        self.assertTrue(result.success)
+        self.assertEqual(len(bulk.call_args.args[0]), 2)
+        session = SimpleNamespace(pk=1, delete=MagicMock())
+        with patch.object(therapeutic_mutations_module.Session.objects, "get", return_value=session), \
+             patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True):
+            self.assertTrue(therapeutic_mutations_module.DeleteSession.mutate(None, info, "1").success)
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module.SessionResource.objects, "get_or_create", side_effect=[(None, True), (None, False)]):
+            self.assertEqual(therapeutic_mutations_module.BulkAddSessionResources.mutate(None, info, "1", ["2", "3"]).added_count, 1)
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module.SessionInventory.objects, "get_or_create", return_value=(None, True)):
+            self.assertEqual(therapeutic_mutations_module.BulkAddSessionInventoryItems.mutate(None, info, "1", ["2"]).added_count, 1)
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True), \
+             patch.object(therapeutic_mutations_module.SessionPlanStep.objects, "get_or_create", return_value=(None, True)):
+            self.assertEqual(therapeutic_mutations_module.BulkAddStepsToSession.mutate(None, info, "1", ["2"]).added_count, 1)
+
     def test_artifact_validation_reports_all_safety_and_alignment_errors(self):
         issues = []
         with tempfile.TemporaryDirectory() as temporary:
@@ -1253,6 +1276,31 @@ class MlFeatureTests(TestCase):
         report = session_manifest_module.validate_session_manifest({}, Path("/tmp/S1"), check_files=False)
         self.assertFalse(report["valid"])
         self.assertTrue(any(issue["code"] == "required_field_missing" for issue in report["errors"]))
+
+    def test_session_manifest_validation_covers_metadata_arrays_and_timeline_errors(self):
+        root = Path("/tmp/S1")
+        base = {
+            "schema_version": "1.0", "session_id": "S1", "source_version": "v1",
+            "clock": "session_elapsed_seconds", "timeline_policy": "contiguous",
+            "duration_seconds": 2, "participants": [{"id": "p", "role": "PATIENT"}],
+            "fragments": [{"fragment_id": "f", "order": 0, "global_start_seconds": 0,
+                           "duration_seconds": 2, "video_path": "video.mp4"}],
+        }
+        self.assertFalse(session_manifest_module.validate_session_manifest(base, root, check_files=True)["valid"])
+        invalid = dict(base)
+        invalid.update({"schema_version": "0", "clock": "bad", "timeline_policy": "bad", "duration_seconds": 0})
+        self.assertFalse(session_manifest_module.validate_session_manifest(invalid, root, check_files=False)["valid"])
+        self.assertFalse(session_manifest_module.validate_session_manifest(None, root)["valid"])
+        self.assertFalse(session_manifest_module.validate_session_manifest(base, root, tolerance_seconds=-1)["valid"])
+        arrays = dict(base)
+        arrays["participants"] = [{"id": "p", "role": "BAD", "extra": 1}, {"id": "p", "role": "PATIENT"}]
+        arrays["fragments"] = [{"fragment_id": "f", "order": 2, "global_start_seconds": 1,
+                                "duration_seconds": -1, "video_path": "../bad"}]
+        report = session_manifest_module.validate_session_manifest(arrays, root, check_files=False)
+        codes = {issue["code"] for issue in report["errors"]}
+        self.assertIn("invalid_participant_role", codes)
+        self.assertIn("fragment_order_not_contiguous", codes)
+        self.assertIn("unsafe_source_path", codes)
 
     def test_pipeline_sample_annotation_update_and_artifact_endpoints(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
@@ -1305,6 +1353,23 @@ class MlFeatureTests(TestCase):
              patch.object(pipeline_views_module.ResultadoAnalisis.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=result))):
             response = pipeline_views_module.session_artifacts(request, 1, "S1")
         self.assertEqual(response.status_code, 200)
+
+    def test_pipeline_view_error_and_post_branches(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True)
+        request = SimpleNamespace(user=user, method="GET", headers={}, body=b"")
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=None):
+            self.assertEqual(pipeline_views_module.dataset_detail(request, 1).status_code, 404)
+            self.assertEqual(pipeline_views_module.create_dataset_sample(SimpleNamespace(user=user, method="POST", headers={}, body=b"{}"), 1).status_code, 404)
+        with patch.object(pipeline_views_module, "_annotation_dataset_for_user", return_value=SimpleNamespace(samples=MagicMock())):
+            post_request = SimpleNamespace(user=user, method="POST", headers={}, body=b"{}")
+            self.assertEqual(pipeline_views_module.annotation_windows(post_request, "S1").status_code, 400)
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=SimpleNamespace(samples=MagicMock(filter=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None)))))):
+            patch_request = SimpleNamespace(user=user, method="PATCH", headers={}, body=b"{}")
+            self.assertEqual(pipeline_views_module.update_dataset_sample(patch_request, 1, 1).status_code, 404)
+        with patch.object(pipeline_views_module, "_dataset_for_user", return_value=SimpleNamespace(samples=MagicMock(exists=MagicMock(return_value=False)))):
+            artifact_request = SimpleNamespace(user=user, method="GET", headers={}, body=b"")
+            self.assertEqual(pipeline_views_module.session_artifacts(artifact_request, 1, "S1").status_code, 202)
+        self.assertEqual(pipeline_views_module._load_pose_artifact("bad/id"), [])
 
     def test_pipeline_annotation_authorization_and_lineage_views(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
@@ -1415,6 +1480,24 @@ class MlFeatureTests(TestCase):
             with patch.object(media, "load_and_validate_session_manifest", return_value={"valid": True}):
                 reused = media.normalize_manifest_fragments(session, manifest)
             self.assertEqual(reused["status"], "reused")
+
+    def test_media_manifest_fragment_gap_audio_and_overlap_branches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            source = root / "source.mp4"
+            source.write_bytes(b"source")
+            fragment = {"fragment_id": "f", "global_start_seconds": 0.5, "duration_seconds": 1, "video_path": "source.mp4"}
+            with patch.object(media, "probe_stream_duration", return_value=2), \
+                 patch.object(media, "_has_audio_stream", return_value=False), \
+                 patch.object(media, "run_command"):
+                video, audio, end = media._process_manifest_fragment(staging, root / "manifest.json", fragment, 0, 0, "preserve_gaps", 0.1)
+            self.assertEqual(end, 1.5)
+            with self.assertRaisesRegex(ValueError, "overlaps"):
+                media._process_manifest_fragment(staging, root / "manifest.json", {**fragment, "global_start_seconds": -1}, 0, 0, "preserve_gaps", 0.1)
+            with self.assertRaisesRegex(ValueError, "timeline gap"):
+                media._process_manifest_fragment(staging, root / "manifest.json", fragment, 0, 0, "contiguous", 0.1)
 
     def test_laravel_import_command_remote_and_row_helpers(self):
         command = laravel_command_module.Command()
