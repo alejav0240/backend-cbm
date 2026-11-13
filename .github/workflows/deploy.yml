@@ -212,6 +212,10 @@ jobs:
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_PR_ARGS: >-
+        ${{ github.event_name == 'pull_request' &&
+        format('-Dsonar.pullrequest.key={0} -Dsonar.pullrequest.branch={1} -Dsonar.pullrequest.base={2}',
+        github.event.pull_request.number, github.head_ref, github.base_ref) || '' }}
     steps:
       - name: SonarQube not configured
         if: ${{ env.SONAR_TOKEN == '' || env.SONAR_HOST_URL == '' }}
@@ -240,6 +244,7 @@ jobs:
             -Dsonar.exclusions=**/migrations/**,**/tests/**,**/.venv/**,**/venv/**,coverage.xml
             -Dsonar.python.version=3.12
             -Dsonar.python.coverage.reportPaths=coverage.xml
+            ${{ env.SONAR_PR_ARGS }}
             -Dsonar.qualitygate.wait=true
 
   docker:
