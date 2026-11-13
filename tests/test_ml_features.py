@@ -68,6 +68,35 @@ from window_index import build_window_index, validate_window_index
 
 
 class MlFeatureTests(TestCase):
+    def test_pipeline_dataset_endpoints_and_authorization_matrix(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=True, pk=1)
+        now = SimpleNamespace(isoformat=lambda: "now")
+        samples = MagicMock()
+        samples.all.return_value = samples
+        samples.count.return_value = 0
+        samples.filter.return_value = samples
+        samples.exists.return_value = False
+        dataset = SimpleNamespace(id=1, pk=1, name="D", description="", status="draft", training_authorized=False, authorized_at=None, authorized_by=None, created_at=now, updated_at=now, samples=samples)
+        get_request = SimpleNamespace(method="GET", user=user, headers={}, body=b"")
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "all", return_value=[dataset]):
+            self.assertEqual(pipeline_views_module.datasets(get_request).status_code, 200)
+        post_request = SimpleNamespace(method="POST", user=user, headers={}, body=json.dumps({"name": " New ", "description": "desc"}).encode())
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "create", return_value=dataset):
+            self.assertEqual(pipeline_views_module.datasets(post_request).status_code, 201)
+        bad_request = SimpleNamespace(method="POST", user=user, headers={}, body=b'{}')
+        self.assertEqual(pipeline_views_module.datasets(bad_request).status_code, 400)
+        with patch.object(pipeline_views_module.TherapistDataset.objects, "filter", return_value=MagicMock(first=MagicMock(return_value=dataset))):
+            samples.exists.return_value = False
+            self.assertEqual(pipeline_views_module.authorize_dataset(post_request, 1).status_code, 400)
+            samples.exists.return_value = True
+            samples.filter.return_value.exists.return_value = True
+            self.assertEqual(pipeline_views_module.authorize_dataset(post_request, 1).status_code, 400)
+            samples.filter.return_value.exists.return_value = False
+            samples.exists.return_value = True
+            samples.filter = MagicMock(return_value=SimpleNamespace(exists=lambda: False, count=lambda: 0))
+            samples.exists = MagicMock(return_value=True)
+            dataset.save = MagicMock()
+            self.assertEqual(pipeline_views_module.authorize_dataset(post_request, 1).status_code, 200)
     def test_window_index_validation_helpers_cover_invalid_cases(self):
         with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([], "audio")
         with self.assertRaises(ValueError): window_index_module._validate_timestamp_values([1, 1], "audio")
