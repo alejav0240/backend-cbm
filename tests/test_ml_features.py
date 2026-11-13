@@ -26,6 +26,8 @@ import pipeline_multimodal.views as pipeline_views_module
 import pipeline_multimodal.models as pipeline_models_module
 import clinical.mutations as clinical_mutations_module
 import finance.mutations as finance_mutations_module
+import institutions.mutations as institutions_mutations_module
+import evaluations.mutations as evaluations_mutations_module
 from models import MultilabelLogisticModel
 from audio_features import extract_audio_modalities
 from create_window_index import write_window_index
@@ -1058,11 +1060,77 @@ class MlFeatureTests(TestCase):
             result = finance_mutations_module.UpdateCourse.mutate(None, None, "1", price=12.5, name="Course")
         self.assertEqual(str(course.price), "12.5")
         self.assertEqual(result.course, course)
-        discount = SimpleNamespace(save=MagicMock())
+        discount = SimpleNamespace(save=MagicMock(), delete=MagicMock())
         with patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
             result = finance_mutations_module.UpdateDiscount.mutate(None, None, "1", value=5, description="x")
         self.assertEqual(str(discount.value), "5")
         self.assertEqual(result.discount, discount)
+
+        course = SimpleNamespace(delete=MagicMock())
+        with patch.object(finance_mutations_module.Course.objects, "get", return_value=course):
+            self.assertTrue(finance_mutations_module.DeleteCourse.mutate(None, None, "1").success)
+        with patch.object(finance_mutations_module.Discount.objects, "get", return_value=discount):
+            self.assertTrue(finance_mutations_module.DeleteDiscount.mutate(None, None, "1").success)
+        with patch.object(finance_mutations_module.Discount.objects, "get", side_effect=finance_mutations_module.Discount.DoesNotExist):
+            self.assertFalse(finance_mutations_module.DeleteDiscount.mutate(None, None, "1").success)
+
+    def test_institution_mutations_cover_crud_and_not_found_paths(self):
+        institution = SimpleNamespace(contact_phone="", save=MagicMock(), delete=MagicMock())
+        with patch.object(institutions_mutations_module.Institution.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=False))), \
+             patch.object(institutions_mutations_module.Institution.objects, "create", return_value=institution):
+            self.assertIs(institutions_mutations_module.CreateInstitution.mutate(None, None, "Clinic").institution, institution)
+        with patch.object(institutions_mutations_module.Institution.objects, "get", return_value=institution):
+            result = institutions_mutations_module.UpdateInstitution.mutate(None, None, "1", name="New", phone="123")
+        self.assertEqual(institution.contact_phone, "123")
+        self.assertIs(result.institution, institution)
+        with patch.object(institutions_mutations_module.Institution.objects, "get", return_value=institution):
+            self.assertTrue(institutions_mutations_module.DeleteInstitution.mutate(None, None, "1").success)
+        group = SimpleNamespace(name="Old", save=MagicMock(), delete=MagicMock())
+        with patch.object(institutions_mutations_module.Institution.objects, "get", return_value=institution), \
+             patch.object(institutions_mutations_module.InstitutionGroup.objects, "create", return_value=group):
+            self.assertIs(institutions_mutations_module.CreateInstitutionGroup.mutate(None, None, "1", "G").group, group)
+        with patch.object(institutions_mutations_module.InstitutionGroup.objects, "get", return_value=group):
+            self.assertIs(institutions_mutations_module.UpdateInstitutionGroup.mutate(None, None, "1", "New").group, group)
+            self.assertTrue(institutions_mutations_module.DeleteInstitutionGroup.mutate(None, None, "1").success)
+
+    def test_clinical_mutation_update_and_delete_paths(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        patient = SimpleNamespace(pk=1, save=MagicMock(), status="active")
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.Patient.objects, "get", return_value=patient):
+            result = clinical_mutations_module.UpdatePatient.mutate(None, info, "1", diagnosis="updated", registration_complete=True)
+            self.assertIs(result.patient, patient)
+            self.assertTrue(clinical_mutations_module.DeletePatient.mutate(None, info, "1").success)
+        plan = SimpleNamespace(patient_id=1, progress_percent=0, save=MagicMock(), delete=MagicMock())
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.InterventionPlan.objects, "get", return_value=plan):
+            self.assertIs(clinical_mutations_module.UpdatePlanProgress.mutate(None, info, "1", 120).plan, plan)
+            self.assertTrue(clinical_mutations_module.DeleteInterventionPlan.mutate(None, info, "1").success)
+        step = SimpleNamespace(plan=SimpleNamespace(patient_id=1), save=MagicMock(), delete=MagicMock())
+        with patch.object(clinical_mutations_module, "user_can_access_patient", return_value=True), \
+             patch.object(clinical_mutations_module.PlanStep.objects, "get", return_value=step):
+            self.assertIs(clinical_mutations_module.UpdateStepPlan.mutate(None, info, "1", objective="x").step, step)
+            self.assertTrue(clinical_mutations_module.DeleteStepPlan.mutate(None, info, "1").success)
+
+    def test_evaluation_form_mutations_cover_create_delete_and_assign(self):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        form = SimpleNamespace(delete=MagicMock())
+        questions = [SimpleNamespace(question="Q1", question_type="text", is_required=None, order_index=None)]
+        with patch.object(evaluations_mutations_module.Form.objects, "create", return_value=form), \
+             patch.object(evaluations_mutations_module.FormQuestion.objects, "create") as create_question:
+            result = evaluations_mutations_module.CreateForm.mutate(None, info, "Form", questions, "Description")
+        self.assertIs(result.form, form)
+        create_question.assert_called_once()
+        with patch.object(evaluations_mutations_module.Form.objects, "get", return_value=form):
+            self.assertTrue(evaluations_mutations_module.DeleteForm.mutate(None, info, "1").success)
+        assignment = SimpleNamespace()
+        with patch.object(evaluations_mutations_module.FormAssignment.objects, "create", return_value=assignment):
+            result = evaluations_mutations_module.AssignForm.mutate(None, info, "1", "1", assigned_to_id="2", patient_id="3", session_id="4")
+        self.assertIs(result.assignment, assignment)
 
     def test_pipeline_sample_annotation_update_and_artifact_endpoints(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True)
@@ -1253,6 +1321,28 @@ class MlFeatureTests(TestCase):
                 {20: info}, {10: "proof.pdf"}, {10: 2},
             )
         self.assertIs(imported[10], payment)
+
+    def test_laravel_import_command_patients_sessions_and_lookup_helpers(self):
+        command = laravel_command_module.Command()
+        patient = SimpleNamespace(
+            diagnosis="", residence="", notes="", save=MagicMock(), tutor=None,
+        )
+        with patch.object(laravel_command_module.Patient.objects, "update_or_create", return_value=(patient, True)):
+            patients = {}
+            command._import_client_row(["1", "Ana", "Lopez", "", "", "", "", "2000-01-02", "0", "", "activo", "", ""], patients)
+        self.assertIs(patients[1], patient)
+        tutor = SimpleNamespace(set_password=MagicMock(), save=MagicMock())
+        with patch.object(command, "_resolve_or_create_tutor_user", return_value=tutor), \
+             patch.object(command, "_upsert_clinical_note") as note:
+            info_map = {}
+            command._import_info_row(
+                ["10", "1", "diag", "res", "", "", "", "Tutor", "", "obj", "fis", "emo", "cog", "soc", "met", "notes", "extra", "", ""],
+                patients, info_map, {}, SimpleNamespace(id=2),
+            )
+        self.assertIs(info_map[10]["patient"], patient)
+        self.assertGreaterEqual(note.call_count, 1)
+        self.assertEqual(command._extract_payment_proofs([["", "10", "", "", "", "proof", "", "", "", ""]]), {10: "proof"})
+        self.assertEqual(command._count_cycles_by_payment([["", "10"] + [""] * 11])[10], 1)
 
 
     def test_media_validates_missing_extraction_and_invalid_probe_values(self):
