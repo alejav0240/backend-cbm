@@ -216,6 +216,10 @@ class MlFeatureTests(TestCase):
         parsed = parser.parse_args(["--dry-run", "--port", "22"])
         self.assertTrue(parsed.dry_run)
         self.assertEqual(parsed.port, 22)
+        unauthenticated_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=False)))
+        protected = config_utils_module.module_permission_required("pacientes")(lambda *_: True)
+        with self.assertRaises(Exception):
+            protected(None, unauthenticated_info)
 
     def test_config_views_user_admin_and_legacy_command_helpers(self):
         request = RequestFactory().get("/health/")
@@ -258,6 +262,28 @@ class MlFeatureTests(TestCase):
         with patch.object(users_laravel_module.mysql.connector, "connect", side_effect=users_laravel_module.mysql.connector.Error("offline")):
             with self.assertRaises(Exception):
                 command.handle(host="db", user="u", password="p", database="d", port=3306, truncate=False, dry_run=False)
+
+        datasets = {
+            "usuarios": [], "clientes": [], "pagos": [], "archivospagos": [], "ciclos": [],
+            "plandeintervencions": [], "matrizescalas": [], "demucas": [],
+        }
+        fake_user = MagicMock(import_users=MagicMock(return_value={}))
+        fake_patient = MagicMock(import_patients=MagicMock(return_value=(None, {})))
+        fake_payment = MagicMock(extract_payment_proofs=MagicMock(return_value={}), import_payments=MagicMock(return_value={}))
+        fake_session = MagicMock()
+        fake_plan = MagicMock()
+        fake_scale = MagicMock()
+        with patch.object(command, "_fetch_all_datasets", return_value=datasets), \
+             patch.object(users_laravel_module.mysql.connector, "connect", return_value=MagicMock()), \
+             patch.object(command, "_ensure_default_therapist", return_value=SimpleNamespace(id=1)), \
+             patch.object(users_laravel_module, "UserImporter", return_value=fake_user), \
+             patch.object(users_laravel_module, "PatientImporter", return_value=fake_patient), \
+             patch.object(users_laravel_module, "PaymentImporter", return_value=fake_payment), \
+             patch.object(users_laravel_module, "SessionImporter", return_value=fake_session), \
+             patch.object(users_laravel_module, "InterventionPlanImporter", return_value=fake_plan), \
+             patch.object(users_laravel_module, "ScaleImporter", return_value=fake_scale):
+            command.handle(host="db", user="u", password="p", database="d", port=3306, truncate=False, dry_run=True)
+        fake_scale.import_scales_and_evaluations.assert_called_once()
     def test_clinical_plan_step_and_report_lifecycle_matrix(self):
         user = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False, pk=1)
         info = SimpleNamespace(context=SimpleNamespace(user=user))
@@ -2172,6 +2198,17 @@ class MlFeatureTests(TestCase):
         with patch.object(institutions_mutations_module.Institution.objects, "get", return_value=institution):
             self.assertIs(institutions_mutations_module.UpdateInstitution.mutate(None, None, "1").institution, institution)
 
+        nonstaff_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=False, is_superuser=False, pk=1,
+            has_perm=lambda _permission: True,
+        )))
+        with patch.object(evaluations_mutations_module, "user_can_access_patient", return_value=False), \
+             patch.object(evaluations_mutations_module, "user_can_access_session", return_value=False):
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.AssignForm.mutate(None, nonstaff_info, "1", "2", patient_id="3")
+            with self.assertRaises(Exception):
+                evaluations_mutations_module.AssignForm.mutate(None, nonstaff_info, "1", "1", session_id="4")
+
     def test_therapeutic_inventory_and_resource_mutations(self):
         info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
             is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
@@ -2925,6 +2962,23 @@ class MlFeatureTests(TestCase):
             users_mutations_module.UpdateUser.mutate(None, unauth_info, "1")
         with self.assertRaises(Exception):
             users_mutations_module.ChangePassword.mutate(None, unauth_info, "old", "newpassword")
+
+        nonstaff_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=False, is_superuser=False, pk=1,
+            has_perm=lambda _permission: True,
+        )))
+        with patch.object(therapeutic_mutations_module, "user_can_access_patient", return_value=False):
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.CreateSession.mutate(None, nonstaff_info, patient_id="2", therapist_id="1", session_date=date(2026, 1, 1), session_type="individual")
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.CreateCycle.mutate(None, nonstaff_info, "2", "1", date(2026, 1, 1))
+        with patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=False):
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.AddSessionResource.mutate(None, nonstaff_info, "1", "1")
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.AddSessionInventoryItem.mutate(None, nonstaff_info, "1", "1")
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.BulkAddSessionResources.mutate(None, nonstaff_info, "1", [])
 
     def test_media_duration_and_segment_helper_matrix(self):
         with patch.object(media, "run_command", return_value="2.5"):
