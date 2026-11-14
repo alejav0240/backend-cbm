@@ -2873,6 +2873,59 @@ class MlFeatureTests(TestCase):
                 movement_payload={"windows": [{"window_id": "S1_W0000"}, {"window_id": "S1_W0000"}]},
             )
 
+    def test_remaining_therapeutic_and_user_mutation_error_branches(self):
+        staff_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=True, is_superuser=False, pk=1,
+        )))
+        with self.assertRaises(Exception):
+            therapeutic_mutations_module.CreateSession.mutate(None, staff_info, patient_id="1", therapist_id="", session_date=date(2026, 1, 1), session_type="individual")
+        with patch.object(therapeutic_mutations_module.Session.objects, "get", side_effect=therapeutic_mutations_module.Session.DoesNotExist):
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.UpdateSession.mutate(None, staff_info, "1")
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.UpdateSessionPaymentStatus.mutate(None, staff_info, "1", "paid")
+        session = SimpleNamespace(pk=1, patient_id=1, save=MagicMock(), delete=MagicMock())
+        session_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+            is_authenticated=True, is_staff=False, is_superuser=False, pk=1,
+            has_perm=lambda _permission: True,
+        )))
+        with patch.object(therapeutic_mutations_module.Session.objects, "get", return_value=session), \
+             patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True):
+            with self.assertRaises(Exception):
+                therapeutic_mutations_module.UpdateSession.mutate(None, session_info, "1", therapist_id="2")
+            self.assertIs(therapeutic_mutations_module.UpdateSessionPaymentStatus.mutate(None, staff_info, "1", "paid").session, session)
+        with patch.object(therapeutic_mutations_module.DigitalResource.objects, "get", side_effect=therapeutic_mutations_module.DigitalResource.DoesNotExist):
+            self.assertFalse(therapeutic_mutations_module.DeleteDigitalResource.mutate(None, staff_info, "1").success)
+        with self.assertRaises(Exception):
+            therapeutic_mutations_module.CreateCycle.mutate(None, staff_info, "", "1", date(2026, 1, 1))
+        with self.assertRaises(Exception):
+            therapeutic_mutations_module.CreateCycle.mutate(None, staff_info, "1", "", date(2026, 1, 1))
+        with patch.object(therapeutic_mutations_module.SessionResource.objects, "get_or_create", side_effect=[(SimpleNamespace(), True), (SimpleNamespace(), False)]), \
+             patch.object(therapeutic_mutations_module.SessionInventory.objects, "get_or_create", side_effect=[(SimpleNamespace(), True), (SimpleNamespace(), False)]), \
+             patch.object(therapeutic_mutations_module.SessionPlanStep.objects, "get_or_create", side_effect=[(SimpleNamespace(), True), (SimpleNamespace(), False)]), \
+             patch.object(therapeutic_mutations_module, "user_can_access_session", return_value=True):
+            self.assertEqual(therapeutic_mutations_module.BulkAddSessionResources.mutate(None, staff_info, "1", ["1", "2"]).added_count, 1)
+            self.assertEqual(therapeutic_mutations_module.BulkAddSessionInventoryItems.mutate(None, staff_info, "1", ["1", "2"]).added_count, 1)
+            self.assertEqual(therapeutic_mutations_module.BulkAddStepsToSession.mutate(None, staff_info, "1", ["1", "2"]).added_count, 1)
+
+        with patch.object(users_mutations_module.Group.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=True))):
+            with self.assertRaises(Exception):
+                users_mutations_module.CreateRole.mutate(None, staff_info, "Existing")
+        with patch.object(users_mutations_module.Group.objects, "get", side_effect=users_mutations_module.Group.DoesNotExist):
+            with self.assertRaises(Exception):
+                users_mutations_module.UpdateRole.mutate(None, staff_info, "1")
+            self.assertFalse(users_mutations_module.DeleteRole.mutate(None, staff_info, "1").success)
+        with self.assertRaises(Exception):
+            users_mutations_module.CreateUser.mutate(None, staff_info, password="password", ci="1", email="")
+        with patch.object(users_mutations_module.User.objects, "filter", return_value=MagicMock(exists=MagicMock(return_value=True))):
+            with self.assertRaises(Exception):
+                users_mutations_module.CreateUser.mutate(None, staff_info, password="password", ci="1", email="a@b.com", username="taken")
+        unauth_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=False)))
+        with self.assertRaises(Exception):
+            users_mutations_module.UpdateUser.mutate(None, unauth_info, "1")
+        with self.assertRaises(Exception):
+            users_mutations_module.ChangePassword.mutate(None, unauth_info, "old", "newpassword")
+
     def test_media_duration_and_segment_helper_matrix(self):
         with patch.object(media, "run_command", return_value="2.5"):
             self.assertEqual(media.probe_duration(Path("clip.mp4")), 2.5)
