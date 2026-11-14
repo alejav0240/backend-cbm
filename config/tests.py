@@ -1,4 +1,6 @@
 import json
+import os
+from unittest.mock import patch
 
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
@@ -27,6 +29,28 @@ class ServiceKeyCSRFExemptMiddlewareTests(SimpleTestCase):
         self.middleware.process_request(request)
 
         self.assertTrue(request._dont_enforce_csrf_checks)
+
+    @patch.dict(os.environ, {"MULTIMODAL_SERVICE_KEY": "pipeline-service-key"})
+    def test_pipeline_service_key_bypasses_csrf_only_for_job_upload(self):
+        request = self.factory.post(
+            "/api/pipeline-multimodal/trabajos/",
+            HTTP_X_SERVICE_KEY="pipeline-service-key",
+        )
+
+        self.middleware.process_request(request)
+
+        self.assertTrue(request._dont_enforce_csrf_checks)
+
+    @patch.dict(os.environ, {"MULTIMODAL_SERVICE_KEY": "pipeline-service-key"})
+    def test_pipeline_without_service_key_keeps_csrf_protection(self):
+        request = self.factory.post(
+            "/api/pipeline-multimodal/trabajos/",
+            HTTP_X_SERVICE_KEY="wrong-key",
+        )
+
+        self.middleware.process_request(request)
+
+        self.assertFalse(hasattr(request, "_dont_enforce_csrf_checks"))
 
     def test_service_key_does_not_bypass_csrf_for_regular_graphql_operations(self):
         request = self._request("query { me { username } }")

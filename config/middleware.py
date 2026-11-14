@@ -91,6 +91,16 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
     """
 
     def process_request(self, request):
+        if (
+            request.path == "/api/pipeline-multimodal/trabajos/"
+            and request.method == "POST"
+        ):
+            provided = request.headers.get("X-Service-Key", "")
+            expected = os.getenv("MULTIMODAL_SERVICE_KEY", "")
+            if expected and provided and secrets.compare_digest(provided, expected):
+                request._dont_enforce_csrf_checks = True
+            return
+
         if request.path != "/graphql/":
             return
 
