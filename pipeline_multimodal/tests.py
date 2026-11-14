@@ -130,6 +130,23 @@ class PipelineMultimodalAsyncTests(TestCase):
         self.assertTrue(respuesta.json()["duplicado"])
         self.assertEqual(TrabajoAnalisis.objects.filter(session_id="SESSION-001").count(), 1)
 
+    def test_csrf_endpoint_allows_pipeline_job_when_cookie_and_header_are_forwarded(self):
+        csrf_client = self.client.__class__(enforce_csrf_checks=True)
+        csrf_response = csrf_client.get("/csrf/")
+        token = csrf_response.cookies["csrftoken"].value
+        archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
+
+        respuesta = csrf_client.post(
+            "/api/pipeline-multimodal/trabajos/",
+            {"video": archivo, "session_id": "SESSION-CSRF"},
+            HTTP_X_CSRFTOKEN=token,
+            HTTP_X_SERVICE_KEY="",
+            HTTP_X_REQUEST_ID="csrf-job-001",
+        )
+
+        self.assertEqual(respuesta.status_code, 202)
+        self.assertEqual(respuesta.json()["session_id"], "SESSION-CSRF")
+
     @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")
     def test_worker_preserva_archivo_si_el_pipeline_falla(self, configurado):
         archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "job.mp4"
