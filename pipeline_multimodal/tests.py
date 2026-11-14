@@ -89,6 +89,20 @@ class PipelineMultimodalAsyncTests(TestCase):
         self.assertEqual(response.json()["mlflow_run_id"], "run-lineage")
         self.assertNotIn("resultado", response.json())
 
+    def test_openai_models_endpoint_lists_registered_model_ids(self):
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-MODEL-LIST",
+            resultado={"status": "completed"},
+            mlflow_model_name="cbm-fusion",
+        )
+
+        response = self.client.get("/v1/models")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["object"], "list")
+        self.assertEqual(response.json()["data"][0]["id"], "cbm-fusion")
+        self.assertEqual(response.json()["data"][0]["object"], "model")
+
     def test_terapeuta_puede_persistir_edicion_demuca_sin_autorizar_entrenamiento(self):
         ResultadoAnalisis.objects.create(
             session_id="SESSION-HITL",

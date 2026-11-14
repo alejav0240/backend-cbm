@@ -643,6 +643,31 @@ def listar_modelos_mlops(request):
     } for item in resultados]})
 
 
+@require_GET
+def listar_modelos_openai(request):
+    """Expose registered model ids using the standard /v1/models contract."""
+    resultados = (
+        ResultadoAnalisis.objects
+        .exclude(mlflow_model_name="")
+        .order_by("-creado_en")
+        .values("mlflow_model_name", "creado_en")
+    )
+    modelos = []
+    vistos = set()
+    for resultado in resultados:
+        nombre = resultado["mlflow_model_name"]
+        if nombre in vistos:
+            continue
+        vistos.add(nombre)
+        modelos.append({
+            "id": nombre,
+            "object": "model",
+            "created": int(resultado["creado_en"].timestamp()),
+            "owned_by": "cbm-backend",
+        })
+    return JsonResponse({"object": "list", "data": modelos})
+
+
 @require_http_methods(["PATCH"])
 def actualizar_demuca(request, session_id: str):
     request_id = request.headers.get("X-Request-ID") or f"multimodal-{uuid.uuid4().hex[:12]}"
