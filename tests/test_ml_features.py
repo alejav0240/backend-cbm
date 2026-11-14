@@ -203,6 +203,8 @@ class MlFeatureTests(TestCase):
         with self.assertRaises(ValueError):
             application_encryption_module.decrypt_envelope({}, "/graphql/")
         with self.assertRaises(ValueError):
+            application_encryption_module._b64decode(None)
+        with self.assertRaises(ValueError):
             application_encryption_module.unwrap_aes_key("bad", "wrong-key")
         with patch.object(config_utils_module, "user_can_access_patient", wraps=config_utils_module.user_can_access_patient):
             non_staff = SimpleNamespace(is_staff=False, is_superuser=False, pk=1)
@@ -2962,6 +2964,8 @@ class MlFeatureTests(TestCase):
             users_mutations_module.UpdateUser.mutate(None, unauth_info, "1")
         with self.assertRaises(Exception):
             users_mutations_module.ChangePassword.mutate(None, unauth_info, "old", "newpassword")
+        with self.assertRaises(Exception):
+            users_mutations_module.MarkOnboardingViewSeen.mutate(None, unauth_info, "/dashboard")
 
         nonstaff_info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
             is_authenticated=True, is_staff=False, is_superuser=False, pk=1,
