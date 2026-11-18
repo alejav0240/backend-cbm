@@ -1,7 +1,9 @@
 import hmac
+import json
 import os
+import threading
 import uuid
-from datetime import datetime, timezone
+from urllib import request as urlrequest
 
 import graphene
 from django.conf import settings
@@ -31,6 +33,47 @@ def _get_session(info, session_id):
     return session
 
 
+def _dispatch_to_ml(processing_run):
+    orchestrator_url = os.getenv("ML_ORCHESTRATOR_URL", "").rstrip("/")
+    source_uri = processing_run.source_uri
+    if not orchestrator_url or not source_uri:
+        return
+
+    callback_url = os.getenv("ML_CALLBACK_URL", "")
+    payload = {
+        "run_id": processing_run.external_run_id,
+        "session_id": str(processing_run.session_id),
+        "video_path": source_uri,
+        "pipeline_version": processing_run.pipeline_version,
+        "skip_pose": os.getenv("ML_SKIP_POSE", "true").lower() in {"1", "true", "yes"},
+        "callback_url": callback_url,
+    }
+
+    def send():
+        try:
+            body = json.dumps(payload).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            orchestrator_key = os.getenv("ML_ORCHESTRATOR_API_KEY", "")
+            if orchestrator_key:
+                headers["X-ML-Service-Key"] = orchestrator_key
+            request = urlrequest.Request(
+                f"{orchestrator_url}/v1/runs",
+                data=body,
+                headers=headers,
+                method="POST",
+            )
+            with urlrequest.urlopen(request, timeout=15):
+                pass
+        except Exception as error:
+            ProcessingRun.objects.filter(pk=processing_run.pk).update(
+                status=ProcessingRun.Status.FAILED,
+                error_code="ml_dispatch_failed",
+                error_message=str(error),
+            )
+
+    threading.Thread(target=send, daemon=True, name=f"dispatch-{processing_run.external_run_id}").start()
+
+
 def _service_authorized(info):
     expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv("ML_SERVICE_API_KEY", "")
     received = info.context.headers.get("X-ML-Service-Key", "")
@@ -57,6 +100,7 @@ class CreateProcessingRun(graphene.Mutation):
             source_uri=source_uri or session.video_url,
             metadata_json=metadata if isinstance(metadata, dict) else {},
         )
+        _dispatch_to_ml(processing_run)
         return CreateProcessingRun(processing_run=processing_run)
 
 
