@@ -2,6 +2,8 @@ import hmac
 import json
 import os
 
+from django.utils import timezone
+
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -42,6 +44,11 @@ def processing_callback(request):
         return JsonResponse({"error": "invalid_status"}, status=400)
 
     run.status = status
+    now = timezone.now()
+    if status == ProcessingRun.Status.RUNNING and run.started_at is None:
+        run.started_at = now
+    if status in {ProcessingRun.Status.COMPLETED, ProcessingRun.Status.FAILED, ProcessingRun.Status.CANCELLED}:
+        run.finished_at = now
     run.result_json = payload.get("result") or {}
     error = payload.get("error")
     if isinstance(error, dict):
