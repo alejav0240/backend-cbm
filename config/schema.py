@@ -8,6 +8,7 @@ from clinical.schema import Query as ClinicalQuery, Mutation as ClinicalMutation
 from marketing.schema import Query as MarketingQuery, Mutation as MarketingMutation
 from uploads.schema import Mutation as UploadsMutation
 from .stats import Query as StatsQuery
+from analysis.schema import Query as AnalysisQuery, Mutation as AnalysisMutation
 
 class Query(
     UsersQuery,
@@ -18,6 +19,7 @@ class Query(
     EvaluationsQuery,
     ClinicalQuery,
     StatsQuery,
+    AnalysisQuery,
     graphene.ObjectType
 ):
     pass
@@ -31,6 +33,7 @@ class Mutation(
     EvaluationsMutation,
     ClinicalMutation,
     UploadsMutation,
+    AnalysisMutation,
     graphene.ObjectType
 ):
     pass

@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'evaluations',
     'onedrive',
     'uploads',
+    'analysis',
 ]
 
 # Algunas apps de dominio todavía no tienen migraciones propias. Durante los
@@ -81,6 +82,7 @@ if "test" in sys.argv:
             "marketing",
             "uploads",
             "therapeutic_sessions",
+            "analysis",
         )
     }
 
@@ -218,6 +220,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # OneDrive (delegated OAuth a OneDrive personal)
 ONEDRIVE_SERVICE_KEY = os.getenv("ONEDRIVE_SERVICE_KEY", "")
 ONEDRIVE_TOKEN_ENCRYPTION_KEY = os.getenv("ONEDRIVE_TOKEN_ENCRYPTION_KEY", "")
+ML_SERVICE_API_KEY = os.getenv("ML_SERVICE_API_KEY", "")
 
 # Unfold Admin
 
