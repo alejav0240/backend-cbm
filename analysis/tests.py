@@ -100,5 +100,51 @@ class DemucaPersistenceTests(TestCase):
         )
         self.assertEqual(
             evaluation.subscale_responses.get(subscale__name="Estereotipias").score,
-            1,
+            2,
         )
+
+    def test_worker_does_not_overwrite_existing_evaluation(self):
+        self.client.post(
+            "/api/ml/processing-callback/",
+            data=json.dumps(
+                {
+                    "run_id": self.run.external_run_id,
+                    "status": "completed",
+                    "result": {
+                        "demuca": {
+                            "comportamientos_restrictivos": {
+                                "estereotipias": 2,
+                            },
+                        }
+                    },
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_ML_SERVICE_KEY="test-ml-key",
+        )
+        evaluation = ScaleEvaluation.objects.get(session=self.session, scale=self.scale)
+        response = evaluation.subscale_responses.get(subscale__name="Estereotipias")
+        response.score = 1
+        response.save(update_fields=["score"])
+
+        self.client.post(
+            "/api/ml/processing-callback/",
+            data=json.dumps(
+                {
+                    "run_id": self.run.external_run_id,
+                    "status": "completed",
+                    "result": {
+                        "demuca": {
+                            "comportamientos_restrictivos": {
+                                "estereotipias": 0,
+                            },
+                        }
+                    },
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_ML_SERVICE_KEY="test-ml-key",
+        )
+
+        response.refresh_from_db()
+        self.assertEqual(response.score, 1)

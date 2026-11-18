@@ -110,9 +110,9 @@ def persist_demuca_evaluation(processing_run: Any) -> ScaleEvaluation | None:
             session=session,
         )
     else:
-        evaluation.patient = patient
-        evaluation.evaluator = evaluator
-        evaluation.save(update_fields=["patient", "evaluator"])
+        # A worker rerun must never replace a therapist's existing evaluation.
+        # The raw worker result remains auditable in ProcessingRun.result_json.
+        return evaluation
 
     scores = _worker_scores(result)
     subscales = {
