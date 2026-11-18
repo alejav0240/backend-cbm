@@ -51,9 +51,13 @@ def processing_callback(request):
         run.source_sha256 = run.result_json.get("source_sha256", run.source_sha256)
     run.save()
 
-    artifacts = run.result_json.get("artifacts", {}) if isinstance(run.result_json, dict) else {}
+    artifacts = {}
+    if isinstance(run.result_json, dict):
+        artifacts = run.result_json.get("artifacts") or run.result_json.get("derived_artifacts") or {}
     if isinstance(artifacts, dict):
         for kind, uri in artifacts.items():
+            if isinstance(uri, dict):
+                uri = uri.get("uri") or uri.get("path")
             if not isinstance(uri, str) or not uri:
                 continue
             ProcessingArtifact.objects.update_or_create(
