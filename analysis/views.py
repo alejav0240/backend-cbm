@@ -60,7 +60,7 @@ def processing_callback(request):
                 run=run,
                 kind=kind,
                 defaults={
-                    "uri": uri if uri.startswith(("http://", "https://")) else f"file://{uri}",
+                    "uri": uri,
                     "training_authorized": False,
                 },
             )
