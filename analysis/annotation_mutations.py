@@ -51,12 +51,14 @@ class ReviewAnnotationCase(graphene.Mutation):
         )
 
         reviews = list(case.reviews.values_list("decision", flat=True))
-        if decision == AnnotationReview.Decision.REJECT:
-            case.status = AnnotationCase.Status.REJECTED
+        if len(reviews) < 2:
+            case.status = AnnotationCase.Status.PENDING
         elif len(set(reviews)) > 1:
             case.status = AnnotationCase.Status.NEEDS_ADJUDICATION
-        else:
+        elif reviews[0] == AnnotationReview.Decision.ACCEPT:
             case.status = AnnotationCase.Status.ACCEPTED
+        else:
+            case.status = AnnotationCase.Status.REJECTED
         case.save(update_fields=["status", "updated_at"])
         return ReviewAnnotationCase(case=case)
 
