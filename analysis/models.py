@@ -5,6 +5,10 @@ from django.db import models
 from users.models import User
 
 
+def default_external_run_id():
+    return f"run-{uuid.uuid4()}"
+
+
 class ProcessingRun(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"
@@ -29,7 +33,7 @@ class ProcessingRun(models.Model):
     external_run_id = models.CharField(
         max_length=120,
         unique=True,
-        default=lambda: f"run-{uuid.uuid4()}",
+        default=default_external_run_id,
     )
     pipeline_version = models.CharField(max_length=50, default="0.3.0")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.QUEUED)
