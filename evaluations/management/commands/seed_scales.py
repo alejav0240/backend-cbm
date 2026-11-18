@@ -1,3 +1,5 @@
+import os
+
 from django.core.management.base import BaseCommand
 from evaluations.models import Scale, Subscale, ScaleValue
 from django.db import transaction
@@ -7,6 +9,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write('Seeding scales...')
+        demuca_max_value = int(os.getenv('DEMUCA_MAX_VALUE', '2'))
+        if demuca_max_value not in (2, 3):
+            raise ValueError('DEMUCA_MAX_VALUE must be 2 or 3')
         
         with transaction.atomic():
             # 1. Escala DEMUCA
@@ -22,7 +27,7 @@ class Command(BaseCommand):
             # Subscales for DEMUCA
             subscales_data = [
                 # CATEGORÍA I: Comportamientos Restrictivos
-                (1, 'Estereotipias', 'Conductas motoras o verbales repetitivas sin relación con el contexto.', 2, 'Comportamientos Restrictivos'),
+                (1, 'Estereotipias', 'Conductas motoras o verbales repetitivas sin relación con el contexto.', demuca_max_value, 'Comportamientos Restrictivos'),
                 (2, 'Agresividad', 'Conductas hostiles, destructivas o autoagresivas.', 2, 'Comportamientos Restrictivos'),
                 (3, 'Desinterés', 'Indiferencia o falta de esfuerzo para participar en actividades musicales.', 2, 'Comportamientos Restrictivos'),
                 (4, 'Pasividad', 'Participación sin iniciativa propia.', 2, 'Comportamientos Restrictivos'),
