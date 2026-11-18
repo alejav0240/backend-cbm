@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import ProcessingArtifact, ProcessingRun
+from .demuca_persistence import persist_demuca_evaluation
 
 
 def _authorized(request):
@@ -57,6 +58,16 @@ def processing_callback(request):
     if isinstance(run.result_json, dict):
         run.source_sha256 = run.result_json.get("source_sha256", run.source_sha256)
     run.save()
+
+    if status == ProcessingRun.Status.COMPLETED:
+        evaluation = persist_demuca_evaluation(run)
+        if evaluation:
+            run.metadata_json = {
+                **(run.metadata_json or {}),
+                "demuca_evaluation_id": evaluation.pk,
+                "demuca_persistence": "completed",
+            }
+            run.save(update_fields=["metadata_json", "updated_at"])
 
     artifacts = {}
     if isinstance(run.result_json, dict):

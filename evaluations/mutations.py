@@ -354,10 +354,57 @@ class AddScaleResponse(graphene.Mutation):
         except Exception as e:
             return AddScaleResponse(success=False, message=str(e))
 
+class UpdateScaleEvaluation(graphene.Mutation):
+    class Arguments:
+        evaluation_id = graphene.ID(required=True)
+        subscales = graphene.List(ResponseSubScale, required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+    evaluation = graphene.Field(ScaleEvaluationType)
+
+    @module_permission_required("evaluaciones", action="change")
+    def mutate(self, info, evaluation_id, subscales):
+        real_evaluation_id = get_db_id(evaluation_id)
+        try:
+            evaluation = ScaleEvaluation.objects.select_related(
+                "session", "patient", "scale"
+            ).get(pk=real_evaluation_id)
+            if evaluation.session_id and not user_can_access_session(
+                info.context.user, evaluation.session_id
+            ):
+                raise GraphQLError("No autorizado.")
+
+            with transaction.atomic():
+                for subscale in subscales:
+                    subscale_id = get_db_id(subscale.subscale_id)
+                    response = ScaleEvaluationSubscaleResponse.objects.filter(
+                        evaluation=evaluation,
+                        subscale_id=subscale_id,
+                    ).first()
+                    if response is None:
+                        raise GraphQLError("La subescala no pertenece a esta evaluación.")
+                    response.score = max(0, min(response.subscale.max_value, subscale.score))
+                    response.save(update_fields=["score"])
+
+            return UpdateScaleEvaluation(
+                success=True,
+                message="Evaluación DEMUCA actualizada correctamente.",
+                evaluation=evaluation,
+            )
+        except ScaleEvaluation.DoesNotExist:
+            return UpdateScaleEvaluation(
+                success=False,
+                message="Evaluación no encontrada.",
+            )
+        except Exception as error:
+            return UpdateScaleEvaluation(success=False, message=str(error))
+
 class Mutation(graphene.ObjectType):
     submit_form_response = SubmitFormResponse.Field()
     submit_full_form = SubmitFullForm.Field()
     add_scale_response = AddScaleResponse.Field()
+    update_scale_evaluation = UpdateScaleEvaluation.Field()
     create_scale = CreateScale.Field()
     delete_scale = DeleteScale.Field()
     create_form = CreateForm.Field()
