@@ -87,3 +87,7 @@ class ProcessingArtifact(models.Model):
 
     def __str__(self):
         return f"{self.kind} — {self.run.external_run_id}"
+
+
+# Import the review models so Django registers them as part of this app.
+from .annotation_models import Adjudication, AnnotationCase, AnnotationReview, ParticipantAnchor  # noqa: E402,F401
