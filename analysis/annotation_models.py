@@ -60,6 +60,9 @@ class AnnotationCase(models.Model):
             models.Index(fields=["run", "status"]),
             models.Index(fields=["run", "window_id"]),
         ]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "window_id", "label"], name="unique_annotation_case_label_window"),
+        ]
 
 
 class AnnotationReview(models.Model):
