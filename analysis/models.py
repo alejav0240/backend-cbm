@@ -67,7 +67,7 @@ class ProcessingArtifact(models.Model):
         related_name="artifacts",
     )
     kind = models.CharField(max_length=100)
-    uri = models.URLField()
+    uri = models.TextField()
     sha256 = models.CharField(max_length=64, blank=True, null=True)
     mime_type = models.CharField(max_length=120, blank=True, null=True)
     size_bytes = models.BigIntegerField(blank=True, null=True)
