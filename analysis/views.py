@@ -11,6 +11,9 @@ from django.views.decorators.http import require_POST
 
 from .models import ProcessingArtifact, ProcessingRun
 from .demuca_persistence import persist_demuca_evaluation
+from .pipeline import normalize_pipeline_stages, result_semantic_status
+from .pipeline import VALID_STATUS_TRANSITIONS
+from .annotation_persistence import persist_annotation_cases
 
 
 def _authorized(request):
@@ -43,6 +46,15 @@ def processing_callback(request):
     valid_statuses = {choice for choice, _ in ProcessingRun.Status.choices}
     if status not in valid_statuses:
         return JsonResponse({"error": "invalid_status"}, status=400)
+    if status not in VALID_STATUS_TRANSITIONS.get(run.status, set()):
+        return JsonResponse(
+            {
+                "error": "invalid_status_transition",
+                "from": run.status,
+                "to": status,
+            },
+            status=409,
+        )
 
     run.status = status
     now = timezone.now()
@@ -51,6 +63,16 @@ def processing_callback(request):
     if status in {ProcessingRun.Status.COMPLETED, ProcessingRun.Status.FAILED, ProcessingRun.Status.CANCELLED}:
         run.finished_at = now
     run.result_json = payload.get("result") or {}
+    if not isinstance(run.result_json, dict):
+        run.result_json = {}
+    run.result_json = {
+        **run.result_json,
+        "pipeline_stages": normalize_pipeline_stages(
+            payload.get("pipeline_stages", run.result_json.get("pipeline_stages"))
+        ),
+        "semantic_status": payload.get("semantic_status")
+        or result_semantic_status(run.result_json),
+    }
     error = payload.get("error")
     if isinstance(error, dict):
         run.error_code = error.get("code")
@@ -68,6 +90,7 @@ def processing_callback(request):
                 "demuca_persistence": "completed",
             }
             run.save(update_fields=["metadata_json", "updated_at"])
+        persist_annotation_cases(run, run.result_json)
 
     artifacts = {}
     if isinstance(run.result_json, dict):

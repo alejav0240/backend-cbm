@@ -2,6 +2,7 @@ import hmac
 import json
 import os
 import threading
+import time
 import uuid
 from urllib import request as urlrequest
 
@@ -14,6 +15,7 @@ from config.utils import get_db_id, module_permission_required, user_can_access_
 from therapeutic_sessions.models import Session
 
 from .models import ProcessingArtifact, ProcessingRun
+from .pipeline import initial_pipeline_stages, normalize_pipeline_stages, result_semantic_status
 from .type import ProcessingRunType
 
 
@@ -50,26 +52,31 @@ def _dispatch_to_ml(processing_run):
     }
 
     def send():
-        try:
-            body = json.dumps(payload).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            orchestrator_key = os.getenv("ML_ORCHESTRATOR_API_KEY", "")
-            if orchestrator_key:
-                headers["X-ML-Service-Key"] = orchestrator_key
-            request = urlrequest.Request(
-                f"{orchestrator_url}/v1/runs",
-                data=body,
-                headers=headers,
-                method="POST",
-            )
-            with urlrequest.urlopen(request, timeout=15):
-                pass
-        except Exception as error:
-            ProcessingRun.objects.filter(pk=processing_run.pk).update(
-                status=ProcessingRun.Status.FAILED,
-                error_code="ml_dispatch_failed",
-                error_message=str(error),
-            )
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        orchestrator_key = os.getenv("ML_ORCHESTRATOR_API_KEY", "")
+        if orchestrator_key:
+            headers["X-ML-Service-Key"] = orchestrator_key
+        last_error = None
+        for attempt in range(3):
+            try:
+                request = urlrequest.Request(
+                    f"{orchestrator_url}/v1/runs",
+                    data=body,
+                    headers=headers,
+                    method="POST",
+                )
+                with urlrequest.urlopen(request, timeout=15):
+                    return
+            except Exception as error:
+                last_error = error
+                if attempt < 2:
+                    time.sleep(2**attempt)
+        ProcessingRun.objects.filter(pk=processing_run.pk).update(
+            status=ProcessingRun.Status.FAILED,
+            error_code="ml_dispatch_failed",
+            error_message=str(last_error),
+        )
 
     threading.Thread(target=send, daemon=True, name=f"dispatch-{processing_run.external_run_id}").start()
 
@@ -99,6 +106,10 @@ class CreateProcessingRun(graphene.Mutation):
             pipeline_version=pipeline_version,
             source_uri=source_uri or session.video_url,
             metadata_json=metadata if isinstance(metadata, dict) else {},
+            result_json={
+                "pipeline_stages": initial_pipeline_stages(),
+                "semantic_status": "pending",
+            },
         )
         _dispatch_to_ml(processing_run)
         return CreateProcessingRun(processing_run=processing_run)
@@ -150,6 +161,12 @@ class UpdateProcessingRun(graphene.Mutation):
         }:
             processing_run.finished_at = now
         if result is not None:
+            if isinstance(result, dict):
+                result = {
+                    **result,
+                    "pipeline_stages": normalize_pipeline_stages(result.get("pipeline_stages")),
+                    "semantic_status": result_semantic_status(result),
+                }
             processing_run.result_json = result
         if source_sha256 is not None:
             processing_run.source_sha256 = source_sha256
