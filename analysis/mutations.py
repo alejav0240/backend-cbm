@@ -39,6 +39,14 @@ def _dispatch_to_ml(processing_run):
     orchestrator_url = os.getenv("ML_ORCHESTRATOR_URL", "").rstrip("/")
     source_uri = processing_run.source_uri
     if not orchestrator_url or not source_uri:
+        ProcessingRun.objects.filter(pk=processing_run.pk).update(
+            status=ProcessingRun.Status.FAILED,
+            error_code="ml_dispatch_not_configured",
+            error_message=(
+                "El análisis multimodal no está configurado: "
+                "falta ML_ORCHESTRATOR_URL o la URL de la grabación."
+            ),
+        )
         return
 
     callback_url = os.getenv("ML_CALLBACK_URL", "")

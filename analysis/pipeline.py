@@ -89,7 +89,16 @@ def normalize_pipeline_stages(value: Any) -> list[dict[str, Any]]:
 def result_semantic_status(result: Any) -> str:
     if not isinstance(result, dict):
         return "pending"
-    status = result.get("semantic_status") or result.get("status")
+    status = result.get("semantic_status")
     if status in {"authorized_model", "provisional_evidence", "unavailable", "provisional", "draft"}:
         return status
+    model_predictions = result.get("model_predictions")
+    demuca = result.get("demuca")
+    if (
+        isinstance(model_predictions, dict)
+        and model_predictions.get("status") == "unavailable"
+    ):
+        return "provisional_evidence"
+    if isinstance(demuca, dict) and demuca.get("review_required") is True:
+        return "provisional_evidence"
     return "completed" if result.get("status") == "completed" else "pending"

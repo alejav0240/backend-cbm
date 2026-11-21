@@ -79,4 +79,13 @@ class ProcessingRunType(DjangoObjectType):
 
     def resolve_review_required(self, info):
         result = self.result_json if isinstance(self.result_json, dict) else {}
-        return bool(result.get("review_required", False))
+        demuca = result.get("demuca")
+        return bool(
+            result.get("review_required", False)
+            or (
+                isinstance(demuca, dict)
+                and demuca.get("review_required") is True
+            )
+            or result_semantic_status(result)
+            in {"provisional_evidence", "provisional", "draft", "unavailable"}
+        )
