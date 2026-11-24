@@ -130,7 +130,7 @@ jobs:
 
       - name: Upload security artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-trivy-filesystem
           path: trivy-filesystem.sarif
@@ -206,7 +206,7 @@ jobs:
 
       - name: Upload coverage
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: coverage.xml
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload image artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-trivy-image
           path: trivy-image.sarif
@@ -350,7 +350,7 @@ jobs:
 
       - name: Upload SBOM
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-sbom
           path: backend-sbom.cdx.json
