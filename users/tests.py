@@ -1,4 +1,7 @@
 import json
+from io import StringIO
+
+from django.core.management import call_command
 from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
@@ -342,3 +345,19 @@ class UsersMutationTests(GraphQLTestCase):
             """
         )
         self.assertIsNotNone(refresh_after_password_change.json().get("errors"))
+
+
+class SetupRbacCommandTests(TestCase):
+    def test_setup_rbac_is_idempotent_and_assigns_expected_permissions(self):
+        output = StringIO()
+        call_command("setup_rbac", stdout=output)
+        call_command("setup_rbac", stdout=output)
+
+        self.assertEqual(Group.objects.filter(name="Administrador").count(), 1)
+        self.assertEqual(Group.objects.filter(name="Terapeuta").count(), 1)
+        self.assertEqual(Group.objects.filter(name="Recepcion").count(), 1)
+        self.assertGreater(
+            Group.objects.get(name="Administrador").permissions.count(),
+            Group.objects.get(name="Terapeuta").permissions.count(),
+        )
+        self.assertIn("Configuración de RBAC completada", output.getvalue())
