@@ -3,6 +3,7 @@ import json
 import secrets
 
 from django.conf import settings
+from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from graphql import GraphQLError, parse
 from graphql.language.ast import (
@@ -99,6 +100,16 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
             expected = os.getenv("MULTIMODAL_SERVICE_KEY", "")
             if expected and provided and secrets.compare_digest(provided, expected):
                 request._dont_enforce_csrf_checks = True
+            return
+
+        if request.path == "/api/ml/processing-callback/" and request.method == "POST":
+            provided = request.headers.get("X-ML-Service-Key", "")
+            expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv(
+                "ML_SERVICE_API_KEY", ""
+            )
+            if not expected or not provided or not secrets.compare_digest(provided, expected):
+                return JsonResponse({"error": "service_not_authorized"}, status=401)
+            request._dont_enforce_csrf_checks = True
             return
 
         if request.path != "/graphql/":

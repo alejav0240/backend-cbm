@@ -193,8 +193,15 @@ jobs:
         run: |
           coverage run --branch manage.py test \
             config.encryption_tests \
+            config.tests \
             clinical.tests \
             users.tests \
+            institutions.tests \
+            therapeutic_sessions.tests \
+            finance.tests \
+            marketing.tests \
+            evaluations.tests \
+            analysis.tests \
             pipeline_multimodal.tests \
             onedrive.tests \
             uploads.tests \
