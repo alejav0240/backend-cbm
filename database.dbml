@@ -2,385 +2,394 @@ Project musicoterapia {
   database_type: "PostgreSQL"
 }
 
-//////////////////////////////////////////////////////
-// USERS
-//////////////////////////////////////////////////////
+// Fuente: estructura.sql (tablas de la aplicacion; se omitieron las tablas internas de Django).
 
-Table users {
-  id integer [pk]
-  username varchar
-  password varchar
-  email varchar
-  first_name varchar
-  last_name varchar
-  ci varchar
-  phone varchar
-  role varchar
-  is_active boolean
-  created_at datetime
-  updated_at datetime
+Table publicaciones_blog {
+  id bigint [pk, not null]
+  titulo varchar(255) [not null]
+  extracto text
+  contenido text [not null]
+  categoria varchar(100) [not null]
+  autor varchar(255) [not null]
+  url_imagen varchar(500)
+  tiempo_lectura varchar(50)
+  estado varchar(20) [not null]
+  tipo varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
 }
 
-//////////////////////////////////////////////////////
-// PATIENTS
-//////////////////////////////////////////////////////
-
-Table patients {
-  id integer [pk]
-  tutor_id integer [ref: > users.id]
-
-  first_name varchar
-  last_name varchar
-  identification varchar
-  birth_date date
-  image_url varchar
-
-  diagnosis text
-  treatment_type varchar
-  session_frequency integer
-
-  physical_state text
-  emotional_state text
-  cognitive_state text
-  social_state text
-
-  general_objectives text
-  notes text
-
-  status varchar
-
-  created_at datetime
+Table inscripciones_cursos {
+  id bigint [pk, not null]
+  nombre_completo varchar(255) [not null]
+  carnet varchar(50)
+  fecha_inscripcion timestamptz [not null]
+  curso_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// INTERVENTION PLAN
-//////////////////////////////////////////////////////
-
-Table intervention_plans {
-  id integer [pk]
-  patient_id integer [ref: > patients.id]
-
-  main_objective text
-  start_date date
-  end_date date
-  progress_percent integer
+Table pagos_cursos {
+  id bigint [pk, not null]
+  metodo_pago varchar(20) [not null]
+  monto decimal(10,2) [not null]
+  fecha_pago timestamptz [not null]
+  estado_pago varchar(20) [not null]
+  inscripcion_id bigint [not null]
 }
 
-Table plan_steps {
-  id integer [pk]
-  plan_id integer [ref: > intervention_plans.id]
-
-  moment varchar
-  focus text
-  musical_resources text
-  mlt_method varchar
-  duration_minutes integer
+Table cursos {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  descripcion text
+  precio decimal(10,2) [not null]
+  estado varchar(20) [not null]
 }
 
-//////////////////////////////////////////////////////
-// SESSIONS
-//////////////////////////////////////////////////////
-
-Table sessions {
-  id integer [pk]
-
-  patient_id integer [ref: > patients.id]
-  therapist_id integer [ref: > users.id]
-
-  session_date datetime
-  duration_minutes integer
-
-  session_type varchar
-  cycle_number integer
-
-  notes text
-
-  video_url varchar
-  audio_url varchar
-
-  payment_status varchar
-
-  created_at datetime
+Table recursos_digitales {
+  id bigint [pk, not null]
+  titulo varchar(255) [not null]
+  tipo varchar(20) [not null]
+  categoria varchar(100)
+  url varchar(200) [not null]
 }
 
-//////////////////////////////////////////////////////
-// RESOURCES
-//////////////////////////////////////////////////////
-
-Table digital_resources {
-  id integer [pk]
-
-  title varchar
-  type varchar
-  category varchar
-  url varchar
+Table descuentos {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  tipo varchar(20) [not null]
+  valor decimal(10,2) [not null]
+  descripcion varchar(255)
 }
 
-Table session_resources {
-  id integer [pk]
-
-  session_id integer [ref: > sessions.id]
-  resource_id integer [ref: > digital_resources.id]
+Table gastos {
+  id bigint [pk, not null]
+  descripcion text [not null]
+  categoria varchar(100) [not null]
+  monto decimal(10,2) [not null]
+  fecha_gasto timestamptz [not null]
+  estado varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
 }
 
-//////////////////////////////////////////////////////
-// INVENTORY
-//////////////////////////////////////////////////////
-
-Table inventory_items {
-  id integer [pk]
-
-  name varchar
-  type varchar
-  condition varchar
-  status varchar
+Table asignaciones_formularios {
+  id bigint [pk, not null]
+  fecha_creacion timestamptz [not null]
+  asignado_por_id bigint [not null]
+  asignado_a_id bigint
+  formulario_id bigint [not null]
+  paciente_id bigint
+  sesion_id bigint
 }
 
-Table session_inventory {
-  id integer [pk]
-
-  session_id integer [ref: > sessions.id]
-  item_id integer [ref: > inventory_items.id]
+Table preguntas_formularios {
+  id bigint [pk, not null]
+  pregunta text [not null]
+  tipo_pregunta varchar(20) [not null]
+  es_obligatorio boolean [not null]
+  indice_orden smallint [not null]
+  formulario_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// SCALES
-//////////////////////////////////////////////////////
-
-Table scales {
-  id integer [pk]
-
-  name varchar
-  description text
-  scale_type varchar
+Table respuestas_formularios {
+  id bigint [pk, not null]
+  respuesta text [not null]
+  fecha_respuesta timestamptz [not null]
+  asignacion_id bigint [not null]
+  pregunta_id bigint [not null]
 }
 
-Table subscales {
-  id integer [pk]
-  scale_id integer [ref: > scales.id]
-  name varchar
+Table formularios {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  descripcion text
 }
 
-Table scale_items {
-  id integer [pk]
-  subscale_id integer [ref: > subscales.id]
-  question text
-  max_score integer
+Table grupos_instituciones {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  descripcion text
+  institucion_id bigint [not null]
 }
 
-Table scale_values {
-  id integer [pk]
-  scale_id integer [ref: > scales.id]
-  label varchar
-  value integer
+Table instituciones {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  direccion text
+  nombre_contacto varchar(255) [not null]
+  correo_contacto varchar(254)
+  telefono_contacto varchar(20)
 }
 
-//////////////////////////////////////////////////////
-// EVALUATIONS
-//////////////////////////////////////////////////////
-
-Table evaluations {
-  id integer [pk]
-
-  session_id integer [ref: > sessions.id]
-  scale_id integer [ref: > scales.id]
-
-  total_score float
-  created_at datetime
+Table planes_intervencion {
+  id bigint [pk, not null]
+  objetivo_principal text [not null]
+  fecha_inicio date [not null]
+  fecha_fin date
+  porcentaje_progreso smallint [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
+  creado_por_id bigint [not null]
+  paciente_id bigint [not null]
 }
 
-Table evaluation_responses {
-  id integer [pk]
-
-  evaluation_id integer [ref: > evaluations.id]
-  item_id integer [ref: > scale_items.id]
-
-  value integer
+Table elementos_inventario {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  tipo varchar(20) [not null]
+  condition varchar(20) [not null]
+  estado varchar(20) [not null]
+  sala varchar(255) [not null]
 }
 
-//////////////////////////////////////////////////////
-// FORMS
-//////////////////////////////////////////////////////
-
-Table forms {
-  id integer [pk]
-  name varchar
-  description text
+Table prospectos {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  phone varchar(20)
+  correo_electronico varchar(254)
+  estado varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
+  campana_id bigint
 }
 
-Table form_questions {
-  id integer [pk]
-
-  form_id integer [ref: > forms.id]
-  question text
-  question_type varchar
+Table campanas_marketing {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  plataforma varchar(100) [not null]
+  estado varchar(20) [not null]
+  presupuesto decimal(12,2) [not null]
+  gastado decimal(12,2) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
 }
 
-Table form_assignments {
-  id integer [pk]
-
-  form_id integer [ref: > forms.id]
-  user_id integer [ref: > users.id]
-  patient_id integer [ref: > patients.id]
+Table notificaciones {
+  id bigint [pk, not null]
+  mensaje text [not null]
+  esta_leido boolean [not null]
+  fecha_creacion timestamptz [not null]
+  usuario_id bigint [not null]
+  tipo varchar(50) [not null]
+  metadatos jsonb [not null]
 }
 
-Table form_responses {
-  id integer [pk]
-
-  assignment_id integer [ref: > form_assignments.id]
-  question_id integer [ref: > form_questions.id]
-
-  response text
+Table conexiones_onedrive {
+  id bigint [pk, not null]
+  token_actualizacion_encriptado text [not null]
+  correo_usuario varchar(254) [not null]
+  esta_activo boolean [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
 }
 
-//////////////////////////////////////////////////////
-// PAYMENTS
-//////////////////////////////////////////////////////
-
-Table payments {
-  id integer [pk]
-
-  patient_id integer [ref: > patients.id]
-  session_id integer [ref: > sessions.id]
-
-  amount decimal
-  payment_method varchar
-  payment_status varchar
-
-  payment_date datetime
+Table notas_clinicas_pacientes {
+  id bigint [pk, not null]
+  categoria varchar(30) [not null]
+  contenido text [not null]
+  fecha_creacion timestamptz [not null]
+  autor_id bigint [not null]
+  paciente_id bigint [not null]
 }
 
-Table discounts {
-  id integer [pk]
-
-  name varchar
-  type varchar
-  value decimal
+Table pacientes {
+  id bigint [pk, not null]
+  nombre varchar(100) [not null]
+  apellido varchar(100) [not null]
+  documento_identidad varchar(30)
+  fecha_nacimiento date
+  url_imagen text
+  notas text
+  estado varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
+  tutor_id bigint
+  registro_completo boolean [not null]
+  diagnostico varchar(50) [not null]
+  residencia varchar(100)
 }
 
-Table payment_discounts {
-  id integer [pk]
-
-  payment_id integer [ref: > payments.id]
-  discount_id integer [ref: > discounts.id]
+Table pagos {
+  id bigint [pk, not null]
+  cantidad_sesiones integer [not null]
+  precio_por_sesion decimal(10,2) [not null]
+  monto_pagado decimal(10,2) [not null]
+  metodo_pago varchar(20) [not null]
+  fecha_pago timestamptz [not null]
+  estado_pago varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
+  descuento_id bigint
+  paciente_id bigint [not null]
+  url_comprobante_pago text
+  tipo_pago varchar(20) [not null]
 }
 
-Table expenses {
-  id integer [pk]
-
-  category varchar
-  description text
-  amount decimal
-  expense_date datetime
+Table pasos_plan {
+  id bigint [pk, not null]
+  momento varchar(20) [not null]
+  duracion_minutos integer
+  objetivo varchar(255) [not null]
+  enfoque text
+  recursos_musicales text
+  enfasis_musical varchar(255)
+  enfoque_terapeutico varchar(255)
+  metodo_mlt varchar(100)
+  indice_orden smallint [not null]
+  plan_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// AI ANALYSIS
-//////////////////////////////////////////////////////
-
-Table ai_analysis {
-  id integer [pk]
-
-  session_id integer [ref: > sessions.id]
-
-  stereotypy_score float
-  aggression_score float
-  passivity_score float
-
-  vocal_exploration float
-  social_interaction float
-  eye_contact float
-  body_movement float
-  rhythmic_exploration float
+Table respuestas_subescalas_evaluacion {
+  id bigint [pk, not null]
+  puntuacion integer [not null]
+  evaluacion_id bigint [not null]
+  subescala_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// MARKETING
-//////////////////////////////////////////////////////
-
-Table marketing_campaigns {
-  id integer [pk]
-
-  platform varchar
-  budget decimal
-  conversions integer
+Table respuestas_valores_evaluacion {
+  id bigint [pk, not null]
+  evaluacion_id bigint [not null]
+  valor_escala_id bigint [not null]
 }
 
-Table leads {
-  id integer [pk]
-
-  name varchar
-  phone varchar
-  email varchar
-
-  source varchar
-  status varchar
+Table evaluaciones_escala {
+  id bigint [pk, not null]
+  fecha_evaluacion timestamptz [not null]
+  evaluador_id bigint [not null]
+  paciente_id bigint [not null]
+  escala_id bigint [not null]
+  sesion_id bigint
 }
 
-//////////////////////////////////////////////////////
-// COURSES
-//////////////////////////////////////////////////////
-
-Table courses {
-  id integer [pk]
-
-  name varchar
-  price decimal
-  description text
+Table valores_escala {
+  id bigint [pk, not null]
+  etiqueta varchar(255) [not null]
+  valor integer [not null]
+  escala_id bigint [not null]
 }
 
-Table course_enrollments {
-  id integer [pk]
-
-  course_id integer [ref: > courses.id]
-  user_id integer [ref: > users.id]
-
-  payment_status varchar
+Table escalas {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  descripcion text
+  tipo_escala varchar(20) [not null]
 }
 
-//////////////////////////////////////////////////////
-// INSTITUTIONS
-//////////////////////////////////////////////////////
-
-Table institutions {
-  id integer [pk]
-
-  name varchar
-  contact_email varchar
-  phone varchar
+Table inventario_sesion {
+  id bigint [pk, not null]
+  elemento_id bigint [not null]
+  sesion_id bigint [not null]
 }
 
-Table institution_groups {
-  id integer [pk]
-
-  institution_id integer [ref: > institutions.id]
-  name varchar
+Table pasos_plan_sesion {
+  id bigint [pk, not null]
+  esta_completada boolean [not null]
+  duracion_real integer
+  fecha_creacion timestamptz [not null]
+  paso_plan_id bigint [not null]
+  sesion_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// REPORTS
-//////////////////////////////////////////////////////
-
-Table therapy_reports {
-  id integer [pk]
-
-  patient_id integer [ref: > patients.id]
-  generated_by integer [ref: > users.id]
-
-  report_url varchar
-  created_at datetime
+Table recursos_sesion {
+  id bigint [pk, not null]
+  recurso_id bigint [not null]
+  sesion_id bigint [not null]
 }
 
-//////////////////////////////////////////////////////
-// NOTIFICATIONS
-//////////////////////////////////////////////////////
-
-Table notifications {
-  id integer [pk]
-
-  user_id integer [ref: > users.id]
-
-  message text
-  is_read boolean
-  created_at datetime
+Table subescalas {
+  id bigint [pk, not null]
+  nombre varchar(255) [not null]
+  descripcion varchar(255)
+  valor_maximo integer [not null]
+  escala_id bigint [not null]
+  categoria varchar(255)
 }
+
+Table sesiones_terapeuticas {
+  id bigint [pk, not null]
+  fecha_sesion timestamptz
+  tipo_sesion varchar(20) [not null]
+  duracion_minutos integer
+  numero_ciclo integer
+  notas text
+  url_video varchar(200)
+  estado_pago varchar(20) [not null]
+  fecha_creacion timestamptz [not null]
+  fecha_actualizacion timestamptz [not null]
+  grupo_id bigint
+  paciente_id bigint
+  terapeuta_id bigint [not null]
+  estado_sesion varchar(20) [not null]
+  numero_sesion integer [not null]
+  estado_video varchar(20) [not null]
+}
+
+Table informes_terapia {
+  id bigint [pk, not null]
+  url_informe varchar(200) [not null]
+  fecha_creacion timestamptz [not null]
+  generado_por_id bigint [not null]
+  paciente_id bigint [not null]
+}
+
+Table usuarios {
+  id bigint [pk, not null]
+  contrasena varchar(128) [not null]
+  ultimo_acceso timestamptz
+  es_superusuario boolean [not null]
+  nombre_usuario varchar(150) [not null]
+  nombre varchar(150) [not null]
+  apellido varchar(150) [not null]
+  correo_electronico varchar(254)
+  es_personal boolean [not null]
+  esta_activo boolean [not null]
+  fecha_registro timestamptz [not null]
+  documento_identidad varchar(50) [not null]
+  telefono varchar(20) [not null]
+  estado varchar(20) [not null]
+  visibilidad varchar(20) [not null]
+  hoja_vida varchar(100)
+  fotografia varchar(100)
+}
+
+Ref: inscripciones_cursos.curso_id > cursos.id
+Ref: pagos_cursos.inscripcion_id > inscripciones_cursos.id
+Ref: asignaciones_formularios.asignado_por_id > usuarios.id
+Ref: asignaciones_formularios.asignado_a_id > usuarios.id
+Ref: asignaciones_formularios.formulario_id > formularios.id
+Ref: asignaciones_formularios.paciente_id > pacientes.id
+Ref: asignaciones_formularios.sesion_id > sesiones_terapeuticas.id
+Ref: preguntas_formularios.formulario_id > formularios.id
+Ref: respuestas_formularios.asignacion_id > asignaciones_formularios.id
+Ref: respuestas_formularios.pregunta_id > preguntas_formularios.id
+Ref: grupos_instituciones.institucion_id > instituciones.id
+Ref: planes_intervencion.creado_por_id > usuarios.id
+Ref: planes_intervencion.paciente_id > pacientes.id
+Ref: prospectos.campana_id > campanas_marketing.id
+Ref: notificaciones.usuario_id > usuarios.id
+Ref: notas_clinicas_pacientes.autor_id > usuarios.id
+Ref: notas_clinicas_pacientes.paciente_id > pacientes.id
+Ref: pacientes.tutor_id > usuarios.id
+Ref: pagos.descuento_id > descuentos.id
+Ref: pagos.paciente_id > pacientes.id
+Ref: pasos_plan.plan_id > planes_intervencion.id
+Ref: respuestas_subescalas_evaluacion.evaluacion_id > evaluaciones_escala.id
+Ref: respuestas_subescalas_evaluacion.subescala_id > subescalas.id
+Ref: respuestas_valores_evaluacion.evaluacion_id > evaluaciones_escala.id
+Ref: respuestas_valores_evaluacion.valor_escala_id > valores_escala.id
+Ref: evaluaciones_escala.evaluador_id > usuarios.id
+Ref: evaluaciones_escala.paciente_id > pacientes.id
+Ref: evaluaciones_escala.escala_id > escalas.id
+Ref: evaluaciones_escala.sesion_id > sesiones_terapeuticas.id
+Ref: valores_escala.escala_id > escalas.id
+Ref: inventario_sesion.elemento_id > elementos_inventario.id
+Ref: inventario_sesion.sesion_id > sesiones_terapeuticas.id
+Ref: pasos_plan_sesion.paso_plan_id > pasos_plan.id
+Ref: pasos_plan_sesion.sesion_id > sesiones_terapeuticas.id
+Ref: recursos_sesion.recurso_id > recursos_digitales.id
+Ref: recursos_sesion.sesion_id > sesiones_terapeuticas.id
+Ref: subescalas.escala_id > escalas.id
+Ref: sesiones_terapeuticas.grupo_id > grupos_instituciones.id
+Ref: sesiones_terapeuticas.paciente_id > pacientes.id
+Ref: sesiones_terapeuticas.terapeuta_id > usuarios.id
+Ref: informes_terapia.generado_por_id > usuarios.id
+Ref: informes_terapia.paciente_id > pacientes.id

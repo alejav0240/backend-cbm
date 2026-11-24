@@ -4,6 +4,7 @@ import base64
 from graphql import GraphQLError
 from django.db.models.functions import Coalesce
 
+ERROR_NO_AUTORIZADO = "No autorizado."
 from therapeutic_sessions.models import Session, SessionResource, SessionInventory, InventoryItem, DigitalResource
 from therapeutic_sessions.type import SessionType, DigitalResourceType, InventoryItemType, CycleType, PaginatedDigitalResources
 from config.utils import (
@@ -41,9 +42,9 @@ class CreateSession(graphene.Mutation):
             raise GraphQLError("ID de terapeuta inválido o no proporcionado.")
         if not (info.context.user.is_staff or info.context.user.is_superuser):
             if db_therapist_id != info.context.user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if db_patient_id and not user_can_access_patient(info.context.user, db_patient_id):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         current_session_number = 0
         if db_patient_id:
@@ -92,11 +93,11 @@ class UpdateSession(graphene.Mutation):
         try:
             session = Session.objects.get(pk=real_id)
             if not user_can_access_session(info.context.user, session.pk):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if therapist_id is not None and not (
                 info.context.user.is_staff or info.context.user.is_superuser
             ) and get_db_id(therapist_id) != info.context.user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if notes is not None:
                 session.notes = notes
             if duration_minutes is not None:
@@ -132,7 +133,7 @@ class UpdateSessionPaymentStatus(graphene.Mutation):
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
         if not user_can_access_session(info.context.user, session.pk):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
             
         session.payment_status = payment_status
         session.save(update_fields=["payment_status", "updated_at"])
@@ -151,7 +152,7 @@ class AddSessionResource(graphene.Mutation):
         db_session_id = get_db_id(session_id)
         db_resource_id = get_db_id(resource_id)
         if not user_can_access_session(info.context.user, db_session_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         SessionResource.objects.get_or_create(
             session_id=db_session_id, resource_id=db_resource_id
@@ -171,7 +172,7 @@ class AddSessionInventoryItem(graphene.Mutation):
         db_session_id = get_db_id(session_id)
         db_item_id = get_db_id(item_id)
         if not user_can_access_session(info.context.user, db_session_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         si, _ = SessionInventory.objects.get_or_create(
             session_id=db_session_id, item_id=db_item_id
@@ -312,11 +313,14 @@ class CreateCycle(graphene.Mutation):
             raise GraphQLError("ID de paciente inválido.")
         if not db_therapist_id:
             raise GraphQLError("ID de terapeuta inválido.")
-        if not (info.context.user.is_staff or info.context.user.is_superuser):
-            if db_therapist_id != info.context.user.pk or not user_can_access_patient(
-                info.context.user, db_patient_id
-            ):
-                raise GraphQLError("No autorizado.")
+        if (
+            not (info.context.user.is_staff or info.context.user.is_superuser)
+            and (
+                db_therapist_id != info.context.user.pk
+                or not user_can_access_patient(info.context.user, db_patient_id)
+            )
+        ):
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
 
         last_session = Session.objects.filter(patient_id=db_patient_id).aggregate(
             last_num=Coalesce(Max('session_number'), 0)
@@ -360,7 +364,7 @@ class DeleteSession(graphene.Mutation):
         try:
             session = Session.objects.get(pk=real_id)
             if not user_can_access_session(info.context.user, session.pk):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             session.delete()
             return DeleteSession(success=True, message="Sesión eliminada correctamente")
         except Session.DoesNotExist:
@@ -381,7 +385,7 @@ class BulkAddSessionResources(graphene.Mutation):
     def mutate(self, info, session_id, resource_ids):
         db_session_id = get_db_id(session_id)
         if not user_can_access_session(info.context.user, db_session_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         count = 0
         for rid in resource_ids:
             _, created = SessionResource.objects.get_or_create(
@@ -405,7 +409,7 @@ class BulkAddSessionInventoryItems(graphene.Mutation):
     def mutate(self, info, session_id, item_ids):
         db_session_id = get_db_id(session_id)
         if not user_can_access_session(info.context.user, db_session_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         count = 0
         for iid in item_ids:
             _, created = SessionInventory.objects.get_or_create(
@@ -429,7 +433,7 @@ class BulkAddStepsToSession(graphene.Mutation):
     def mutate(self, info, session_id, plan_step_ids):
         db_session_id = get_db_id(session_id)
         if not user_can_access_session(info.context.user, db_session_id):
-            raise GraphQLError("No autorizado.")
+            raise GraphQLError(ERROR_NO_AUTORIZADO)
         count = 0
         for sid in plan_step_ids:
             _, created = SessionPlanStep.objects.get_or_create(

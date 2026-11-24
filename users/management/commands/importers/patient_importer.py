@@ -52,40 +52,59 @@ class PatientImporter(BaseImporter):
     # CIs que son placeholders conocidos en el sistema legacy
     PLACEHOLDER_CIS = {"0", "0000", "000", "1234"}
 
-    def _process_row(self, row, users_by_name, default_therapist):
-        legacy_client_id = self._to_int(row[0])
+    def _resolve_patient_ci(self, raw_ci, legacy_client_id, first_name, last_name):
+        ci_candidate = self._limit_text(raw_ci, 30)
+        if not raw_ci or raw_ci in self.PLACEHOLDER_CIS:
+            return self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
+        if ci_candidate in self._seen_cis:
+            ci = self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
+            self.logger(f"⚠️ CI duplicado '{raw_ci}' para cliente id={legacy_client_id} ({first_name} {last_name}) → usando {ci}")
+        else:
+            ci = ci_candidate
+        self._seen_cis.add(ci_candidate)
+        return ci
+
+    def _patient_values(self, row, legacy_client_id):
         first_name = self._limit_text(self._clean_text(row[1]), 100)
         last_name = self._limit_text(self._clean_text(row[2]), 100)
-        ci_raw = self._clean_text(row[3])
+        ci = self._resolve_patient_ci(self._clean_text(row[3]), legacy_client_id, first_name, last_name)
+        return {
+            "first_name": first_name, "last_name": last_name, "ci": ci,
+            "birth_date": self._to_date(row[4]), "image_url": self._clean_text(row[5]) or None,
+            "notes": self._clean_text(row[6]), "diagnosis": self._limit_text(self._clean_text(row[7]), 50),
+            "residence": self._limit_text(self._clean_text(row[8]), 100),
+            "tutor_fullname": self._clean_text(row[9]),
+            "clinical": {
+                "GENERAL_OBJECTIVE": self._clean_text(row[12]), "SOCIAL_AREA": self._clean_text(row[13]),
+                "COGNITIVE_AREA": self._clean_text(row[14]), "PHYSICAL_AREA": self._clean_text(row[15]),
+                "EMOTIONAL_AREA": self._clean_text(row[16]), "METHODS": self._clean_text(row[17]),
+                "ADDITIONAL_NOTES": self._clean_text(row[18]),
+            },
+        }
 
-        # Usar LEGACY-PAT-{id} si el CI es un placeholder conocido o ya está usado por otro paciente
-        if not ci_raw or ci_raw in self.PLACEHOLDER_CIS:
-            ci = self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
-        else:
-            # Verificar si ya existe otro paciente con este CI (duplicado real en legacy)
-            ci_candidate = self._limit_text(ci_raw, 30)
-            if ci_candidate in self._seen_cis:
-                ci = self._limit_text(f"LEGACY-PAT-{legacy_client_id}", 30)
-                self.logger(f"⚠️  CI duplicado '{ci_raw}' para cliente id={legacy_client_id} ({first_name} {last_name}) → usando {ci}")
-            else:
-                ci = ci_candidate
-            self._seen_cis.add(ci_candidate)
-        birth_date = self._to_date(row[4])
-        image_url = self._clean_text(row[5]) or None
-        
-        notes = self._clean_text(row[6])
-        diagnosis = self._limit_text(self._clean_text(row[7]), 50)
-        residence = self._limit_text(self._clean_text(row[8]), 100)
-        tutor_fullname = self._clean_text(row[9])
-        
-        general_objective = self._clean_text(row[12])
-        social = self._clean_text(row[13])
-        cognitive = self._clean_text(row[14])
-        physical = self._clean_text(row[15])
-        emotional = self._clean_text(row[16])
-        methods = self._clean_text(row[17])
-        questionnaire = self._clean_text(row[18])
-        
+    def _save_patient(self, values, created_at):
+        if self.dry_run:
+            return Patient(ci=values["ci"], first_name=values["first_name"], last_name=values["last_name"], created_at=created_at)
+        patient, created = Patient.objects.update_or_create(
+            ci=values["ci"],
+            defaults={key: values[key] for key in ("first_name", "last_name", "birth_date", "image_url", "diagnosis", "residence", "notes")}
+            | {"status": Patient.Status.ACTIVE, "registration_complete": True},
+        )
+        if created or patient.created_at != created_at:
+            Patient.objects.filter(pk=patient.pk).update(created_at=created_at)
+            patient.refresh_from_db()
+        return patient
+
+    def _save_clinical_notes(self, patient, therapist, clinical):
+        if self.dry_run:
+            self.stats["notes"] += sum(bool(value) for value in clinical.values())
+            return
+        for category, content in clinical.items():
+            self._upsert_clinical_note(patient, therapist, category, content)
+
+    def _process_row(self, row, users_by_name, default_therapist):
+        legacy_client_id = self._to_int(row[0])
+        values = self._patient_values(row, legacy_client_id)
         legacy_info_id = self._to_int(row[19]) if len(row) > 19 else None
         # Si el cliente no tiene infocliente (LEFT JOIN devuelve NULL), usar client_id como clave
         # con signo negativo para no colisionar con ids reales de infoclientes
@@ -93,58 +112,19 @@ class PatientImporter(BaseImporter):
             legacy_info_id = -legacy_client_id
             self.logger(f"⚠️  Cliente id={legacy_client_id} ({first_name} {last_name}) sin infocliente → info_map key={legacy_info_id}")
         created_at = self._to_datetime(row[20]) if len(row) > 20 else timezone.now()
-
-        status = Patient.Status.ACTIVE
-
-        if self.dry_run:
-            patient = Patient(ci=ci, first_name=first_name, last_name=last_name, created_at=created_at)
-        else:
-            patient, created = Patient.objects.update_or_create(
-                ci=ci,
-                defaults={
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "birth_date": birth_date,
-                    "image_url": image_url,
-                    "status": status,
-                    "diagnosis": diagnosis,
-                    "residence": residence,
-                    "notes": notes,
-                    "registration_complete": True,
-                },
-            )
-            # Forzar la fecha de creación legacy
-            if created or patient.created_at != created_at:
-                Patient.objects.filter(pk=patient.pk).update(created_at=created_at)
-                patient.refresh_from_db()
+        patient = self._save_patient(values, created_at)
         
         self.patients_by_legacy_client[legacy_client_id] = patient
         self.stats['patients'] += 1
 
         # Resolver tutor
-        tutor_user = self._resolve_or_create_tutor_user(legacy_info_id, tutor_fullname, users_by_name)
+        tutor_user = self._resolve_or_create_tutor_user(legacy_info_id, values["tutor_fullname"], users_by_name)
         
         if not self.dry_run:
             patient.tutor = tutor_user
             patient.save(update_fields=["tutor", "updated_at"])
 
-            # Crear notas clínicas
-            self._upsert_clinical_note(patient, default_therapist, "GENERAL_OBJECTIVE", general_objective)
-            self._upsert_clinical_note(patient, default_therapist, "PHYSICAL_AREA", physical)
-            self._upsert_clinical_note(patient, default_therapist, "EMOTIONAL_AREA", emotional)
-            self._upsert_clinical_note(patient, default_therapist, "COGNITIVE_AREA", cognitive)
-            self._upsert_clinical_note(patient, default_therapist, "SOCIAL_AREA", social)
-            self._upsert_clinical_note(patient, default_therapist, "METHODS", methods)
-            self._upsert_clinical_note(patient, default_therapist, "ADDITIONAL_NOTES", questionnaire)
-        else:
-            # En dry-run también incrementamos el contador para ver que se procesaron
-            if general_objective: self.stats['notes'] += 1
-            if physical: self.stats['notes'] += 1
-            if emotional: self.stats['notes'] += 1
-            if cognitive: self.stats['notes'] += 1
-            if social: self.stats['notes'] += 1
-            if methods: self.stats['notes'] += 1
-            if questionnaire: self.stats['notes'] += 1
+        self._save_clinical_notes(patient, default_therapist, values["clinical"])
 
         self.info_map[legacy_info_id] = {
             "patient": patient,

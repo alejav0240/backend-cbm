@@ -1,8 +1,12 @@
 db.sqlite3
 __init__.py
 .env
+secrets/
 __pycache__
 migrations
+!pipeline_multimodal/migrations/
+!pipeline_multimodal/migrations/__init__.py
+!pipeline_multimodal/migrations/*.py
 !users/migrations/
 users/migrations/__pycache__/
 !users/migrations/0003_onboardingview.py
@@ -14,3 +18,6 @@ users/migrations/__pycache__/
 .codegraph
 media
 staticfiles
+
+# Local browser/session exports
+cookies.txt

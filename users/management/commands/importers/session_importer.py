@@ -66,7 +66,6 @@ class SessionImporter(BaseImporter):
 
     def _process_row(self, row, payments_by_legacy, therapist):
         # Indices: 0:ci.id, 1:ci.id_pago, 2:nrociclo, 3:sesion, 4:estadosesion, 5:ci.fecha, 6:estadopago, 7:eri, 8:cim, 9:ejecucion, 10:apuntes, 11:ci.created_at, 12:ci.updated_at
-        legacy_id = self._to_int(row[0])
         legacy_payment_id = self._to_int(row[1])
         payment = payments_by_legacy.get(legacy_payment_id)
         
@@ -91,7 +90,7 @@ class SessionImporter(BaseImporter):
         notes = "\n".join(notes_parts) if notes_parts else None
 
         if self.dry_run:
-            session = Session(
+            Session(
                 patient=payment.patient,
                 therapist=therapist,
                 session_date=session_datetime,

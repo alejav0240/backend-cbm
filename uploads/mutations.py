@@ -1,4 +1,5 @@
 import os
+import secrets
 
 import graphene
 from django.conf import settings
@@ -16,7 +17,7 @@ def _is_authorized(info) -> bool:
     if not service_key:
         return False
     provided = info.context.headers.get("X-Service-Key", "")
-    return provided == service_key
+    return secrets.compare_digest(provided, service_key)
 
 
 def _get_session(session_id: str) -> Session:
@@ -67,6 +68,7 @@ class CompletarSubidaSesion(graphene.Mutation):
         message = graphene.String()
         job_id = graphene.String()
         duration_minutes = graphene.Int()
+        pipeline_job_id = graphene.String()
 
     success = graphene.Boolean()
 
@@ -80,6 +82,7 @@ class CompletarSubidaSesion(graphene.Mutation):
         message=None,
         job_id=None,
         duration_minutes=None,
+        pipeline_job_id=None,
     ):
         if not _is_authorized(info):
             raise GraphQLError("No autorizado.")
@@ -112,6 +115,8 @@ class CompletarSubidaSesion(graphene.Mutation):
         metadatos = {"sessionId": session_id}
         if job_id:
             metadatos["jobId"] = job_id
+        if pipeline_job_id:
+            metadatos["pipelineJobId"] = pipeline_job_id
 
         if ok:
             destino = "OneDrive"

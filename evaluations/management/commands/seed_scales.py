@@ -4,6 +4,13 @@ from django.core.management.base import BaseCommand
 from evaluations.models import Scale, Subscale, ScaleValue
 from django.db import transaction
 
+SCALE_COMPORTAMIENTOS_RESTRICTIVOS = 'Comportamientos Restrictivos'
+SCALE_INTERACCION_SOCIAL = 'Interacción Social y Cognición'
+SCALE_PERCEPCION_RITMICA = 'Percepción y Exploración Rítmica'
+SCALE_PERCEPCION_SONORA = 'Percepción y Exploración Sonora'
+SCALE_EXPLORACION_VOCAL = 'Exploración Vocal'
+SCALE_MOVIMIENTO_CORPORAL = 'Movimiento Corporal con la Música'
+
 class Command(BaseCommand):
     help = 'Seeds the database with DEMUCA, ERI, and CIM scales.'
 

@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -16,7 +17,7 @@ def _is_authorized(request) -> bool:
     if not service_key:
         return False
     provided = request.headers.get("X-Service-Key", "")
-    return provided == service_key
+    return secrets.compare_digest(provided, service_key)
 
 
 @csrf_exempt

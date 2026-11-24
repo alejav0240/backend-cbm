@@ -24,7 +24,7 @@ def generate_unique_username(first_name: str = "", last_name: str = "", digits_l
 
     Garantiza unicidad consultando el modelo User.
     """
-    User = get_user_model()
+    user_model = get_user_model()
 
     first_word = first_name.strip().split()[0] if first_name.strip() else ""
     last_word = last_name.strip().split()[0] if last_name.strip() else ""
@@ -49,11 +49,11 @@ def generate_unique_username(first_name: str = "", last_name: str = "", digits_l
     for _ in range(50):
         num = random.randint(min_val, max_val)
         candidate = f"{base}{num}"
-        if not User.objects.filter(username=candidate).exists():
+        if not user_model.objects.filter(username=candidate).exists():
             return candidate
 
     # Si hay muchas colisiones, buscar secuencialmente
     counter = min_val
-    while User.objects.filter(username=f"{base}{counter}").exists():
+    while user_model.objects.filter(username=f"{base}{counter}").exists():
         counter += 1
     return f"{base}{counter}"

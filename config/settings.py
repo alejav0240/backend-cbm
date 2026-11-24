@@ -3,6 +3,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
+CLINICAL_PATIENT_CHANGE_LIST = 'admin:clinical_patient_changelist'
+
 # Monkeypatch to bypass database version checks (PostgreSQL 10.23 vs Django 4.2 requirement of 12+)
 from django.db.backends.base.base import BaseDatabaseWrapper
 BaseDatabaseWrapper.check_database_version_supported = lambda self: None
@@ -11,20 +13,36 @@ BaseDatabaseWrapper.check_database_version_supported = lambda self: None
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
+
+def _get_csv_env(name, default=""):
+    """Read a comma-separated environment variable as a cleaned list."""
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-#hp^*p*3sd(2p3d)75%a(-f9rpyy72k0!mr#w8qift&-6+v0%&")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be configured through the environment")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+APP_ENCRYPTION_ENABLED = os.getenv("APP_ENCRYPTION_ENABLED", "true").strip().lower() not in (
+    "false",
+    "0",
+    "no",
+    "off",
+)
+if APP_ENV == "production" and DEBUG:
+    raise RuntimeError("DEBUG must be false when APP_ENV=production")
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "[::1]",
-    "api.musicoterapiabolivia.com",
-    "plataform.musicoterapiabolivia.com",
+ALLOWED_HOSTS = _get_csv_env(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,[::1],"
+    "api.musicoterapiabolivia.com,"
+    "plataform.musicoterapiabolivia.com,"
     "plataforma.musicoterapiabolivia.com",
-]
+)
 
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
@@ -63,6 +81,8 @@ INSTALLED_APPS = [
     'onedrive',
     'uploads',
     'analysis',
+    'multimodal',
+    'pipeline_multimodal'
 ]
 
 # Algunas apps de dominio todavía no tienen migraciones propias. Durante los
@@ -83,6 +103,7 @@ if "test" in sys.argv:
             "uploads",
             "therapeutic_sessions",
             "analysis",
+            "pipeline_multimodal",
         )
     }
 
@@ -92,6 +113,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'config.encryption_middleware.ApplicationEncryptionMiddleware',
     'config.middleware.ServiceKeyCSRFExemptMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -164,13 +186,14 @@ JWT_REFRESH_EXPIRATION_DELTA = datetime.timedelta(days=7)
 GRAPHQL_JWT = {
     "JWT_VERIFY_EXPIRATION": True,
     "JWT_LONG_RUNNING_REFRESH_TOKEN": True,
-    "JWT_REUSE_REFRESH_TOKENS": True,
     "JWT_ALLOW_ANY_HANDLER": "config.jwt.allow_refresh_token",
     "JWT_COOKIE_NAME": "access_token",
     "JWT_REFRESH_TOKEN_COOKIE_NAME": "refresh_token",
     "JWT_COOKIE_HTTPONLY": True,
     "JWT_COOKIE_SECURE": not DEBUG,
     "JWT_COOKIE_SAMESITE": "Lax",
+    # Rotate and invalidate the previous database-backed refresh token on use.
+    "JWT_REUSE_REFRESH_TOKENS": False,
 }
 
 CSRF_COOKIE_SECURE = not DEBUG
@@ -183,25 +206,25 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # Tell Django the original request was HTTPS (Apache proxy terminates SSL)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "https://plataform.musicoterapiabolivia.com",
-    "https://plataforma.musicoterapiabolivia.com",
+CSRF_TRUSTED_ORIGINS = _get_csv_env(
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:3001,http://127.0.0.1:3001,"
+    "http://localhost:3004,http://127.0.0.1:3004,"
+    "https://plataform.musicoterapiabolivia.com,"
+    "https://plataforma.musicoterapiabolivia.com,"
     "https://api.musicoterapiabolivia.com",
-]
+)
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "https://plataform.musicoterapiabolivia.com",
-    "https://plataforma.musicoterapiabolivia.com",
+CORS_ALLOWED_ORIGINS = _get_csv_env(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:3001,http://127.0.0.1:3001,"
+    "http://localhost:3004,http://127.0.0.1:3004,"
+    "https://plataform.musicoterapiabolivia.com,"
+    "https://plataforma.musicoterapiabolivia.com,"
     "https://api.musicoterapiabolivia.com",
-]
+)
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -280,7 +303,7 @@ UNFOLD = {
                     {
                         "title": _("Pacientes"),
                         "icon": "person",
-                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                        "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                     },
                     {
                         "title": _("Planes de Intervención"),
@@ -364,7 +387,7 @@ UNFOLD = {
             "items": [
                 {
                     "title": _("Pacientes"),
-                    "link": reverse_lazy("admin:clinical_patient_changelist"),
+                    "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                 },
                 {
                     "title": _("Planes"),
@@ -385,7 +408,7 @@ UNFOLD = {
                     {
                         "title": _("Pacientes"),
                         "icon": "person",
-                        "link": reverse_lazy("admin:clinical_patient_changelist"),
+                        "link": reverse_lazy(CLINICAL_PATIENT_CHANGE_LIST),
                     },
                     {
                         "title": _("Sesiones"),

@@ -1,6 +1,8 @@
 import graphene
 from graphql import GraphQLError
 
+INSTITUTION_NOT_FOUND = 'Institución no encontrada'
+
 from institutions.models import Institution, InstitutionGroup
 from institutions.type import InstitutionType, InstitutionGroupType
 from config.utils import get_db_id
@@ -50,7 +52,7 @@ class UpdateInstitution(graphene.Mutation):
         try:
             institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
-            raise GraphQLError("Institución no encontrada")
+            raise GraphQLError(INSTITUTION_NOT_FOUND)
 
         if "phone" in kwargs:
             institution.contact_phone = kwargs.pop("phone")
@@ -77,7 +79,7 @@ class DeleteInstitution(graphene.Mutation):
         try:
             institution = Institution.objects.get(pk=real_id)
         except Institution.DoesNotExist:
-            raise GraphQLError("Institución no encontrada")
+            raise GraphQLError(INSTITUTION_NOT_FOUND)
 
         institution.delete()
 
@@ -100,7 +102,7 @@ class CreateInstitutionGroup(graphene.Mutation):
         try:
             institution = Institution.objects.get(pk=real_inst_id)
         except Institution.DoesNotExist:
-            raise GraphQLError("Institución no encontrada")
+            raise GraphQLError(INSTITUTION_NOT_FOUND)
 
         group = InstitutionGroup.objects.create(
             institution=institution,

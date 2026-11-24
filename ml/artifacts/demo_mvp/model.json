@@ -1,0 +1,225 @@
+{
+  "training_authorized": false,
+  "demo_only": true,
+  "ground_truth": false,
+  "models": {
+    "feature_logistic_regression": {
+      "model_type": "per_label_logistic_regression",
+      "features": [
+        "audio_rms_mean",
+        "audio_zcr_mean",
+        "visual_motion_mean",
+        "visual_motion_max"
+      ],
+      "threshold": 0.5,
+      "estimators": {
+        "visual__MOVIMIENTO": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            -0.07705978286100533,
+            0.20078742098626995,
+            0.7374869588067496,
+            0.3849036162712061
+          ],
+          "intercept": -0.11469516869058059
+        },
+        "visual__MOVIMIENTO_REPETITIVO": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "visual__CONTACTO_VISUAL": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "visual__INTERACCION_OBJETO": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            1.2602491130586213,
+            -0.6871206599224111,
+            -9.41164066108537,
+            6.905194420276434
+          ],
+          "intercept": -3.2588740676016186
+        },
+        "visual__ORIENTACION_CORPORAL": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "audio__VOCALIZACION": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "audio__HABLA": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "audio__RISA": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            2.3748461168250206,
+            -2.4565841372886856,
+            -3.4303851626172808,
+            6.228635249531865
+          ],
+          "intercept": -6.543708506497463
+        },
+        "audio__LLANTO": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "audio__GRITO": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "audio__SILENCIO": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            -1.5713699767193694,
+            0.2946316308790719,
+            0.00989297406740834,
+            -0.02160822413422921
+          ],
+          "intercept": -0.4733202304361773
+        },
+        "audio__ACTIVIDAD_MUSICAL": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            0.4958149020732898,
+            -1.1060042225761528,
+            1.6956545170002109,
+            -0.46433190457939194
+          ],
+          "intercept": -0.9222323488842381
+        },
+        "interaction__MIRADA": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "interaction__GESTO": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "interaction__TACTO": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "interaction__IMITACION": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "interaction__RESPUESTA": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            0.842308517311696,
+            -5.454166665659143,
+            3.3425847152957293,
+            0.815737173472017
+          ],
+          "intercept": -7.012784789608533
+        },
+        "interaction__ACTIVIDAD_CONJUNTA": {
+          "kind": "logistic_regression",
+          "mean": [
+            0.058882057395195524,
+            0.06786023217145547,
+            12.187006396608576,
+            19.736554733867212
+          ],
+          "scale": [
+            0.03669405798055895,
+            0.04395272918045683,
+            10.3433944073934,
+            16.65294333748449
+          ],
+          "coefficients": [
+            0.36846564947201893,
+            -0.6516647111158452,
+            2.110920743905333,
+            -0.3785658298728555
+          ],
+          "intercept": -1.2366375815368094
+        },
+        "interaction__INTERACCION_MUSICAL": {
+          "kind": "constant",
+          "probability": 0.0
+        },
+        "interaction__INTERACCION_VERBAL": {
+          "kind": "constant",
+          "probability": 0.0
+        }
+      }
+    }
+  }
+}

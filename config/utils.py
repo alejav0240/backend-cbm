@@ -2,6 +2,7 @@ from graphql import GraphQLError
 from functools import wraps
 import base64
 
+ERROR_NO_AUTENTICADO = "No autenticado."
 def get_db_id(global_id):
     """
     Helper para obtener el ID real de la DB desde un ID de Relay o un ID plano.
@@ -37,7 +38,7 @@ def login_required(func):
     def wrapper(root, info, *args, **kwargs):
         user = info.context.user
         if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
+            raise GraphQLError(ERROR_NO_AUTENTICADO)
         return func(root, info, *args, **kwargs)
     return wrapper
 
@@ -46,7 +47,7 @@ def staff_member_required(func):
     def wrapper(root, info, *args, **kwargs):
         user = info.context.user
         if not user.is_authenticated:
-            raise GraphQLError("No autenticado.")
+            raise GraphQLError(ERROR_NO_AUTENTICADO)
         if not user.is_staff:
             raise GraphQLError("No autorizado: se requiere rol de administrador.")
         return func(root, info, *args, **kwargs)
@@ -62,7 +63,7 @@ def module_permission_required(module_name, action='view'):
         def wrapper(root, info, *args, **kwargs):
             user = info.context.user
             if not user.is_authenticated:
-                raise GraphQLError("No autenticado.")
+                raise GraphQLError(ERROR_NO_AUTENTICADO)
             
             if user.is_superuser or user.is_staff:
                 return func(root, info, *args, **kwargs)
