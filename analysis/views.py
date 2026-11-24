@@ -87,7 +87,7 @@ def _persist_callback_artifacts(run, artifacts):
             kind=kind,
             defaults={
                 "uri": uri,
-                "sha256": metadata.get("sha256"),
+                "sha256": metadata.get("sha256") or "",
                 "training_authorized": metadata.get("training_authorized") is True,
                 "metadata_json": metadata,
             },
@@ -160,10 +160,10 @@ def processing_callback(request):
     run.result_json = _normalize_callback_result(payload)
     error = _normalize_processing_error(payload.get("error"))
     if isinstance(error, dict):
-        run.error_code = error.get("code")
-        run.error_message = error.get("message")
+        run.error_code = error.get("code") or ""
+        run.error_message = error.get("message") or ""
     if isinstance(run.result_json, dict):
-        run.source_sha256 = run.result_json.get("source_sha256", run.source_sha256)
+        run.source_sha256 = run.result_json.get("source_sha256") or run.source_sha256
     run.save()
 
     if status == ProcessingRun.Status.COMPLETED:
