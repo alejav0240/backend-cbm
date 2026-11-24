@@ -42,6 +42,58 @@ def _normalize_processing_error(error):
     return error
 
 
+def _update_run_status(run, status):
+    run.status = status
+    now = timezone.now()
+    if status == ProcessingRun.Status.RUNNING and run.started_at is None:
+        run.started_at = now
+    if status in {
+        ProcessingRun.Status.COMPLETED,
+        ProcessingRun.Status.FAILED,
+        ProcessingRun.Status.CANCELLED,
+    }:
+        run.finished_at = now
+
+
+def _normalize_callback_result(payload):
+    result = payload.get("result")
+    result = result if isinstance(result, dict) else {}
+    return {
+        **result,
+        "pipeline_stages": normalize_pipeline_stages(
+            payload.get("pipeline_stages", result.get("pipeline_stages"))
+        ),
+        "semantic_status": payload.get("semantic_status")
+        or result_semantic_status(result),
+    }
+
+
+def _persist_callback_artifacts(run, artifacts):
+    if not isinstance(artifacts, dict):
+        return
+    for kind, artifact in artifacts.items():
+        metadata = artifact if isinstance(artifact, dict) else {}
+        uri = (
+            metadata.get("uri") or metadata.get("path")
+            if isinstance(artifact, dict)
+            else artifact
+        )
+        if isinstance(uri, dict):
+            uri = uri.get("uri") or uri.get("path")
+        if not isinstance(uri, str) or not uri:
+            continue
+        ProcessingArtifact.objects.update_or_create(
+            run=run,
+            kind=kind,
+            defaults={
+                "uri": uri,
+                "sha256": metadata.get("sha256"),
+                "training_authorized": metadata.get("training_authorized") is True,
+                "metadata_json": metadata,
+            },
+        )
+
+
 @csrf_exempt
 @require_POST
 def processing_callback(request):
@@ -76,23 +128,8 @@ def processing_callback(request):
             status=409,
         )
 
-    run.status = status
-    now = timezone.now()
-    if status == ProcessingRun.Status.RUNNING and run.started_at is None:
-        run.started_at = now
-    if status in {ProcessingRun.Status.COMPLETED, ProcessingRun.Status.FAILED, ProcessingRun.Status.CANCELLED}:
-        run.finished_at = now
-    run.result_json = payload.get("result") or {}
-    if not isinstance(run.result_json, dict):
-        run.result_json = {}
-    run.result_json = {
-        **run.result_json,
-        "pipeline_stages": normalize_pipeline_stages(
-            payload.get("pipeline_stages", run.result_json.get("pipeline_stages"))
-        ),
-        "semantic_status": payload.get("semantic_status")
-        or result_semantic_status(run.result_json),
-    }
+    _update_run_status(run, status)
+    run.result_json = _normalize_callback_result(payload)
     error = _normalize_processing_error(payload.get("error"))
     if isinstance(error, dict):
         run.error_code = error.get("code")
@@ -112,33 +149,7 @@ def processing_callback(request):
             run.save(update_fields=["metadata_json", "updated_at"])
         persist_annotation_cases(run, run.result_json)
 
-    artifacts = {}
-    if isinstance(run.result_json, dict):
-        artifacts = run.result_json.get("artifacts") or run.result_json.get("derived_artifacts") or {}
-    if isinstance(artifacts, dict):
-        for kind, artifact in artifacts.items():
-            metadata = {}
-            sha256 = None
-            training_authorized = False
-            uri = artifact
-            if isinstance(artifact, dict):
-                uri = artifact.get("uri") or artifact.get("path")
-                metadata = artifact
-                sha256 = artifact.get("sha256")
-                training_authorized = artifact.get("training_authorized") is True
-            if isinstance(uri, dict):
-                uri = uri.get("uri") or uri.get("path")
-            if not isinstance(uri, str) or not uri:
-                continue
-            ProcessingArtifact.objects.update_or_create(
-                run=run,
-                kind=kind,
-                defaults={
-                    "uri": uri,
-                    "sha256": sha256,
-                    "training_authorized": training_authorized,
-                    "metadata_json": metadata,
-                },
-            )
+    artifacts = run.result_json.get("artifacts") or run.result_json.get("derived_artifacts")
+    _persist_callback_artifacts(run, artifacts)
 
     return JsonResponse({"ok": True, "run_id": run.external_run_id, "status": run.status})

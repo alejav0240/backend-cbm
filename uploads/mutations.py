@@ -30,6 +30,31 @@ def _get_session(session_id: str) -> Session:
         raise GraphQLError(f"Sesión {real_id} no encontrada.")
 
 
+def _notification_content(ok, storage, message, patient_name):
+    if not ok:
+        return (
+            message or f"No se pudo subir la grabación de la sesión de {patient_name}.",
+            "subida_fallo",
+        )
+    destination = {
+        "r2": "Cloudflare R2",
+        "local": "almacenamiento local",
+    }.get(storage, "OneDrive")
+    return (
+        f"La grabación de la sesión de {patient_name} fue subida correctamente a {destination}.",
+        "subida_exitosa",
+    )
+
+
+def _notification_metadata(session_id, job_id, pipeline_job_id):
+    metadata = {"sessionId": session_id}
+    if job_id:
+        metadata["jobId"] = job_id
+    if pipeline_job_id:
+        metadata["pipelineJobId"] = pipeline_job_id
+    return metadata
+
+
 class MarcarSubidaEnProgreso(graphene.Mutation):
     """Marca una sesión con `video_status = subiendo`.
 
@@ -112,29 +137,13 @@ class CompletarSubidaSesion(graphene.Mutation):
             else "su paciente"
         )
 
-        metadatos = {"sessionId": session_id}
-        if job_id:
-            metadatos["jobId"] = job_id
-        if pipeline_job_id:
-            metadatos["pipelineJobId"] = pipeline_job_id
-
-        if ok:
-            destino = "OneDrive"
-            if storage == "r2":
-                destino = "Cloudflare R2"
-            elif storage == "local":
-                destino = "almacenamiento local"
-            texto = f"La grabación de la sesión de {nombre_paciente} fue subida correctamente a {destino}."
-            tipo = "subida_exitosa"
-        else:
-            texto = (
-                message
-                or f"No se pudo subir la grabación de la sesión de {nombre_paciente}."
-            )
-            tipo = "subida_fallo"
+        texto, tipo = _notification_content(ok, storage, message, nombre_paciente)
 
         Notification.objects.create(
-            user=session.therapist, message=texto, tipo=tipo, metadatos=metadatos
+            user=session.therapist,
+            message=texto,
+            tipo=tipo,
+            metadatos=_notification_metadata(session_id, job_id, pipeline_job_id),
         )
 
         return CompletarSubidaSesion(success=True)
