@@ -305,8 +305,23 @@ jobs:
           severity: HIGH,CRITICAL
           format: sarif
           output: trivy-image.sarif
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
+
+      - name: Enforce image security findings
+        run: |
+          set -euo pipefail
+          trivy image "$IMAGE" \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format json \
+            --output trivy-image.json
+          findings="$(jq '[.Results[]? | (.Vulnerabilities[]?, .Secrets[]?, .Misconfigurations[]?) | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' trivy-image.json)"
+          if [ "$findings" -ne 0 ]; then
+            echo "Trivy found $findings HIGH/CRITICAL image findings."
+            exit 1
+          fi
 
       - name: Show image vulnerabilities in logs
         if: ${{ failure() }}
