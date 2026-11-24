@@ -1,6 +1,7 @@
 import graphene
 from graphql import GraphQLError
 
+ERROR_NO_AUTORIZADO = "No autorizado."
 from therapeutic_sessions.models import DigitalResource, Session, InventoryItem
 from therapeutic_sessions.type import (
     SessionType, DigitalResourceType, InventoryItemType, CycleType,
@@ -106,6 +107,37 @@ def _build_cycles(base_qs):
     return cycles
 
 
+def _restrict_to_user(user, therapist_id):
+    if user.is_staff or user.is_superuser:
+        return therapist_id
+    if therapist_id and get_db_id(therapist_id) != user.pk:
+        raise GraphQLError(ERROR_NO_AUTORIZADO)
+    return str(user.pk)
+
+
+def _apply_session_filters(qs, patient_id, therapist_id, session_type, payment_status, session_status, search, date_from, date_to, include_no_date):
+    from django.db.models import Q
+    if patient_id:
+        qs = qs.filter(patient_id=get_db_id(patient_id))
+    if therapist_id:
+        qs = qs.filter(therapist_id=get_db_id(therapist_id))
+    for field, value in (("session_type", session_type), ("payment_status", payment_status)):
+        if value:
+            qs = qs.filter(**{field: value})
+    if session_status:
+        qs = qs.filter(session_status__iexact=session_status)
+    if search:
+        qs = qs.filter(Q(patient__first_name__icontains=search) | Q(patient__last_name__icontains=search) | Q(therapist__first_name__icontains=search) | Q(therapist__last_name__icontains=search))
+    if date_from or date_to:
+        date_filter = Q()
+        if date_from:
+            date_filter &= Q(session_date__date__gte=date_from)
+        if date_to:
+            date_filter &= Q(session_date__date__lte=date_to)
+        qs = qs.filter(date_filter | Q(session_date__isnull=True)) if include_no_date else qs.filter(date_filter)
+    return qs
+
+
 class Query(graphene.ObjectType):
     sessions = graphene.Field(
         PaginatedSessions,
@@ -187,49 +219,21 @@ class Query(graphene.ObjectType):
                          session_type=None, payment_status=None, session_status=None,
                          date_from=None, date_to=None, include_no_date=True,
                          search=None, page=1, page_size=10, by_cycles=False):
-        from django.db.models import Q
+        from django.db.models import F, Q
         from django.utils import timezone
 
-        user = info.context.user
-        if not (user.is_staff or user.is_superuser):
-            if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
-            therapist_id = str(user.pk)
+        therapist_id = _restrict_to_user(info.context.user, therapist_id)
 
-        qs = Session.objects.select_related("patient", "therapist", "group").order_by("-pk")
+        # The sessions view is chronological; keep pagination consistent with
+        # the order shown by the frontend instead of paginating by insertion id.
+        qs = Session.objects.select_related("patient", "therapist", "group").order_by(
+            F("session_date").desc(nulls_last=True), "-pk"
+        )
 
-        if patient_id:
-            qs = qs.filter(patient_id=get_db_id(patient_id))
-        if therapist_id:
-            qs = qs.filter(therapist_id=get_db_id(therapist_id))
-        if session_type:
-            qs = qs.filter(session_type=session_type)
-        if payment_status:
-            qs = qs.filter(payment_status=payment_status)
-        if session_status:
-            # Acepta registros antiguos guardados en mayúsculas.
-            qs = qs.filter(session_status__iexact=session_status)
-        if search:
-            qs = qs.filter(
-                Q(patient__first_name__icontains=search) |
-                Q(patient__last_name__icontains=search) |
-                Q(therapist__first_name__icontains=search) |
-                Q(therapist__last_name__icontains=search)
-            )
-
-        # ── Filtro de fechas ──────────────────────────────────────────────
-        if date_from or date_to:
-            date_filter = Q()
-            if date_from:
-                date_filter &= Q(session_date__date__gte=date_from)
-            if date_to:
-                date_filter &= Q(session_date__date__lte=date_to)
-
-            if include_no_date:
-                # Incluye también sesiones sin fecha (agendadas sin asignar)
-                qs = qs.filter(date_filter | Q(session_date__isnull=True))
-            else:
-                qs = qs.filter(date_filter)
+        qs = _apply_session_filters(
+            qs, patient_id, therapist_id, session_type, payment_status,
+            session_status, search, date_from, date_to, include_no_date,
+        )
 
         if by_cycles:
             # ── Paginación por ciclos: 1 ciclo por página, página 1 = más reciente ──
@@ -270,7 +274,7 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not (user.is_staff or user.is_superuser):
             if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             therapist_id = str(user.pk)
 
         qs = Session.objects.select_related("patient", "therapist", "group").filter(
@@ -318,7 +322,7 @@ class Query(graphene.ObjectType):
             ).get(pk=real_id)
             if not (info.context.user.is_staff or info.context.user.is_superuser) \
                     and session.therapist_id != info.context.user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             return session
         except Session.DoesNotExist:
             raise GraphQLError("Sesión no encontrada")
@@ -405,7 +409,7 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not (user.is_staff or user.is_superuser):
             if therapist_id and get_db_id(therapist_id) != user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             therapist_id = str(user.pk)
 
         qs = Session.objects.filter(cycle_number__isnull=False)

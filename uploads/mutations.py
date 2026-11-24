@@ -1,4 +1,5 @@
 import os
+import secrets
 
 import graphene
 from django.conf import settings
@@ -16,7 +17,7 @@ def _is_authorized(info) -> bool:
     if not service_key:
         return False
     provided = info.context.headers.get("X-Service-Key", "")
-    return provided == service_key
+    return secrets.compare_digest(provided, service_key)
 
 
 def _get_session(session_id: str) -> Session:
@@ -27,6 +28,31 @@ def _get_session(session_id: str) -> Session:
         return Session.objects.get(pk=real_id)
     except Session.DoesNotExist:
         raise GraphQLError(f"Sesión {real_id} no encontrada.")
+
+
+def _notification_content(ok, storage, message, patient_name):
+    if not ok:
+        return (
+            message or f"No se pudo subir la grabación de la sesión de {patient_name}.",
+            "subida_fallo",
+        )
+    destination = {
+        "r2": "Cloudflare R2",
+        "local": "almacenamiento local",
+    }.get(storage, "OneDrive")
+    return (
+        f"La grabación de la sesión de {patient_name} fue subida correctamente a {destination}.",
+        "subida_exitosa",
+    )
+
+
+def _notification_metadata(session_id, job_id, pipeline_job_id):
+    metadata = {"sessionId": session_id}
+    if job_id:
+        metadata["jobId"] = job_id
+    if pipeline_job_id:
+        metadata["pipelineJobId"] = pipeline_job_id
+    return metadata
 
 
 class MarcarSubidaEnProgreso(graphene.Mutation):
@@ -66,11 +92,22 @@ class CompletarSubidaSesion(graphene.Mutation):
         ok = graphene.Boolean(required=True)
         message = graphene.String()
         job_id = graphene.String()
+        duration_minutes = graphene.Int()
+        pipeline_job_id = graphene.String()
 
     success = graphene.Boolean()
 
     def mutate(
-        self, info, session_id, ok, video_url=None, storage=None, message=None, job_id=None
+        self,
+        info,
+        session_id,
+        ok,
+        video_url=None,
+        storage=None,
+        message=None,
+        job_id=None,
+        duration_minutes=None,
+        pipeline_job_id=None,
     ):
         if not _is_authorized(info):
             raise GraphQLError("No autorizado.")
@@ -80,7 +117,15 @@ class CompletarSubidaSesion(graphene.Mutation):
         if ok and video_url:
             session.video_url = video_url
             session.video_status = Session.VideoStatus.SUBIDO
-            session.save(update_fields=["video_url", "video_status", "updated_at"])
+            update_fields = ["video_url", "video_status", "updated_at"]
+            if (
+                isinstance(duration_minutes, int)
+                and duration_minutes > 0
+                and not session.duration_minutes
+            ):
+                session.duration_minutes = duration_minutes
+                update_fields.append("duration_minutes")
+            session.save(update_fields=update_fields)
         elif not ok:
             session.video_status = Session.VideoStatus.FALLO
             session.save(update_fields=["video_status", "updated_at"])
@@ -92,27 +137,13 @@ class CompletarSubidaSesion(graphene.Mutation):
             else "su paciente"
         )
 
-        metadatos = {"sessionId": session_id}
-        if job_id:
-            metadatos["jobId"] = job_id
-
-        if ok:
-            destino = "OneDrive"
-            if storage == "r2":
-                destino = "Cloudflare R2"
-            elif storage == "local":
-                destino = "almacenamiento local"
-            texto = f"La grabación de la sesión de {nombre_paciente} fue subida correctamente a {destino}."
-            tipo = "subida_exitosa"
-        else:
-            texto = (
-                message
-                or f"No se pudo subir la grabación de la sesión de {nombre_paciente}."
-            )
-            tipo = "subida_fallo"
+        texto, tipo = _notification_content(ok, storage, message, nombre_paciente)
 
         Notification.objects.create(
-            user=session.therapist, message=texto, tipo=tipo, metadatos=metadatos
+            user=session.therapist,
+            message=texto,
+            tipo=tipo,
+            metadatos=_notification_metadata(session_id, job_id, pipeline_job_id),
         )
 
         return CompletarSubidaSesion(success=True)

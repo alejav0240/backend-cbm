@@ -1,5 +1,6 @@
 import graphene
 from django.db import transaction
+from django.utils import timezone
 from graphql import GraphQLError
 from clinical.models import Patient
 from users.models import User
@@ -29,6 +30,7 @@ from config.utils import (
     user_can_access_session,
 )
 
+ERROR_NO_AUTORIZADO = "No autorizado."
 class QuestionInput(graphene.InputObjectType):
     question = graphene.String(required=True)
     question_type = graphene.String(required=True)
@@ -87,15 +89,15 @@ class AssignForm(graphene.Mutation):
                patient_id=None, session_id=None):
         if not (info.context.user.is_staff or info.context.user.is_superuser):
             if get_db_id(assigned_by_id) != info.context.user.pk:
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if patient_id and not user_can_access_patient(
                 info.context.user, get_db_id(patient_id)
             ):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if session_id and not user_can_access_session(
                 info.context.user, get_db_id(session_id)
             ):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
         try:
             assignment = FormAssignment.objects.create(
                 form_id=get_db_id(form_id),
@@ -128,7 +130,7 @@ class UpdateFormAssignment(graphene.Mutation):
                 or info.context.user.is_superuser
                 or assignment.assigned_by_id == info.context.user.pk
             ):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             if assigned_to_id is not None:
                 assignment.assigned_to_id = get_db_id(assigned_to_id)
             if patient_id is not None:
@@ -157,7 +159,7 @@ class DeleteFormAssignment(graphene.Mutation):
                 or info.context.user.is_superuser
                 or assignment.assigned_by_id == info.context.user.pk
             ):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             assignment.delete()
             return DeleteFormAssignment(success=True)
         except FormAssignment.DoesNotExist:
@@ -244,14 +246,14 @@ class SubmitFormResponse(graphene.Mutation):
                 or assignment.assigned_by_id == info.context.user.pk
                 or assignment.assigned_to_id == info.context.user.pk
             ):
-                raise GraphQLError("No autorizado.")
-            response, created = FormResponse.objects.update_or_create(
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
+            response, _ = FormResponse.objects.update_or_create(
                 assignment_id=real_assignment_id,
                 question_id=real_question_id,
                 defaults={'response': response_text}
             )
             return SubmitFormResponse(success=True, response=response)
-        except Exception as e:
+        except (FormAssignment.DoesNotExist, ValueError, TypeError):
             return SubmitFormResponse(success=False, response=None)
 
 
@@ -278,7 +280,7 @@ class SubmitFullForm(graphene.Mutation):
                 or assignment.assigned_by_id == info.context.user.pk
                 or assignment.assigned_to_id == info.context.user.pk
             ):
-                raise GraphQLError("No autorizado.")
+                raise GraphQLError(ERROR_NO_AUTORIZADO)
             
             with transaction.atomic():
                 for resp in responses:
@@ -291,7 +293,7 @@ class SubmitFullForm(graphene.Mutation):
             return SubmitFullForm(success=True, assignment=assignment)
         except FormAssignment.DoesNotExist:
             return SubmitFullForm(success=False, assignment=None)
-        except Exception as e:
+        except (ValueError, TypeError):
             return SubmitFullForm(success=False, assignment=None)
 
 class ResponseSubScale(graphene.InputObjectType):
@@ -354,10 +356,69 @@ class AddScaleResponse(graphene.Mutation):
         except Exception as e:
             return AddScaleResponse(success=False, message=str(e))
 
+class UpdateScaleEvaluation(graphene.Mutation):
+    class Arguments:
+        evaluation_id = graphene.ID(required=True)
+        subscales = graphene.List(ResponseSubScale, required=True)
+        accept = graphene.Boolean(default_value=False)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+    evaluation = graphene.Field(ScaleEvaluationType)
+
+    @module_permission_required("evaluaciones", action="change")
+    def mutate(self, info, evaluation_id, subscales, accept=False):
+        real_evaluation_id = get_db_id(evaluation_id)
+        try:
+            evaluation = ScaleEvaluation.objects.select_related(
+                "session", "patient", "scale"
+            ).get(pk=real_evaluation_id)
+            if evaluation.session_id and not user_can_access_session(
+                info.context.user, evaluation.session_id
+            ):
+                raise GraphQLError("No autorizado.")
+
+            with transaction.atomic():
+                for subscale in subscales:
+                    subscale_id = get_db_id(subscale.subscale_id)
+                    response = ScaleEvaluationSubscaleResponse.objects.filter(
+                        evaluation=evaluation,
+                        subscale_id=subscale_id,
+                    ).first()
+                    if response is None:
+                        raise GraphQLError("La subescala no pertenece a esta evaluación.")
+                    response.score = max(0, min(response.subscale.max_value, subscale.score))
+                    response.save(update_fields=["score"])
+                if accept:
+                    evaluation.review_status = "accepted"
+                    evaluation.reviewed_by = info.context.user
+                    evaluation.reviewed_at = timezone.now()
+                    evaluation.save(
+                        update_fields=["review_status", "reviewed_by", "reviewed_at"]
+                    )
+
+            return UpdateScaleEvaluation(
+                success=True,
+                message=(
+                    "Evaluación DEMUCA aceptada por el especialista."
+                    if accept
+                    else "Evaluación DEMUCA actualizada correctamente."
+                ),
+                evaluation=evaluation,
+            )
+        except ScaleEvaluation.DoesNotExist:
+            return UpdateScaleEvaluation(
+                success=False,
+                message="Evaluación no encontrada.",
+            )
+        except Exception as error:
+            return UpdateScaleEvaluation(success=False, message=str(error))
+
 class Mutation(graphene.ObjectType):
     submit_form_response = SubmitFormResponse.Field()
     submit_full_form = SubmitFullForm.Field()
     add_scale_response = AddScaleResponse.Field()
+    update_scale_evaluation = UpdateScaleEvaluation.Field()
     create_scale = CreateScale.Field()
     delete_scale = DeleteScale.Field()
     create_form = CreateForm.Field()

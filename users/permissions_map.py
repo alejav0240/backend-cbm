@@ -22,6 +22,7 @@ MODULE_MODEL_MAP = {
     'cursos': ('finance', 'course'),
     'instituciones': ('institutions', 'institution'),
     'ajustes': ('users', 'user'),
+    'ml': ('pipeline_multimodal', 'therapistdataset'),
 }
 
 def get_permissions_for_modules(modules):

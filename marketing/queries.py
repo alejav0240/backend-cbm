@@ -16,6 +16,12 @@ class Query(graphene.ObjectType):
         page_size=graphene.Int(default_value=10),
     )
     blog_post = graphene.Field(BlogPostType, id=graphene.ID(required=True))
+    public_blog_posts = graphene.Field(
+        PaginatedBlogPosts,
+        page=graphene.Int(default_value=1),
+        page_size=graphene.Int(default_value=9),
+    )
+    public_blog_post = graphene.Field(BlogPostType, slug=graphene.String(required=True))
 
     marketing_campaigns = graphene.Field(
         PaginatedCampaigns,
@@ -62,6 +68,24 @@ class Query(graphene.ObjectType):
             return BlogPost.objects.get(pk=real_id)
         except BlogPost.DoesNotExist:
             raise GraphQLError("Artículo no encontrado")
+
+    def resolve_public_blog_posts(self, info, page=1, page_size=9):
+        qs = BlogPost.objects.filter(status__iexact=BlogPost.PostStatus.PUBLISHED)
+        total_count = qs.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        offset = max(page - 1, 0) * page_size
+        return PaginatedBlogPosts(
+            results=qs[offset:offset + page_size],
+            total_count=total_count,
+            total_pages=total_pages,
+            current_page=page,
+        )
+
+    def resolve_public_blog_post(self, info, slug):
+        return BlogPost.objects.filter(
+            slug=slug,
+            status__iexact=BlogPost.PostStatus.PUBLISHED,
+        ).first()
 
     @module_permission_required('marketing', action='view')
     def resolve_marketing_campaigns(self, info, status=None, platform=None, page=1, page_size=10):

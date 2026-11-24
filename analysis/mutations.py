@@ -2,6 +2,7 @@ import hmac
 import json
 import os
 import threading
+import time
 import uuid
 from urllib import request as urlrequest
 
@@ -14,6 +15,7 @@ from config.utils import get_db_id, module_permission_required, user_can_access_
 from therapeutic_sessions.models import Session
 
 from .models import ProcessingArtifact, ProcessingRun
+from .pipeline import initial_pipeline_stages, normalize_pipeline_stages, result_semantic_status
 from .type import ProcessingRunType
 
 
@@ -37,6 +39,14 @@ def _dispatch_to_ml(processing_run):
     orchestrator_url = os.getenv("ML_ORCHESTRATOR_URL", "").rstrip("/")
     source_uri = processing_run.source_uri
     if not orchestrator_url or not source_uri:
+        ProcessingRun.objects.filter(pk=processing_run.pk).update(
+            status=ProcessingRun.Status.FAILED,
+            error_code="ml_dispatch_not_configured",
+            error_message=(
+                "El análisis multimodal no está configurado: "
+                "falta ML_ORCHESTRATOR_URL o la URL de la grabación."
+            ),
+        )
         return
 
     callback_url = os.getenv("ML_CALLBACK_URL", "")
@@ -45,31 +55,37 @@ def _dispatch_to_ml(processing_run):
         "session_id": str(processing_run.session_id),
         "video_path": source_uri,
         "pipeline_version": processing_run.pipeline_version,
-        "skip_pose": os.getenv("ML_SKIP_POSE", "true").lower() in {"1", "true", "yes"},
+        "skip_pose": os.getenv("ML_SKIP_POSE", "false").lower() in {"1", "true", "yes"},
+        "pose_model": os.getenv("ML_POSE_MODEL", ""),
         "callback_url": callback_url,
     }
 
     def send():
-        try:
-            body = json.dumps(payload).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            orchestrator_key = os.getenv("ML_ORCHESTRATOR_API_KEY", "")
-            if orchestrator_key:
-                headers["X-ML-Service-Key"] = orchestrator_key
-            request = urlrequest.Request(
-                f"{orchestrator_url}/v1/runs",
-                data=body,
-                headers=headers,
-                method="POST",
-            )
-            with urlrequest.urlopen(request, timeout=15):
-                pass
-        except Exception as error:
-            ProcessingRun.objects.filter(pk=processing_run.pk).update(
-                status=ProcessingRun.Status.FAILED,
-                error_code="ml_dispatch_failed",
-                error_message=str(error),
-            )
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        orchestrator_key = os.getenv("ML_ORCHESTRATOR_API_KEY", "")
+        if orchestrator_key:
+            headers["X-ML-Service-Key"] = orchestrator_key
+        last_error = None
+        for attempt in range(3):
+            try:
+                request = urlrequest.Request(
+                    f"{orchestrator_url}/v1/runs",
+                    data=body,
+                    headers=headers,
+                    method="POST",
+                )
+                with urlrequest.urlopen(request, timeout=15):
+                    return
+            except Exception as error:
+                last_error = error
+                if attempt < 2:
+                    time.sleep(2**attempt)
+        ProcessingRun.objects.filter(pk=processing_run.pk).update(
+            status=ProcessingRun.Status.FAILED,
+            error_code="ml_dispatch_failed",
+            error_message=str(last_error),
+        )
 
     threading.Thread(target=send, daemon=True, name=f"dispatch-{processing_run.external_run_id}").start()
 
@@ -78,6 +94,48 @@ def _service_authorized(info):
     expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv("ML_SERVICE_API_KEY", "")
     received = info.context.headers.get("X-ML-Service-Key", "")
     return bool(expected) and hmac.compare_digest(received, expected)
+
+
+def _apply_run_status(processing_run, status, now):
+    processing_run.status = status
+    if status == ProcessingRun.Status.RUNNING and processing_run.started_at is None:
+        processing_run.started_at = now
+    if status in {
+        ProcessingRun.Status.COMPLETED,
+        ProcessingRun.Status.FAILED,
+        ProcessingRun.Status.CANCELLED,
+    }:
+        processing_run.finished_at = now
+
+
+def _normalized_result(result):
+    if not isinstance(result, dict):
+        return result
+    return {
+        **result,
+        "pipeline_stages": normalize_pipeline_stages(result.get("pipeline_stages")),
+        "semantic_status": result_semantic_status(result),
+    }
+
+
+def _upsert_artifacts(processing_run, artifacts):
+    if not isinstance(artifacts, list):
+        return
+    for payload in artifacts:
+        if not isinstance(payload, dict) or not payload.get("kind") or not payload.get("uri"):
+            continue
+        ProcessingArtifact.objects.update_or_create(
+            run=processing_run,
+            kind=payload["kind"],
+            defaults={
+                "uri": payload["uri"],
+                "sha256": payload.get("sha256") or "",
+                "mime_type": payload.get("mime_type") or "",
+                "size_bytes": payload.get("size_bytes"),
+                "training_authorized": payload.get("training_authorized") is True,
+                "metadata_json": payload.get("metadata", {}),
+            },
+        )
 
 
 class CreateProcessingRun(graphene.Mutation):
@@ -99,6 +157,10 @@ class CreateProcessingRun(graphene.Mutation):
             pipeline_version=pipeline_version,
             source_uri=source_uri or session.video_url,
             metadata_json=metadata if isinstance(metadata, dict) else {},
+            result_json={
+                "pipeline_stages": initial_pipeline_stages(),
+                "semantic_status": "pending",
+            },
         )
         _dispatch_to_ml(processing_run)
         return CreateProcessingRun(processing_run=processing_run)
@@ -135,22 +197,12 @@ class UpdateProcessingRun(graphene.Mutation):
         except ProcessingRun.DoesNotExist as error:
             raise GraphQLError("ProcessingRun no encontrado.") from error
 
-        valid_statuses = {choice for choice, _ in ProcessingRun.Status.choices}
-        if status not in valid_statuses:
+        if status not in {choice for choice, _ in ProcessingRun.Status.choices}:
             raise GraphQLError(f"Estado de procesamiento inválido: {status}")
 
-        now = django_timezone.now()
-        processing_run.status = status
-        if status == ProcessingRun.Status.RUNNING and processing_run.started_at is None:
-            processing_run.started_at = now
-        if status in {
-            ProcessingRun.Status.COMPLETED,
-            ProcessingRun.Status.FAILED,
-            ProcessingRun.Status.CANCELLED,
-        }:
-            processing_run.finished_at = now
+        _apply_run_status(processing_run, status, django_timezone.now())
         if result is not None:
-            processing_run.result_json = result
+            processing_run.result_json = _normalized_result(result)
         if source_sha256 is not None:
             processing_run.source_sha256 = source_sha256
         if error_code is not None:
@@ -159,22 +211,7 @@ class UpdateProcessingRun(graphene.Mutation):
             processing_run.error_message = error_message
         processing_run.save()
 
-        if isinstance(artifacts, list):
-            for payload in artifacts:
-                if not isinstance(payload, dict) or not payload.get("kind") or not payload.get("uri"):
-                    continue
-                ProcessingArtifact.objects.update_or_create(
-                    run=processing_run,
-                    kind=payload["kind"],
-                    defaults={
-                        "uri": payload["uri"],
-                        "sha256": payload.get("sha256"),
-                        "mime_type": payload.get("mime_type"),
-                        "size_bytes": payload.get("size_bytes"),
-                        "training_authorized": payload.get("training_authorized") is True,
-                        "metadata_json": payload.get("metadata", {}),
-                    },
-                )
+        _upsert_artifacts(processing_run, artifacts)
 
         return UpdateProcessingRun(processing_run=processing_run)
 

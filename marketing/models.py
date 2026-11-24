@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.text import slugify
 
 
 class BlogPost(models.Model):
@@ -11,12 +12,13 @@ class BlogPost(models.Model):
         LATEX = "LATEX", "LaTeX"
 
     title = models.CharField(max_length=255)
-    excerpt = models.TextField(blank=True, null=True)
+    slug = models.SlugField(max_length=280, unique=True, blank=True)
+    excerpt = models.TextField(blank=True, default="")
     content = models.TextField()
     category = models.CharField(max_length=100)
     author = models.CharField(max_length=255)  # Puede ser un FK a User, pero por ahora seguimos la UI (string libre)
-    image_url = models.CharField(max_length=500, blank=True, null=True)
-    read_time = models.CharField(max_length=50, blank=True, null=True)
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    read_time = models.CharField(max_length=50, blank=True, default="")
     status = models.CharField(max_length=20, choices=PostStatus.choices, default=PostStatus.PUBLISHED)
     type = models.CharField(max_length=20, choices=PostType.choices, default=PostType.MARKDOWN)
     
@@ -26,6 +28,17 @@ class BlogPost(models.Model):
     class Meta:
         db_table = "blog_posts"
         ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title) or f"articulo-{self.pk or 'nuevo'}"
+            candidate = base_slug
+            suffix = 2
+            while BlogPost.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f"{base_slug}-{suffix}"
+                suffix += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title
@@ -70,8 +83,8 @@ class Lead(models.Model):
         LOST = "lost", "Perdido"
 
     name = models.CharField(max_length=255)
-    phone = models.CharField(max_length=20, blank=True, null=True)
-    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
     status = models.CharField(max_length=20, choices=LeadStatus.choices, default=LeadStatus.NEW)
     campaign = models.ForeignKey(
         MarketingCampaign,

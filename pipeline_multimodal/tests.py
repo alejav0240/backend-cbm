@@ -1,0 +1,409 @@
+import json
+from pathlib import Path
+import sys
+import tempfile
+from unittest.mock import patch
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.conf import settings
+from django.db import IntegrityError
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.contrib.auth import get_user_model
+
+from pipeline_multimodal.models import ResultadoAnalisis, TherapistDataset, TherapistDatasetSample, TrabajoAnalisis
+from pipeline_multimodal.servicios import ErrorPipelineMultimodal
+from pipeline_multimodal.demuca_review import merge_demuca_data
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="pipeline-multimodal-test-"), DEBUG=True)
+class PipelineMultimodalTests(SimpleTestCase):
+    def test_merge_demuca_data_normaliza_edicion_parcial(self):
+        result = merge_demuca_data(
+            {"sesion_id": "PIPE-001", "movimiento_corporal": {"andar": 1}},
+            {"movimiento_corporal": {"andar": 2}},
+            session_id="PIPE-001",
+        )
+        self.assertEqual(result["movimiento_corporal"]["andar"], 2)
+        self.assertEqual(result["movimiento_corporal"]["correr"], 0)
+
+    def test_merge_demuca_data_rechaza_valor_negativo(self):
+        with self.assertRaisesMessage(ValueError, "demuca_value_must_be_non_negative"):
+            merge_demuca_data(
+                None,
+                {"movimiento_corporal": {"andar": -1}},
+                session_id="PIPE-001",
+            )
+
+    def test_publica_resultado_del_servicio(self):
+        archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
+        cuerpo = {"status": "completed", "session_id": "PIPE-001"}
+        with (
+            patch("pipeline_multimodal.views.ServicioPipelineMultimodal.ejecutar", return_value=cuerpo) as ejecutar,
+            patch("pipeline_multimodal.views.ResultadoAnalisis.objects.create"),
+        ):
+            respuesta = self.client.post(
+                "/api/pipeline-multimodal/analizar-video/",
+                {"video": archivo, "session_id": "PIPE-001"},
+                HTTP_X_SERVICE_KEY="",
+            )
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json(), cuerpo)
+        self.assertEqual(ejecutar.call_args.args[1], "PIPE-001")
+        self.assertIn("X-Request-ID", respuesta)
+
+    def test_servicio_construye_comando_cli(self):
+        servicio = __import__("pipeline_multimodal.servicios", fromlist=["ServicioPipelineMultimodal"]).ServicioPipelineMultimodal(
+            Path("/proyecto"), Path(sys.executable), timeout=3
+        )
+        archivo = Path(settings.MEDIA_ROOT) / "video.mp4"
+        archivo.write_bytes(b"video")
+        with patch("pipeline_multimodal.servicios.subprocess.run") as ejecutar:
+            ejecutar.return_value.returncode = 0
+            ejecutar.return_value.stdout = json.dumps({"status": "completed"})
+            ejecutar.return_value.stderr = ""
+            resultado = servicio.ejecutar(archivo, "PIPE-001")
+        self.assertEqual(resultado["status"], "completed")
+        self.assertIn("ml/analyze_video.py", " ".join(ejecutar.call_args.args[0]))
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="pipeline-multimodal-async-test-"), DEBUG=True)
+class PipelineMultimodalAsyncTests(TestCase):
+    def test_lineage_endpoint_exposes_only_read_only_tracking_metadata(self):
+        user = get_user_model().objects.create_user(username="lineage-user", password="secret")
+        self.client.force_login(user)
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-LINEAGE",
+            resultado={"status": "completed"},
+            mlflow_run_id="run-lineage",
+            mlflow_experiment="cbm-video-pipeline",
+            mlflow_model_name="cbm-fusion",
+            mlflow_model_version="3",
+            model_sha256="a" * 64,
+            dataset_hash="b" * 64,
+        )
+
+        response = self.client.get("/api/pipeline-multimodal/mlops/lineage/SESSION-LINEAGE/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mlflow_run_id"], "run-lineage")
+        self.assertNotIn("resultado", response.json())
+
+    def test_openai_models_endpoint_lists_registered_model_ids(self):
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-MODEL-LIST",
+            resultado={"status": "completed"},
+            mlflow_model_name="cbm-fusion",
+        )
+
+        response = self.client.get("/v1/models")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["object"], "list")
+        self.assertEqual(response.json()["data"][0]["id"], "cbm-fusion")
+        self.assertEqual(response.json()["data"][0]["object"], "model")
+
+    def test_terapeuta_puede_persistir_edicion_demuca_sin_autorizar_entrenamiento(self):
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-HITL",
+            resultado={
+                "status": "completed",
+                "session_id": "SESSION-HITL",
+                "demuca": {"status": "draft", "data": {"sesion_id": "SESSION-HITL"}},
+            },
+        )
+
+        respuesta = self.client.patch(
+            "/api/pipeline-multimodal/resultados/SESSION-HITL/demuca/",
+            data=json.dumps({"demuca": {"movimiento_corporal": {"andar": 2}}}),
+            content_type="application/json",
+            HTTP_X_SERVICE_KEY="",
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        payload = respuesta.json()
+        self.assertEqual(payload["demuca"]["status"], "human_reviewed")
+        self.assertEqual(payload["demuca"]["data"]["movimiento_corporal"]["andar"], 2)
+        self.assertFalse(payload["demuca"]["training_authorized"])
+
+    def test_reutiliza_trabajo_activo_para_evitar_duplicados(self):
+        existente = TrabajoAnalisis.objects.create(
+            session_id="SESSION-001", archivo_path="/tmp/existing.mp4"
+        )
+        archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
+
+        respuesta = self.client.post(
+            "/api/pipeline-multimodal/trabajos/",
+            {"video": archivo, "session_id": "SESSION-001"},
+            HTTP_X_SERVICE_KEY="",
+            HTTP_X_REQUEST_ID="upload-job-001",
+        )
+
+        self.assertEqual(respuesta.status_code, 202)
+        self.assertEqual(respuesta.json()["job_id"], str(existente.job_id))
+        self.assertTrue(respuesta.json()["duplicado"])
+        self.assertEqual(TrabajoAnalisis.objects.filter(session_id="SESSION-001").count(), 1)
+
+    def test_csrf_endpoint_allows_pipeline_job_when_cookie_and_header_are_forwarded(self):
+        csrf_client = self.client.__class__(enforce_csrf_checks=True)
+        csrf_response = csrf_client.get("/csrf/")
+        token = csrf_response.cookies["csrftoken"].value
+        archivo = SimpleUploadedFile("sesion.mp4", b"video", content_type="video/mp4")
+
+        respuesta = csrf_client.post(
+            "/api/pipeline-multimodal/trabajos/",
+            {"video": archivo, "session_id": "SESSION-CSRF"},
+            HTTP_X_CSRFTOKEN=token,
+            HTTP_X_SERVICE_KEY="",
+            HTTP_X_REQUEST_ID="csrf-job-001",
+        )
+
+        self.assertEqual(respuesta.status_code, 202)
+        self.assertEqual(respuesta.json()["session_id"], "SESSION-CSRF")
+
+    @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")
+    def test_worker_preserva_archivo_si_el_pipeline_falla(self, configurado):
+        archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "job.mp4"
+        archivo.parent.mkdir(parents=True, exist_ok=True)
+        archivo.write_bytes(b"video")
+        trabajo = TrabajoAnalisis.objects.create(
+            session_id="SESSION-002", request_id="request-002", archivo_path=str(archivo)
+        )
+        configurado.return_value.ejecutar.side_effect = ErrorPipelineMultimodal("fallo ML")
+
+        call_command("procesar_pipeline_multimodal", "--once")
+
+        trabajo.refresh_from_db()
+        self.assertEqual(trabajo.estado, TrabajoAnalisis.Estado.FALLIDO)
+        self.assertEqual(trabajo.error, "El pipeline no pudo procesar el trabajo.")
+        self.assertTrue(archivo.exists())
+
+    @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")
+    def test_worker_elimina_archivo_solo_despues_de_completar(self, configurado):
+        archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "job.mp4"
+        archivo.parent.mkdir(parents=True, exist_ok=True)
+        archivo.write_bytes(b"video")
+        trabajo = TrabajoAnalisis.objects.create(
+            session_id="SESSION-003", request_id="request-003", archivo_path=str(archivo)
+        )
+        configurado.return_value.ejecutar.return_value = {
+            "status": "completed", "session_id": "SESSION-003",
+            "mlflow": {"run_id": "run-003", "experiment": "cbm-video-pipeline"},
+            "model_predictions": {
+                "model_type": "phase2_tree",
+                "model_version": "v3",
+                "model_path": "",
+            },
+        }
+
+        call_command("procesar_pipeline_multimodal", "--once")
+
+        trabajo.refresh_from_db()
+        self.assertEqual(trabajo.estado, TrabajoAnalisis.Estado.COMPLETADO)
+        self.assertEqual(trabajo.resultado["status"], "completed")
+        resultado = ResultadoAnalisis.objects.get(session_id="SESSION-003")
+        self.assertEqual(resultado.resultado["status"], "completed")
+        self.assertEqual(resultado.mlflow_run_id, "run-003")
+        self.assertEqual(resultado.mlflow_experiment, "cbm-video-pipeline")
+        self.assertEqual(resultado.mlflow_model_name, "phase2_tree")
+        self.assertEqual(resultado.mlflow_model_version, "v3")
+        self.assertFalse(archivo.exists())
+
+    def test_reintento_fallido_no_sobrescribe_archivo_original_si_falla_db(self):
+        archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "old.mp4"
+        archivo.parent.mkdir(parents=True, exist_ok=True)
+        archivo.write_bytes(b"original")
+        TrabajoAnalisis.objects.create(
+            session_id="SESSION-004", request_id="request-004", archivo_path=str(archivo),
+            estado=TrabajoAnalisis.Estado.FALLIDO, error="fallo anterior",
+        )
+        nuevo = SimpleUploadedFile("nuevo.mp4", b"nuevo", content_type="video/mp4")
+
+        with patch.object(TrabajoAnalisis, "save", side_effect=RuntimeError("db down")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    "/api/pipeline-multimodal/trabajos/",
+                    {"video": nuevo, "session_id": "SESSION-004"},
+                    HTTP_X_SERVICE_KEY="",
+                    HTTP_X_REQUEST_ID="request-004-retry",
+                )
+
+        self.assertEqual(archivo.read_bytes(), b"original")
+
+    @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")
+    def test_worker_actualiza_el_resultado_mas_reciente_sin_romper_historial(self, configurado):
+        archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "history.mp4"
+        archivo.parent.mkdir(parents=True, exist_ok=True)
+        archivo.write_bytes(b"video")
+        TrabajoAnalisis.objects.create(
+            session_id="SESSION-005", request_id="request-005", archivo_path=str(archivo)
+        )
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-005", request_id="old-005", resultado={"status": "completed"}
+        )
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-005", request_id="new-005", resultado={"status": "completed"}
+        )
+        configurado.return_value.ejecutar.return_value = {
+            "status": "completed", "session_id": "SESSION-005"
+        }
+
+        call_command("procesar_pipeline_multimodal", "--once")
+
+        self.assertEqual(ResultadoAnalisis.objects.filter(session_id="SESSION-005").count(), 2)
+        self.assertEqual(
+            ResultadoAnalisis.objects.filter(session_id="SESSION-005").order_by("-creado_en", "-pk").first().request_id,
+            "request-005",
+        )
+
+    @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ServicioPipelineMultimodal.configurado")
+    @patch("pipeline_multimodal.management.commands.procesar_pipeline_multimodal.ResultadoAnalisis.objects.create")
+    def test_worker_marca_fallo_si_no_puede_publicar_resultado(self, crear_resultado, configurado):
+        archivo = Path(settings.MEDIA_ROOT) / "pipeline_jobs" / "publish-failure.mp4"
+        archivo.parent.mkdir(parents=True, exist_ok=True)
+        archivo.write_bytes(b"video")
+        trabajo = TrabajoAnalisis.objects.create(
+            session_id="SESSION-006", request_id="request-006", archivo_path=str(archivo)
+        )
+        configurado.return_value.ejecutar.return_value = {
+            "status": "completed", "session_id": "SESSION-006"
+        }
+        crear_resultado.side_effect = RuntimeError("database unavailable")
+
+        call_command("procesar_pipeline_multimodal", "--once")
+
+        trabajo.refresh_from_db()
+        self.assertEqual(trabajo.estado, TrabajoAnalisis.Estado.FALLIDO)
+        self.assertIn("No se pudo persistir el resultado", trabajo.error)
+        self.assertTrue(archivo.exists())
+
+    def test_bd_impide_dos_trabajos_activos_para_la_misma_sesion(self):
+        TrabajoAnalisis.objects.create(
+            session_id="SESSION-007", request_id="request-007", archivo_path="/tmp/one.mp4"
+        )
+
+        with self.assertRaises(IntegrityError):
+            TrabajoAnalisis.objects.create(
+                session_id="SESSION-007", request_id="request-008", archivo_path="/tmp/two.mp4"
+            )
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="pipeline-datasets-test-"), MEDIA_URL="/media/")
+class TherapistDatasetApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username="therapist", password="secret", ci="CI-THERAPIST", email="therapist@example.com")
+        self.other = user_model.objects.create_user(username="other", password="secret", ci="CI-OTHER", email="other@example.com")
+        self.staff = user_model.objects.create_user(username="staff", password="secret", ci="CI-STAFF", email="staff@example.com", is_staff=True)
+        self.sample_payload = {
+            "session_id": "SESSION-1", "window_id": "window-1",
+            "features": {"audio_rms_mean": 0.1, "audio_zcr_mean": 0.2, "visual_motion_mean": 0.3, "visual_motion_max": 0.4},
+            "labels": {"audio__HABLA": 1, "visual__MOVIMIENTO": 0},
+        }
+
+    def test_requires_login_and_owner_or_staff_access(self):
+        response = self.client.get("/api/pipeline-multimodal/datasets/")
+        self.assertEqual(response.status_code, 401)
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Private")
+        self.client.login(username="other", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/").status_code, 404)
+        self.client.login(username="staff", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/").status_code, 200)
+
+    def test_crud_validates_values_and_duplicate_keys(self):
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post("/api/pipeline-multimodal/datasets/", data=json.dumps({"name": "Reviewed windows"}), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        dataset_id = response.json()["id"]
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(self.sample_payload), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        duplicate = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(self.sample_payload), content_type="application/json")
+        self.assertEqual(duplicate.status_code, 400)
+        invalid = dict(self.sample_payload, features=dict(self.sample_payload["features"], audio_rms_mean=float("nan")))
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/", data=json.dumps(invalid), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        sample = TherapistDatasetSample.objects.get(dataset_id=dataset_id)
+        response = self.client.patch(f"/api/pipeline-multimodal/datasets/{dataset_id}/samples/{sample.pk}/", data=json.dumps({"reviewed": True}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["reviewed"])
+
+    def test_export_writes_schema_without_identifiers(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Export")
+        TherapistDatasetSample.objects.create(dataset=dataset, **self.sample_payload)
+        self.client.login(username="therapist", password="secret")
+        with patch("pipeline_multimodal.views.log_run", return_value="dataset-run") as track:
+            response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/export/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        csv_path = Path(settings.MEDIA_ROOT) / "datasets" / str(dataset.pk) / "dataset.csv"
+        manifest_path = csv_path.with_name("manifest.json")
+        self.assertTrue(csv_path.exists())
+        self.assertTrue(manifest_path.exists())
+        csv_text = csv_path.read_text()
+        self.assertNotIn("SESSION-1", csv_text)
+        self.assertEqual(payload["rows"], 1)
+        self.assertFalse(json.loads(manifest_path.read_text())["training_authorized"])
+        self.assertEqual(payload["mlflow"]["run_id"], "dataset-run")
+        self.assertEqual(track.call_args.kwargs["dataset_path"], csv_path)
+
+    def test_staff_can_authorize_only_fully_reviewed_dataset(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Authorization")
+        TherapistDatasetSample.objects.create(dataset=dataset, **self.sample_payload)
+        self.client.login(username="staff", password="secret")
+        blocked = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(blocked.status_code, 400)
+        sample = dataset.samples.get()
+        sample.reviewed = True
+        sample.save(update_fields=["reviewed", "updated_at"])
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(response.status_code, 200)
+        dataset.refresh_from_db()
+        self.assertTrue(dataset.training_authorized)
+        self.assertEqual(dataset.status, TherapistDataset.Status.AUTHORIZED)
+
+    def test_non_staff_cannot_authorize_dataset(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Restricted authorization")
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/authorize/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_annotation_persists_timestamp_tags_features_and_pose_without_training_authorization(self):
+        self.client.login(username="therapist", password="secret")
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Session annotations")
+        payload = {
+            "session_id": "SESSION-ANNOTATED", "window_id": "window-001",
+            "start_time": 1.5, "end_time": 4.25, "demuca_phase": "MOVIMIENTO",
+            "sound_tags": ["habla"], "movement_tags": ["camina"], "interaction_tags": [],
+            "features": {"audio_rms_mean": 0.1, "audio_zcr_mean": 0.2, "visual_motion_mean": 0.3, "visual_motion_max": 0.4},
+            "labels": {"visual__MOVIMIENTO": 1},
+            "derived_features": {"velocity_mean": 0.75},
+            "pose_landmarks": [{"name": "nose", "x": 0.1, "y": 0.2, "visibility": 0.9}],
+            "artifact_payload": {"video_url": "/media/session.mp4"},
+        }
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/annotations/", data=json.dumps(payload), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.json()["training_authorized"])
+        sample = TherapistDatasetSample.objects.get(dataset=dataset)
+        self.assertEqual(sample.start_time, 1.5)
+        self.assertEqual(sample.pose_landmarks[0]["name"], "nose")
+
+    def test_annotation_rejects_invalid_window_and_artifact_access_is_owner_scoped(self):
+        dataset = TherapistDataset.objects.create(owner=self.owner, name="Private annotations")
+        ResultadoAnalisis.objects.create(
+            session_id="SESSION-ANNOTATED",
+            resultado={"status": "completed", "pose_landmarks": [{"x": 0.2}]},
+        )
+        invalid = {
+            "session_id": "SESSION-ANNOTATED", "window_id": "window-001", "start_time": 3, "end_time": 2,
+            "demuca_phase": "MOVIMIENTO", "sound_tags": [], "movement_tags": [], "interaction_tags": [],
+            "features": self.sample_payload["features"], "labels": self.sample_payload["labels"],
+        }
+        self.client.login(username="therapist", password="secret")
+        response = self.client.post(f"/api/pipeline-multimodal/datasets/{dataset.pk}/annotations/", data=json.dumps(invalid), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        response = self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/sessions/SESSION-ANNOTATED/artifacts/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pose_landmarks"], [{"x": 0.2}])
+        self.assertFalse(response.json()["training_authorized"])
+        self.client.login(username="other", password="secret")
+        self.assertEqual(self.client.get(f"/api/pipeline-multimodal/datasets/{dataset.pk}/sessions/SESSION-ANNOTATED/artifacts/").status_code, 404)

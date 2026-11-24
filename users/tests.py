@@ -1,4 +1,7 @@
 import json
+from io import StringIO
+
+from django.core.management import call_command
 from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
@@ -273,6 +276,18 @@ class UsersMutationTests(GraphQLTestCase):
         self.assertResponseNoErrors(refreshed)
         self.assertTrue(refreshed.json()["data"]["refreshToken"]["token"])
         self.assertTrue(refreshed.json()["data"]["refreshToken"]["refreshToken"])
+        rotated_refresh_token = refreshed.cookies["refresh_token"].value
+
+        # Rotation must invalidate the previous refresh token instead of allowing reuse.
+        self.client.cookies.update(refreshed.cookies)
+        self.client.cookies["refresh_token"] = login.cookies["refresh_token"].value
+        replayed = self.query(
+            """
+            mutation { refreshToken { token refreshToken } }
+            """
+        )
+        self.assertIsNotNone(replayed.json().get("errors"))
+        self.client.cookies["refresh_token"] = rotated_refresh_token
 
         logged_out = self.query(
             """
@@ -285,3 +300,64 @@ class UsersMutationTests(GraphQLTestCase):
         self.assertResponseNoErrors(logged_out)
         self.assertTrue(logged_out.json()["data"]["deleteTokenCookie"]["deleted"])
         self.assertTrue(logged_out.json()["data"]["deleteRefreshTokenCookie"]["deleted"])
+
+        # Logout must revoke the rotated token, not only delete the browser cookie.
+        self.client.cookies["access_token"] = "expired-access-token"
+        self.client.cookies["refresh_token"] = rotated_refresh_token
+        refresh_after_logout = self.query(
+            """
+            mutation { refreshToken { token refreshToken } }
+            """
+        )
+        self.assertIsNotNone(refresh_after_logout.json().get("errors"))
+
+    def test_change_password_revokes_refresh_tokens(self):
+        login = self.query(
+            """
+            mutation {
+                tokenAuth(username: "testuser", password: "old_password_123") {
+                    user { username }
+                }
+            }
+            """
+        )
+        self.assertResponseNoErrors(login)
+        refresh_token = login.cookies["refresh_token"].value
+
+        self.client.force_login(self.user)
+        changed = self.query(
+            """
+            mutation {
+                changePassword(
+                    oldPassword: "old_password_123"
+                    newPassword: "new_password_secure_456"
+                ) { success }
+            }
+            """
+        )
+        self.assertResponseNoErrors(changed)
+
+        self.client.cookies["access_token"] = "expired-access-token"
+        self.client.cookies["refresh_token"] = refresh_token
+        refresh_after_password_change = self.query(
+            """
+            mutation { refreshToken { token refreshToken } }
+            """
+        )
+        self.assertIsNotNone(refresh_after_password_change.json().get("errors"))
+
+
+class SetupRbacCommandTests(TestCase):
+    def test_setup_rbac_is_idempotent_and_assigns_expected_permissions(self):
+        output = StringIO()
+        call_command("setup_rbac", stdout=output)
+        call_command("setup_rbac", stdout=output)
+
+        self.assertEqual(Group.objects.filter(name="Administrador").count(), 1)
+        self.assertEqual(Group.objects.filter(name="Terapeuta").count(), 1)
+        self.assertEqual(Group.objects.filter(name="Recepcion").count(), 1)
+        self.assertGreater(
+            Group.objects.get(name="Administrador").permissions.count(),
+            Group.objects.get(name="Terapeuta").permissions.count(),
+        )
+        self.assertIn("Configuración de RBAC completada", output.getvalue())

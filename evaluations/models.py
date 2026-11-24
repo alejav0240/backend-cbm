@@ -4,10 +4,6 @@ from users.models import User
 from clinical.models import Patient
 
 
-# ─────────────────────────────────────────
-# Definición de escalas
-# ─────────────────────────────────────────
-
 class Scale(models.Model):
 
     class ScaleType(models.TextChoices):
@@ -15,7 +11,7 @@ class Scale(models.Model):
         VALUE_LIST = "value_list", "Por lista de valores"
 
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, default="")
     scale_type = models.CharField(max_length=20, choices=ScaleType.choices)
 
     class Meta:
@@ -28,8 +24,8 @@ class Scale(models.Model):
 class Subscale(models.Model):
     scale = models.ForeignKey(Scale, on_delete=models.CASCADE, related_name="subscales")
     name = models.CharField(max_length=255)
-    description = models.CharField(max_length=255, blank=True, null=True)
-    category = models.CharField(max_length=255, blank=True, null=True)
+    description = models.CharField(max_length=255, blank=True, default="")
+    category = models.CharField(max_length=255, blank=True, default="")
     max_value = models.PositiveIntegerField()
 
     class Meta:
@@ -52,10 +48,6 @@ class ScaleValue(models.Model):
         return f"{self.label} ({self.value}) — {self.scale}"
 
 
-# ─────────────────────────────────────────
-# Aplicación de escalas
-# ─────────────────────────────────────────
-
 class ScaleEvaluation(models.Model):
     """
     Una instancia de evaluar a un paciente con una escala.
@@ -73,6 +65,22 @@ class ScaleEvaluation(models.Model):
         related_name="scale_evaluations",
     )
     evaluated_at = models.DateTimeField(default=timezone.now)
+    review_status = models.CharField(
+        max_length=20,
+        choices=(
+            ("pending", "Pendiente de revisión"),
+            ("accepted", "Aceptada por especialista"),
+        ),
+        default="pending",
+    )
+    reviewed_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_scale_evaluations",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "scale_evaluations"
@@ -128,13 +136,9 @@ class ScaleEvaluationValueResponse(models.Model):
         return f"{self.scale_value.label} — {self.evaluation}"
 
 
-# ─────────────────────────────────────────
-# Formularios
-# ─────────────────────────────────────────
-
 class Form(models.Model):
     name = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = "forms"

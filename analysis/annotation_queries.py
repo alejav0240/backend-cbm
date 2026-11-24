@@ -4,6 +4,7 @@ from config.utils import get_db_id, user_can_access_session
 
 from .annotation_models import AnnotationCase
 from .annotation_type import AnnotationCaseType
+from .models import ProcessingRun
 
 
 class AnnotationQuery(graphene.ObjectType):
@@ -17,10 +18,10 @@ class AnnotationQuery(graphene.ObjectType):
         if not info.context.user.is_authenticated:
             return AnnotationCase.objects.none()
         try:
-            run = AnnotationCase.objects.select_related("run__session").get(
-                run_id=get_db_id(run_id)
-            ).run
-        except AnnotationCase.DoesNotExist:
+            run = ProcessingRun.objects.select_related("session").get(
+                pk=get_db_id(run_id)
+            )
+        except ProcessingRun.DoesNotExist:
             return AnnotationCase.objects.none()
 
         if not user_can_access_session(info.context.user, run.session_id):

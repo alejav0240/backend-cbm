@@ -32,6 +32,7 @@ class ScaleEvaluationType(DjangoObjectType):
         fields = (
             "id", "scale", "patient", "evaluator", "session",
             "evaluated_at",
+            "review_status", "reviewed_by", "reviewed_at",
             "subscale_responses", "value_responses",
         )
 

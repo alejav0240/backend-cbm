@@ -23,7 +23,6 @@ class ScaleImporter(BaseImporter):
     def import_scales_and_evaluations(
         self,
         matrix_rows: List[List[str]],
-        submatrix_rows: List[List[str]],
         demucas_rows: List[List[str]],
         info_map: Dict[int, dict],
         evaluator: User,
@@ -73,7 +72,7 @@ class ScaleImporter(BaseImporter):
             self.stats['resources'] += 1
         else:
             # Evitar duplicados por título
-            resource, created = DigitalResource.objects.get_or_create(
+            _, created = DigitalResource.objects.get_or_create(
                 title=title,
                 defaults={
                     "type": DigitalResource.ResourceType.AUDIO, # Default por ser recursos musicales

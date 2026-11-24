@@ -64,12 +64,13 @@ class UploadMutationTests(TestCase):
         response = self._post(
             """
             mutation Complete($sessionId: ID!, $url: String!) {
-                completarSubidaSesion(
+              completarSubidaSesion(
                     sessionId: $sessionId,
                     videoUrl: $url,
                     storage: "local",
                     ok: true,
-                    jobId: "job-1"
+                    jobId: "job-1",
+                    durationMinutes: 7
                 ) { success }
             }
             """,
@@ -81,5 +82,6 @@ class UploadMutationTests(TestCase):
         self.session.refresh_from_db()
         self.assertEqual(self.session.video_status, Session.VideoStatus.SUBIDO)
         self.assertEqual(self.session.video_url, "https://cdn.test/video.mp4")
+        self.assertEqual(self.session.duration_minutes, 7)
         notification = self.therapist.notifications.get()
         self.assertEqual(notification.tipo, "subida_exitosa")

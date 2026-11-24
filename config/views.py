@@ -1,11 +1,26 @@
 from graphene_django.views import GraphQLView
+from django.conf import settings
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.http import require_GET
 
+from .application_encryption import public_jwk
+
+@require_GET
+def health_view(request):
+    return JsonResponse({"status": "ok"})
+
+
 @require_GET
 def csrf_token_view(request):
     return JsonResponse({"csrfToken": get_token(request)})
+
+
+@require_GET
+def application_encryption_key_view(request):
+    if not settings.APP_ENCRYPTION_ENABLED:
+        return JsonResponse({"detail": "Application encryption is disabled"}, status=404)
+    return JsonResponse(public_jwk(), headers={"Cache-Control": "no-store"})
 
 class CBMGraphQLView(GraphQLView):
     def execute_graphql_request(self, *args, **kwargs):

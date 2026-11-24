@@ -8,13 +8,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # 1. Crear grupo Administrador con TODO
-        admin_group, created = Group.objects.get_or_create(name='Administrador')
+        admin_group, _ = Group.objects.get_or_create(name='Administrador')
         all_perms = Permission.objects.all()
         admin_group.permissions.set(all_perms)
         self.stdout.write(self.style.SUCCESS('Grupo Administrador configurado con todos los permisos.'))
 
         # 2. Crear grupo Terapeuta con permisos clínicos
-        terapeuta_group, created = Group.objects.get_or_create(name='Terapeuta')
+        terapeuta_group, _ = Group.objects.get_or_create(name='Terapeuta')
         clinical_modules = ['pacientes', 'sesiones', 'agenda', 'evaluaciones', 'planes', 'escalas', 'informes', 'recursos']
         
         terapeuta_perms = []
@@ -27,7 +27,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'Grupo Terapeuta configurado con módulos: {", ".join(clinical_modules)}'))
 
         # 3. Crear grupo Recepción con permisos administrativos
-        recepcion_group, created = Group.objects.get_or_create(name='Recepcion')
+        recepcion_group, _ = Group.objects.get_or_create(name='Recepcion')
         admin_modules = ['pacientes', 'sesiones', 'agenda', 'pagos', 'gastos', 'instituciones']
         
         recepcion_perms = []
