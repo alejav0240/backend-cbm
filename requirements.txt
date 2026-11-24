@@ -35,7 +35,7 @@ django-filter
 django-extensions
 
 # Production
-gunicorn>=21.2
+gunicorn>=27.0.1
 whitenoise>=6.12.0
 
 # Dev
