@@ -278,7 +278,7 @@ jobs:
           tags: ${{ env.IMAGE }}
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0.20.5
+        uses: anchore/sbom-action@v0.24.3
         with:
           image: ${{ env.IMAGE }}
           format: cyclonedx-json
