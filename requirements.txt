@@ -22,7 +22,7 @@ Pillow
 django-storages
 numpy
 soundfile>=0.14,<1
-mlflow>=3.1,<4
+mlflow>=3.18.0,<4
 scikit-learn
 mediapipe
 opencv-python-headless
