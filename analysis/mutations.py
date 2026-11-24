@@ -129,8 +129,8 @@ def _upsert_artifacts(processing_run, artifacts):
             kind=payload["kind"],
             defaults={
                 "uri": payload["uri"],
-                "sha256": payload.get("sha256"),
-                "mime_type": payload.get("mime_type"),
+                "sha256": payload.get("sha256") or "",
+                "mime_type": payload.get("mime_type") or "",
                 "size_bytes": payload.get("size_bytes"),
                 "training_authorized": payload.get("training_authorized") is True,
                 "metadata_json": payload.get("metadata", {}),
