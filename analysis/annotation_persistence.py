@@ -14,38 +14,55 @@ def _prediction_windows(result: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _positive_cases(
-    result: dict[str, Any],
-) -> list[dict[str, Any]]:
+def _window_bounds(window: dict[str, Any]) -> tuple[float, float] | None:
+    try:
+        return float(window["start_seconds"]), float(window["end_seconds"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _positive_predictions(window: dict[str, Any]) -> list[str]:
+    predictions = window.get("predictions")
+    if not isinstance(predictions, dict):
+        return []
+    return [
+        label
+        for label, value in predictions.items()
+        if isinstance(label, str) and bool(value)
+    ]
+
+
+def _build_case(
+    window: dict[str, Any],
+    label: str,
+    bounds: tuple[float, float],
+    source: str,
+) -> dict[str, Any]:
+    modality = label.split("__", 1)[0] if "__" in label else "multimodal"
+    return {
+        "window_id": str(window["window_id"]),
+        "label": label,
+        "start_seconds": bounds[0],
+        "end_seconds": bounds[1],
+        "modality": modality,
+        "actor_role": "unknown",
+        "source": source,
+        "proposal_json": window,
+    }
+
+
+def _positive_cases(result: dict[str, Any]) -> list[dict[str, Any]]:
     source = "model" if result.get("semantic_status") == "authorized_model" else "provisional"
     cases = []
     for window in _prediction_windows(result):
-        predictions = window.get("predictions")
-        if not isinstance(predictions, dict):
-            continue
-        try:
-            start = float(window["start_seconds"])
-            end = float(window["end_seconds"])
-        except (KeyError, TypeError, ValueError):
-            continue
         window_id = str(window.get("window_id") or "")
-        if not window_id:
+        bounds = _window_bounds(window)
+        if not window_id or bounds is None:
             continue
-        for label, value in predictions.items():
-            if isinstance(label, str) and bool(value):
-                modality = label.split("__", 1)[0] if "__" in label else "multimodal"
-                cases.append(
-                    {
-                        "window_id": window_id,
-                        "label": label,
-                        "start_seconds": start,
-                        "end_seconds": end,
-                        "modality": modality,
-                        "actor_role": "unknown",
-                        "source": source,
-                        "proposal_json": window,
-                    }
-                )
+        cases.extend(
+            _build_case(window, label, bounds, source)
+            for label in _positive_predictions(window)
+        )
     return cases
 
 
