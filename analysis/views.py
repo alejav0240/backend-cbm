@@ -10,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import ProcessingArtifact, ProcessingRun
-from .demuca_persistence import persist_demuca_evaluation
+from .pipeline.persistence import persist_demuca_evaluation
 from .pipeline import normalize_pipeline_stages, result_semantic_status
 from .pipeline import VALID_STATUS_TRANSITIONS
 from .annotation_persistence import persist_annotation_cases
