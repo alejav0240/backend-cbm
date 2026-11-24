@@ -6,7 +6,6 @@ from django.utils import timezone
 
 from django.conf import settings
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import ProcessingArtifact, ProcessingRun
@@ -140,7 +139,6 @@ def _persist_completed_callback(run):
     persist_annotation_cases(run, run.result_json)
 
 
-@csrf_exempt
 @require_POST
 def processing_callback(request):
     if not _authorized(request):
