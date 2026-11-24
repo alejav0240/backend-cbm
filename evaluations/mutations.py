@@ -1,5 +1,6 @@
 import graphene
 from django.db import transaction
+from django.utils import timezone
 from graphql import GraphQLError
 from clinical.models import Patient
 from users.models import User
@@ -358,13 +359,14 @@ class UpdateScaleEvaluation(graphene.Mutation):
     class Arguments:
         evaluation_id = graphene.ID(required=True)
         subscales = graphene.List(ResponseSubScale, required=True)
+        accept = graphene.Boolean(default_value=False)
 
     success = graphene.Boolean()
     message = graphene.String()
     evaluation = graphene.Field(ScaleEvaluationType)
 
     @module_permission_required("evaluaciones", action="change")
-    def mutate(self, info, evaluation_id, subscales):
+    def mutate(self, info, evaluation_id, subscales, accept=False):
         real_evaluation_id = get_db_id(evaluation_id)
         try:
             evaluation = ScaleEvaluation.objects.select_related(
@@ -386,10 +388,21 @@ class UpdateScaleEvaluation(graphene.Mutation):
                         raise GraphQLError("La subescala no pertenece a esta evaluación.")
                     response.score = max(0, min(response.subscale.max_value, subscale.score))
                     response.save(update_fields=["score"])
+                if accept:
+                    evaluation.review_status = "accepted"
+                    evaluation.reviewed_by = info.context.user
+                    evaluation.reviewed_at = timezone.now()
+                    evaluation.save(
+                        update_fields=["review_status", "reviewed_by", "reviewed_at"]
+                    )
 
             return UpdateScaleEvaluation(
                 success=True,
-                message="Evaluación DEMUCA actualizada correctamente.",
+                message=(
+                    "Evaluación DEMUCA aceptada por el especialista."
+                    if accept
+                    else "Evaluación DEMUCA actualizada correctamente."
+                ),
                 evaluation=evaluation,
             )
         except ScaleEvaluation.DoesNotExist:

@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.text import slugify
 
 
 class BlogPost(models.Model):
@@ -11,6 +12,7 @@ class BlogPost(models.Model):
         LATEX = "LATEX", "LaTeX"
 
     title = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=280, unique=True, null=True, blank=True)
     excerpt = models.TextField(blank=True, null=True)
     content = models.TextField()
     category = models.CharField(max_length=100)
@@ -26,6 +28,17 @@ class BlogPost(models.Model):
     class Meta:
         db_table = "blog_posts"
         ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title) or f"articulo-{self.pk or 'nuevo'}"
+            candidate = base_slug
+            suffix = 2
+            while BlogPost.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f"{base_slug}-{suffix}"
+                suffix += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title

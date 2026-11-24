@@ -22,6 +22,26 @@ def _authorized(request):
     return bool(expected) and hmac.compare_digest(received, expected)
 
 
+def _normalize_processing_error(error):
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    message = error.get("message")
+    if (
+        code == "ValueError"
+        and isinstance(message, str)
+        and "windows_missing_or_empty" in message
+    ):
+        return {
+            "code": "insufficient_duration_for_window",
+            "message": (
+                "La sesión es demasiado corta para generar una ventana completa "
+                "de análisis. Se requiere una duración mayor o igual a 5 segundos."
+            ),
+        }
+    return error
+
+
 @csrf_exempt
 @require_POST
 def processing_callback(request):
@@ -73,7 +93,7 @@ def processing_callback(request):
         "semantic_status": payload.get("semantic_status")
         or result_semantic_status(run.result_json),
     }
-    error = payload.get("error")
+    error = _normalize_processing_error(payload.get("error"))
     if isinstance(error, dict):
         run.error_code = error.get("code")
         run.error_message = error.get("message")
@@ -96,7 +116,16 @@ def processing_callback(request):
     if isinstance(run.result_json, dict):
         artifacts = run.result_json.get("artifacts") or run.result_json.get("derived_artifacts") or {}
     if isinstance(artifacts, dict):
-        for kind, uri in artifacts.items():
+        for kind, artifact in artifacts.items():
+            metadata = {}
+            sha256 = None
+            training_authorized = False
+            uri = artifact
+            if isinstance(artifact, dict):
+                uri = artifact.get("uri") or artifact.get("path")
+                metadata = artifact
+                sha256 = artifact.get("sha256")
+                training_authorized = artifact.get("training_authorized") is True
             if isinstance(uri, dict):
                 uri = uri.get("uri") or uri.get("path")
             if not isinstance(uri, str) or not uri:
@@ -106,7 +135,9 @@ def processing_callback(request):
                 kind=kind,
                 defaults={
                     "uri": uri,
-                    "training_authorized": False,
+                    "sha256": sha256,
+                    "training_authorized": training_authorized,
+                    "metadata_json": metadata,
                 },
             )
 

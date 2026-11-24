@@ -148,3 +148,41 @@ class DemucaPersistenceTests(TestCase):
 
         response.refresh_from_db()
         self.assertEqual(response.score, 1)
+
+    def test_short_session_callback_uses_friendly_error_code(self):
+        response = self.client.post(
+            "/api/ml/processing-callback/",
+            data=json.dumps(
+                {
+                    "run_id": self.run.external_run_id,
+                    "status": "failed",
+                    "error": {
+                        "code": "ValueError",
+                        "message": "window_index_validation_failed:windows_missing_or_empty",
+                    },
+                    "pipeline_stages": [
+                        {
+                            "id": "segmentation",
+                            "status": "blocked",
+                            "progress": 0,
+                            "message": "window_index_validation_failed:windows_missing_or_empty",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_ML_SERVICE_KEY="test-ml-key",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.error_code, "insufficient_duration_for_window")
+        self.assertIn("demasiado corta", self.run.error_message)
+        self.assertEqual(
+            next(
+                stage
+                for stage in self.run.result_json["pipeline_stages"]
+                if stage["id"] == "segmentation"
+            )["status"],
+            "blocked",
+        )

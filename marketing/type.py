@@ -8,7 +8,7 @@ class BlogPostType(DjangoObjectType):
     class Meta:
         model = BlogPost
         fields = (
-            "id", "title", "excerpt", "content", "category",
+            "id", "title", "slug", "excerpt", "content", "category",
             "author", "image_url", "read_time", "status", "type",
             "created_at", "updated_at"
         )

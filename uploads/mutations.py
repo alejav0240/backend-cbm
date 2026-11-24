@@ -66,11 +66,20 @@ class CompletarSubidaSesion(graphene.Mutation):
         ok = graphene.Boolean(required=True)
         message = graphene.String()
         job_id = graphene.String()
+        duration_minutes = graphene.Int()
 
     success = graphene.Boolean()
 
     def mutate(
-        self, info, session_id, ok, video_url=None, storage=None, message=None, job_id=None
+        self,
+        info,
+        session_id,
+        ok,
+        video_url=None,
+        storage=None,
+        message=None,
+        job_id=None,
+        duration_minutes=None,
     ):
         if not _is_authorized(info):
             raise GraphQLError("No autorizado.")
@@ -80,7 +89,15 @@ class CompletarSubidaSesion(graphene.Mutation):
         if ok and video_url:
             session.video_url = video_url
             session.video_status = Session.VideoStatus.SUBIDO
-            session.save(update_fields=["video_url", "video_status", "updated_at"])
+            update_fields = ["video_url", "video_status", "updated_at"]
+            if (
+                isinstance(duration_minutes, int)
+                and duration_minutes > 0
+                and not session.duration_minutes
+            ):
+                session.duration_minutes = duration_minutes
+                update_fields.append("duration_minutes")
+            session.save(update_fields=update_fields)
         elif not ok:
             session.video_status = Session.VideoStatus.FALLO
             session.save(update_fields=["video_status", "updated_at"])

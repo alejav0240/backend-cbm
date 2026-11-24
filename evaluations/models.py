@@ -73,6 +73,22 @@ class ScaleEvaluation(models.Model):
         related_name="scale_evaluations",
     )
     evaluated_at = models.DateTimeField(default=timezone.now)
+    review_status = models.CharField(
+        max_length=20,
+        choices=(
+            ("pending", "Pendiente de revisión"),
+            ("accepted", "Aceptada por especialista"),
+        ),
+        default="pending",
+    )
+    reviewed_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_scale_evaluations",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "scale_evaluations"

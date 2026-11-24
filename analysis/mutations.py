@@ -55,7 +55,8 @@ def _dispatch_to_ml(processing_run):
         "session_id": str(processing_run.session_id),
         "video_path": source_uri,
         "pipeline_version": processing_run.pipeline_version,
-        "skip_pose": os.getenv("ML_SKIP_POSE", "true").lower() in {"1", "true", "yes"},
+        "skip_pose": os.getenv("ML_SKIP_POSE", "false").lower() in {"1", "true", "yes"},
+        "pose_model": os.getenv("ML_POSE_MODEL", ""),
         "callback_url": callback_url,
     }
 
