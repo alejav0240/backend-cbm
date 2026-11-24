@@ -246,7 +246,7 @@ jobs:
           args: >-
             -Dsonar.projectKey=cbm-backend
             -Dsonar.sources=.
-            -Dsonar.exclusions=**/migrations/**,**/tests/**,**/.venv/**,**/venv/**,coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/tests/**,**/tests.py,**/test_*.py,**/.venv/**,**/venv/**,coverage.xml
             -Dsonar.python.version=3.12
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.qualitygate.wait=true
