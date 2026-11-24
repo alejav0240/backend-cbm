@@ -12,8 +12,8 @@ class BlogPost(models.Model):
         LATEX = "LATEX", "LaTeX"
 
     title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=280, unique=True, null=True, blank=True)
-    excerpt = models.TextField(blank=True, null=True, default="")
+    slug = models.SlugField(max_length=280, unique=True, blank=True)
+    excerpt = models.TextField(blank=True, default="")
     content = models.TextField()
     category = models.CharField(max_length=100)
     author = models.CharField(max_length=255)  # Puede ser un FK a User, pero por ahora seguimos la UI (string libre)
