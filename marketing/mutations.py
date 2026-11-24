@@ -106,8 +106,8 @@ class CreateLead(graphene.Mutation):
         real_campaign_id = get_db_id(campaign_id)
         lead = Lead.objects.create(
             name=name,
-            phone=phone,
-            email=email,
+            phone=phone or "",
+            email=email or "",
             campaign_id=real_campaign_id,
         )
         return CreateLead(lead=lead)

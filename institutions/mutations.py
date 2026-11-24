@@ -27,8 +27,8 @@ class CreateInstitution(graphene.Mutation):
 
         institution = Institution.objects.create(
             name=name,
-            contact_email=contact_email,
-            contact_phone=phone,
+            contact_email=contact_email or "",
+            contact_phone=phone or "",
         )
 
         return CreateInstitution(institution=institution)

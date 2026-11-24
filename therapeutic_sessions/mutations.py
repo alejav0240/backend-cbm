@@ -64,10 +64,10 @@ class CreateSession(graphene.Mutation):
             session_number=current_session_number,
             cycle_number=calculated_cycle,
             duration_minutes=duration_minutes,
-            notes=notes,
+            notes=notes or "",
 
             group_id=db_group_id,
-            video_url=video_url,
+            video_url=video_url or "",
         )
 
         return CreateSession(session=session)
