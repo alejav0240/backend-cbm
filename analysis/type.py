@@ -73,15 +73,12 @@ class ProcessingRunType(DjangoObjectType):
     def resolve_pipeline_stages(self, info):
         result = self.result_json if isinstance(self.result_json, dict) else {}
         stages = [dict(stage) for stage in result.get("pipeline_stages", [])]
-        if not stages:
-            return stages
-
         # La aceptación clínica DEMUCA cierra human_review. La revisión de
         # eventos para el dataset es una cola independiente y no debe bloquear
         # el pipeline clínico.
         from evaluations.models import ScaleEvaluation
 
-        reviewed_at = (
+        reviewed_at = stages and (
             ScaleEvaluation.objects.filter(
                 session_id=self.session_id,
                 scale__name__icontains="demuca",
@@ -91,17 +88,15 @@ class ProcessingRunType(DjangoObjectType):
             .values_list("reviewed_at", flat=True)
             .first()
         )
-        if reviewed_at is None:
-            return stages
-
-        for stage in stages:
-            if stage.get("id") == "human_review" and stage.get("status") != "completed":
-                stage.update(
-                    status="completed",
-                    progress=100,
-                    finished_at=reviewed_at.isoformat(),
-                    message="Evaluación DEMUCA aceptada por el especialista.",
-                )
+        if reviewed_at:
+            for stage in stages:
+                if stage.get("id") == "human_review" and stage.get("status") != "completed":
+                    stage.update(
+                        status="completed",
+                        progress=100,
+                        finished_at=reviewed_at.isoformat(),
+                        message="Evaluación DEMUCA aceptada por el especialista.",
+                    )
         return stages
 
     def resolve_semantic_status(self, info):

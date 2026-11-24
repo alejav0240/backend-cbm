@@ -96,6 +96,48 @@ def _service_authorized(info):
     return bool(expected) and hmac.compare_digest(received, expected)
 
 
+def _apply_run_status(processing_run, status, now):
+    processing_run.status = status
+    if status == ProcessingRun.Status.RUNNING and processing_run.started_at is None:
+        processing_run.started_at = now
+    if status in {
+        ProcessingRun.Status.COMPLETED,
+        ProcessingRun.Status.FAILED,
+        ProcessingRun.Status.CANCELLED,
+    }:
+        processing_run.finished_at = now
+
+
+def _normalized_result(result):
+    if not isinstance(result, dict):
+        return result
+    return {
+        **result,
+        "pipeline_stages": normalize_pipeline_stages(result.get("pipeline_stages")),
+        "semantic_status": result_semantic_status(result),
+    }
+
+
+def _upsert_artifacts(processing_run, artifacts):
+    if not isinstance(artifacts, list):
+        return
+    for payload in artifacts:
+        if not isinstance(payload, dict) or not payload.get("kind") or not payload.get("uri"):
+            continue
+        ProcessingArtifact.objects.update_or_create(
+            run=processing_run,
+            kind=payload["kind"],
+            defaults={
+                "uri": payload["uri"],
+                "sha256": payload.get("sha256"),
+                "mime_type": payload.get("mime_type"),
+                "size_bytes": payload.get("size_bytes"),
+                "training_authorized": payload.get("training_authorized") is True,
+                "metadata_json": payload.get("metadata", {}),
+            },
+        )
+
+
 class CreateProcessingRun(graphene.Mutation):
     class Arguments:
         session_id = graphene.ID(required=True)
@@ -155,28 +197,12 @@ class UpdateProcessingRun(graphene.Mutation):
         except ProcessingRun.DoesNotExist as error:
             raise GraphQLError("ProcessingRun no encontrado.") from error
 
-        valid_statuses = {choice for choice, _ in ProcessingRun.Status.choices}
-        if status not in valid_statuses:
+        if status not in {choice for choice, _ in ProcessingRun.Status.choices}:
             raise GraphQLError(f"Estado de procesamiento inválido: {status}")
 
-        now = django_timezone.now()
-        processing_run.status = status
-        if status == ProcessingRun.Status.RUNNING and processing_run.started_at is None:
-            processing_run.started_at = now
-        if status in {
-            ProcessingRun.Status.COMPLETED,
-            ProcessingRun.Status.FAILED,
-            ProcessingRun.Status.CANCELLED,
-        }:
-            processing_run.finished_at = now
+        _apply_run_status(processing_run, status, django_timezone.now())
         if result is not None:
-            if isinstance(result, dict):
-                result = {
-                    **result,
-                    "pipeline_stages": normalize_pipeline_stages(result.get("pipeline_stages")),
-                    "semantic_status": result_semantic_status(result),
-                }
-            processing_run.result_json = result
+            processing_run.result_json = _normalized_result(result)
         if source_sha256 is not None:
             processing_run.source_sha256 = source_sha256
         if error_code is not None:
@@ -185,22 +211,7 @@ class UpdateProcessingRun(graphene.Mutation):
             processing_run.error_message = error_message
         processing_run.save()
 
-        if isinstance(artifacts, list):
-            for payload in artifacts:
-                if not isinstance(payload, dict) or not payload.get("kind") or not payload.get("uri"):
-                    continue
-                ProcessingArtifact.objects.update_or_create(
-                    run=processing_run,
-                    kind=payload["kind"],
-                    defaults={
-                        "uri": payload["uri"],
-                        "sha256": payload.get("sha256"),
-                        "mime_type": payload.get("mime_type"),
-                        "size_bytes": payload.get("size_bytes"),
-                        "training_authorized": payload.get("training_authorized") is True,
-                        "metadata_json": payload.get("metadata", {}),
-                    },
-                )
+        _upsert_artifacts(processing_run, artifacts)
 
         return UpdateProcessingRun(processing_run=processing_run)
 
