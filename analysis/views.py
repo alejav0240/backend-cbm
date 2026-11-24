@@ -94,32 +94,30 @@ def _persist_callback_artifacts(run, artifacts):
         )
 
 
-@csrf_exempt
-@require_POST
-def processing_callback(request):
-    if not _authorized(request):
-        return JsonResponse({"error": "service_not_authorized"}, status=401)
-
+def _parse_callback_payload(request):
     try:
-        payload = json.loads(request.body.decode("utf-8"))
+        return json.loads(request.body.decode("utf-8")), None
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return JsonResponse({"error": "invalid_json"}, status=400)
+        return None, JsonResponse({"error": "invalid_json"}, status=400)
 
+
+def _find_callback_run(payload):
     run_id = payload.get("run_id")
     if not isinstance(run_id, str):
-        return JsonResponse({"error": "run_id_required"}, status=400)
-
+        return None, JsonResponse({"error": "run_id_required"}, status=400)
     try:
-        run = ProcessingRun.objects.get(external_run_id=run_id)
+        return ProcessingRun.objects.get(external_run_id=run_id), None
     except ProcessingRun.DoesNotExist:
-        return JsonResponse({"error": "processing_run_not_found"}, status=404)
+        return None, JsonResponse({"error": "processing_run_not_found"}, status=404)
 
+
+def _validate_callback_status(run, payload):
     status = payload.get("status")
     valid_statuses = {choice for choice, _ in ProcessingRun.Status.choices}
     if status not in valid_statuses:
-        return JsonResponse({"error": "invalid_status"}, status=400)
+        return None, JsonResponse({"error": "invalid_status"}, status=400)
     if status not in VALID_STATUS_TRANSITIONS.get(run.status, set()):
-        return JsonResponse(
+        return None, JsonResponse(
             {
                 "error": "invalid_status_transition",
                 "from": run.status,
@@ -127,6 +125,36 @@ def processing_callback(request):
             },
             status=409,
         )
+    return status, None
+
+
+def _persist_completed_callback(run):
+    evaluation = persist_demuca_evaluation(run)
+    if evaluation:
+        run.metadata_json = {
+            **(run.metadata_json or {}),
+            "demuca_evaluation_id": evaluation.pk,
+            "demuca_persistence": "completed",
+        }
+        run.save(update_fields=["metadata_json", "updated_at"])
+    persist_annotation_cases(run, run.result_json)
+
+
+@csrf_exempt
+@require_POST
+def processing_callback(request):
+    if not _authorized(request):
+        return JsonResponse({"error": "service_not_authorized"}, status=401)
+
+    payload, response = _parse_callback_payload(request)
+    if response:
+        return response
+    run, response = _find_callback_run(payload)
+    if response:
+        return response
+    status, response = _validate_callback_status(run, payload)
+    if response:
+        return response
 
     _update_run_status(run, status)
     run.result_json = _normalize_callback_result(payload)
@@ -139,15 +167,7 @@ def processing_callback(request):
     run.save()
 
     if status == ProcessingRun.Status.COMPLETED:
-        evaluation = persist_demuca_evaluation(run)
-        if evaluation:
-            run.metadata_json = {
-                **(run.metadata_json or {}),
-                "demuca_evaluation_id": evaluation.pk,
-                "demuca_persistence": "completed",
-            }
-            run.save(update_fields=["metadata_json", "updated_at"])
-        persist_annotation_cases(run, run.result_json)
+        _persist_completed_callback(run)
 
     artifacts = run.result_json.get("artifacts") or run.result_json.get("derived_artifacts")
     _persist_callback_artifacts(run, artifacts)

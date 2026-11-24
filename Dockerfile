@@ -63,6 +63,11 @@ RUN rm -f /wheels/opencv_python_headless*.whl \
 
 COPY --from=builder --chown=app:app /build /app
 
+# Application code is immutable at runtime; only runtime data directories stay writable.
+RUN find /app -type d -exec chmod 0555 {} + \
+    && find /app -type f -exec chmod 0444 {} + \
+    && chmod 0755 /app/media /app/staticfiles
+
 USER app
 
 EXPOSE 8000
