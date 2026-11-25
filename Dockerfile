@@ -61,7 +61,8 @@ COPY --from=builder /build /app
 # Application code is immutable at runtime; only runtime data directories stay writable.
 RUN find /app -type d -exec chmod 0555 {} + \
     && find /app -type f -exec chmod 0444 {} + \
-    && chmod 0755 /app/media /app/staticfiles
+    && chmod 0755 /app/media /app/staticfiles \
+    && chown -R nonroot:nonroot /app/media /app/staticfiles
 
 USER nonroot
 
