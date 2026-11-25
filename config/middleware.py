@@ -300,25 +300,3 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
         if self._is_post(request, "/api/ml/processing-callback/"):
             return self._process_ml_callback(request)
         self._process_graphql(request)
-
-            return
-        payload = self._graphql_payload(request)
-        if not isinstance(payload, dict) or not _is_service_operation(
-            payload.get("query"),
-            payload.get("operationName"),
-        ):
-            return
-        service_keys = {
-            getattr(settings, "ONEDRIVE_SERVICE_KEY", None) or os.getenv("ONEDRIVE_SERVICE_KEY"),
-            os.getenv("MULTIMODAL_SERVICE_KEY"),
-        }
-        provided = request.headers.get("X-Service-Key", "")
-        if any(self._valid_service_key(provided, key) for key in service_keys):
-            request._dont_enforce_csrf_checks = True
-
-    def process_request(self, request):
-        if self._process_pipeline_upload(request):
-            return
-        if self._is_post(request, "/api/ml/processing-callback/"):
-            return self._process_ml_callback(request)
-        self._process_graphql(request)
