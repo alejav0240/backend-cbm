@@ -347,8 +347,24 @@ jobs:
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         run: |
           set -euo pipefail
-          docker push "$REGISTRY_IMAGE:${GITHUB_SHA}"
-          docker push "$REGISTRY_IMAGE:latest"
+          push_with_retry() {
+            local image="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              echo "Pushing $image (attempt $attempt/3)"
+              if docker push "$image"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::GHCR push failed after 3 attempts: $image"
+            return 1
+          }
+
+          push_with_retry "$REGISTRY_IMAGE:${GITHUB_SHA}"
+          push_with_retry "$REGISTRY_IMAGE:latest"
 
       - name: Show image vulnerabilities in logs
         if: ${{ failure() }}
