@@ -41,6 +41,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apk add --no-cache \
+        ffmpeg \
         glib \
         libglvnd \
         libsndfile \
