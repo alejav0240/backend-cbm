@@ -91,47 +91,234 @@ class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
     el resto de peticiones conservan la protección CSRF completa.
     """
 
-    def process_request(self, request):
-        if (
-            request.path == "/api/pipeline-multimodal/trabajos/"
-            and request.method == "POST"
+    @staticmethod
+    def _valid_service_key(provided, expected):
+        return bool(
+            expected
+            and provided
+            and secrets.compare_digest(provided, expected)
+        )
+
+    @staticmethod
+    def _is_post(request, path):
+        return request.path == path and request.method == "POST"
+
+    def _process_pipeline_upload(self, request):
+        if not self._is_post(request, "/api/pipeline-multimodal/trabajos/"):
+            return False
+        if self._valid_service_key(
+            request.headers.get("X-Service-Key", ""),
+            os.getenv("MULTIMODAL_SERVICE_KEY", ""),
         ):
-            provided = request.headers.get("X-Service-Key", "")
-            expected = os.getenv("MULTIMODAL_SERVICE_KEY", "")
-            if expected and provided and secrets.compare_digest(provided, expected):
-                request._dont_enforce_csrf_checks = True
-            return
-
-        if request.path == "/api/ml/processing-callback/" and request.method == "POST":
-            provided = request.headers.get("X-ML-Service-Key", "")
-            expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv(
-                "ML_SERVICE_API_KEY", ""
-            )
-            if not expected or not provided or not secrets.compare_digest(provided, expected):
-                return JsonResponse({"error": "service_not_authorized"}, status=401)
             request._dont_enforce_csrf_checks = True
-            return
+        return True
 
+    def _process_ml_callback(self, request):
+        if not self._is_post(request, "/api/ml/processing-callback/"):
+            return False
+
+        expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv(
+            "ML_SERVICE_API_KEY", ""
+        )
+
+        if not self._valid_service_key(
+            request.headers.get("X-ML-Service-Key", ""),
+            expected,
+        ):
+            return JsonResponse({"error": "service_not_authorized"}, status=401)
+
+        request._dont_enforce_csrf_checks = True
+        return None
+
+    @staticmethod
+    def _graphql_payload(request):
+        try:
+            return json.loads(request.body.decode("utf-8"))
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+    def _process_graphql(self, request):
+        if request.path != "/graphql/":import os
+import json
+import secrets
+
+from django.conf import settings
+from django.http import JsonResponse
+from django.utils.deprecation import MiddlewareMixin
+from graphql import GraphQLError, parse
+from graphql.language.ast import (
+    FieldNode,
+    FragmentDefinitionNode,
+    FragmentSpreadNode,
+    OperationDefinitionNode,
+)
+
+
+SERVICE_OPERATIONS = frozenset(
+    {
+        "marcarSubidaEnProgreso",
+        "completarSubidaSesion",
+    }
+)
+
+
+def _contains_service_operation(node, fragments, visited_fragments=None):
+    visited_fragments = visited_fragments or set()
+    if isinstance(node, FieldNode) and node.name.value in SERVICE_OPERATIONS:
+        return True
+
+    selection_set = getattr(node, "selection_set", None)
+    if not selection_set:
+        return False
+
+    for child in selection_set.selections:
+        if isinstance(child, FragmentSpreadNode):
+            fragment_name = child.name.value
+            if fragment_name in visited_fragments:
+                continue
+            fragment = fragments.get(fragment_name)
+            if fragment and _contains_service_operation(
+                fragment,
+                fragments,
+                visited_fragments | {fragment_name},
+            ):
+                return True
+        elif _contains_service_operation(child, fragments, visited_fragments):
+            return True
+    return False
+
+
+def _is_service_operation(query, operation_name=None):
+    if not isinstance(query, str) or not query.strip():
+        return False
+    try:
+        document = parse(query)
+    except (GraphQLError, TypeError):
+        return False
+    operations = [
+        definition
+        for definition in document.definitions
+        if isinstance(definition, OperationDefinitionNode)
+    ]
+    fragments = {
+        definition.name.value: definition
+        for definition in document.definitions
+        if isinstance(definition, FragmentDefinitionNode) and definition.name
+    }
+    if operation_name is not None:
+        if not isinstance(operation_name, str):
+            return False
+        operations = [
+            operation
+            for operation in operations
+            if operation.name and operation.name.value == operation_name
+        ]
+    elif len(operations) != 1:
+        return False
+
+    return len(operations) == 1 and _contains_service_operation(operations[0], fragments)
+
+
+class ServiceKeyCSRFExemptMiddleware(MiddlewareMixin):
+    """Exime del chequeo CSRF solo a peticiones servicio-a-servicio con X-Service-Key válido.
+
+    El upload worker de Next.js corre server-side y su fetch a /graphql/ no envía
+    cabecera Origin ni Referer, por lo que Django (HTTPS vía SECURE_PROXY_SSL_HEADER)
+    responde 403 "Referer checking failed" antes de validar el token CSRF.
+
+    Igual que @csrf_exempt en onedrive/views.py, la confianza se basa en el secreto
+    compartido (ONEDRIVE_SERVICE_KEY): si la cabecera coincide, se salta el chequeo;
+    el resto de peticiones conservan la protección CSRF completa.
+    """
+
+    @staticmethod
+    def _valid_service_key(provided, expected):
+        return bool(
+            expected
+            and provided
+            and secrets.compare_digest(provided, expected)
+        )
+
+    @staticmethod
+    def _is_post(request, path):
+        return request.path == path and request.method == "POST"
+
+    def _process_pipeline_upload(self, request):
+        if not self._is_post(request, "/api/pipeline-multimodal/trabajos/"):
+            return False
+        if self._valid_service_key(
+            request.headers.get("X-Service-Key", ""),
+            os.getenv("MULTIMODAL_SERVICE_KEY", ""),
+        ):
+            request._dont_enforce_csrf_checks = True
+        return True
+
+    def _process_ml_callback(self, request):
+        if not self._is_post(request, "/api/ml/processing-callback/"):
+            return False
+
+        expected = getattr(settings, "ML_SERVICE_API_KEY", "") or os.getenv(
+            "ML_SERVICE_API_KEY", ""
+        )
+
+        if not self._valid_service_key(
+            request.headers.get("X-ML-Service-Key", ""),
+            expected,
+        ):
+            return JsonResponse({"error": "service_not_authorized"}, status=401)
+
+        request._dont_enforce_csrf_checks = True
+        return None
+
+    @staticmethod
+    def _graphql_payload(request):
+        try:
+            return json.loads(request.body.decode("utf-8"))
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+    def _process_graphql(self, request):
         if request.path != "/graphql/":
             return
-
-        try:
-            payload = json.loads(request.body.decode("utf-8"))
-        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
-            return
-
+        payload = self._graphql_payload(request)
         if not isinstance(payload, dict) or not _is_service_operation(
             payload.get("query"),
             payload.get("operationName"),
         ):
             return
-
         service_keys = {
             getattr(settings, "ONEDRIVE_SERVICE_KEY", None) or os.getenv("ONEDRIVE_SERVICE_KEY"),
             os.getenv("MULTIMODAL_SERVICE_KEY"),
         }
         provided = request.headers.get("X-Service-Key", "")
-        if provided and any(
-            key and secrets.compare_digest(provided, key) for key in service_keys
-        ):
+        if any(self._valid_service_key(provided, key) for key in service_keys):
             request._dont_enforce_csrf_checks = True
+
+    def process_request(self, request):
+        if self._process_pipeline_upload(request):
+            return
+        if self._is_post(request, "/api/ml/processing-callback/"):
+            return self._process_ml_callback(request)
+        self._process_graphql(request)
+
+            return
+        payload = self._graphql_payload(request)
+        if not isinstance(payload, dict) or not _is_service_operation(
+            payload.get("query"),
+            payload.get("operationName"),
+        ):
+            return
+        service_keys = {
+            getattr(settings, "ONEDRIVE_SERVICE_KEY", None) or os.getenv("ONEDRIVE_SERVICE_KEY"),
+            os.getenv("MULTIMODAL_SERVICE_KEY"),
+        }
+        provided = request.headers.get("X-Service-Key", "")
+        if any(self._valid_service_key(provided, key) for key in service_keys):
+            request._dont_enforce_csrf_checks = True
+
+    def process_request(self, request):
+        if self._process_pipeline_upload(request):
+            return
+        if self._is_post(request, "/api/ml/processing-callback/"):
+            return self._process_ml_callback(request)
+        self._process_graphql(request)

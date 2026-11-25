@@ -48,7 +48,7 @@ class CreateForm(graphene.Mutation):
     @module_permission_required('formularios', action='add')
     def mutate(self, info, name, questions, description=None):
         with transaction.atomic():
-            form = Form.objects.create(name=name, description=description)
+            form = Form.objects.create(name=name, description=description or "")
             for idx, q in enumerate(questions):
                 FormQuestion.objects.create(
                     form=form,

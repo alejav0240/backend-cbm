@@ -52,6 +52,30 @@ class ServiceKeyCSRFExemptMiddlewareTests(SimpleTestCase):
 
         self.assertFalse(hasattr(request, "_dont_enforce_csrf_checks"))
 
+    @override_settings(ML_SERVICE_API_KEY="callback-service-key")
+    def test_ml_callback_key_bypasses_csrf_for_callback_only(self):
+        request = self.factory.post(
+            "/api/ml/processing-callback/",
+            HTTP_X_ML_SERVICE_KEY="callback-service-key",
+        )
+
+        response = self.middleware.process_request(request)
+
+        self.assertIsNone(response)
+        self.assertTrue(request._dont_enforce_csrf_checks)
+
+    @override_settings(ML_SERVICE_API_KEY="callback-service-key")
+    def test_ml_callback_without_valid_key_is_rejected(self):
+        request = self.factory.post(
+            "/api/ml/processing-callback/",
+            HTTP_X_ML_SERVICE_KEY="wrong-key",
+        )
+
+        response = self.middleware.process_request(request)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(hasattr(request, "_dont_enforce_csrf_checks"))
+
     def test_service_key_does_not_bypass_csrf_for_regular_graphql_operations(self):
         request = self._request("query { me { username } }")
 
