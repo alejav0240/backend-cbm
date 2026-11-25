@@ -1,7 +1,10 @@
 import http from "k6/http";
 import { check } from "k6";
 
-const targetUrl = (__ENV.TARGET_URL || "").replace(/\/+$/, "");
+let targetUrl = __ENV.TARGET_URL || "";
+while (targetUrl.endsWith("/")) {
+  targetUrl = targetUrl.slice(0, -1);
+}
 
 export const options = {
   vus: 2,
