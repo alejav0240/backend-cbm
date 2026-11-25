@@ -12,7 +12,13 @@ from evaluations.models import Scale, ScaleEvaluation, Subscale
 from therapeutic_sessions.models import Session
 from users.models import User
 
-from .annotation_models import AnnotationCase
+from .annotation_models import AnnotationCase, AnnotationReview
+from .annotation_mutations import (
+    AdjudicateAnnotationCase,
+    AssignParticipantAnchor,
+    ReviewAnnotationCase,
+)
+from .annotation_queries import AnnotationQuery
 from .models import ProcessingRun
 from .mutations import (
     UpdateProcessingRun,
@@ -411,6 +417,123 @@ class DemucaPersistenceTests(TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.error_code, "ml_dispatch_not_configured")
         self.assertEqual(self.run.status, ProcessingRun.Status.FAILED)
+
+    def test_processing_dispatch_sends_authenticated_payload_and_retries(self):
+        self.therapist.is_staff = True
+        self.therapist.save(update_fields=["is_staff"])
+        self.run.source_uri = "https://example.com/session.mp4"
+        self.run.save(update_fields=["source_uri"])
+
+        with patch.dict(
+            os.environ,
+            {
+                "ML_ORCHESTRATOR_URL": "https://ml.example.com/",
+                "ML_CALLBACK_URL": "https://api.example.com/callback",
+                "ML_ORCHESTRATOR_API_KEY": "orchestrator-key",
+                "ML_SKIP_POSE": "true",
+                "ML_POSE_MODEL": "pose-v2",
+            },
+        ), patch("analysis.mutations.threading.Thread") as thread, patch(
+            "analysis.mutations.urlrequest.urlopen"
+        ) as urlopen:
+            _dispatch_to_ml(self.run)
+            send = thread.call_args.kwargs["target"]
+            send()
+            request = urlopen.call_args.args[0]
+            self.assertEqual(request.full_url, "https://ml.example.com/v1/runs")
+            self.assertEqual(request.get_header("X-ml-service-key"), "orchestrator-key")
+            self.assertIn('"skip_pose": true', request.data.decode())
+
+        with patch.dict(
+            os.environ,
+            {
+                "ML_ORCHESTRATOR_URL": "https://ml.example.com",
+                "ML_CALLBACK_URL": "",
+            },
+        ), patch("analysis.mutations.threading.Thread") as thread, patch(
+            "analysis.mutations.urlrequest.urlopen",
+            side_effect=OSError("worker unavailable"),
+        ), patch("analysis.mutations.time.sleep"):
+            _dispatch_to_ml(self.run)
+            thread.call_args.kwargs["target"]()
+
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.error_code, "ml_dispatch_failed")
+
+    def test_annotation_query_and_review_mutations_cover_access_and_adjudication(self):
+        from analysis.annotation_models import ParticipantAnchor
+
+        case = AnnotationCase.objects.create(
+            run=self.run,
+            window_id="window-1",
+            start_seconds=1,
+            end_seconds=2,
+            modality="audio",
+            label="speech",
+        )
+        info = SimpleNamespace(context=SimpleNamespace(user=self.therapist))
+        self.therapist.is_staff = True
+        self.therapist.save(update_fields=["is_staff"])
+
+        queryset = AnnotationQuery.resolve_annotation_cases(
+            None, info, str(self.run.pk), status=AnnotationCase.Status.PENDING
+        )
+        self.assertEqual(list(queryset), [case])
+        self.assertEqual(
+            AnnotationQuery.resolve_annotation_cases(
+                None,
+                SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=False))),
+                str(self.run.pk),
+            ).count(),
+            0,
+        )
+
+        ReviewAnnotationCase.mutate(
+            None,
+            info,
+            case_id=str(case.pk),
+            decision=AnnotationReview.Decision.ACCEPT,
+        )
+        self.assertEqual(case.__class__.objects.get(pk=case.pk).status, AnnotationCase.Status.PENDING)
+
+        second_reviewer = User.objects.create_user(
+            username="annotation_reviewer",
+            email="annotation.reviewer@example.com",
+            password="test-password",
+            ci="99999999",
+            is_staff=True,
+        )
+        ReviewAnnotationCase.mutate(
+            None,
+            SimpleNamespace(context=SimpleNamespace(user=second_reviewer)),
+            case_id=str(case.pk),
+            decision=AnnotationReview.Decision.REJECT,
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.status, AnnotationCase.Status.NEEDS_ADJUDICATION)
+
+        AdjudicateAnnotationCase.mutate(
+            None,
+            info,
+            case_id=str(case.pk),
+            final_decision=AnnotationReview.Decision.ACCEPT,
+            rationale="Reviewed by lead therapist",
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.status, AnnotationCase.Status.ACCEPTED)
+
+        anchor = AssignParticipantAnchor.mutate(
+            None,
+            info,
+            run_id=str(self.run.pk),
+            track_id="track-1",
+            role="patient",
+            anchor_seconds=1.5,
+            bounding_box={"x": 1},
+            confidence=0.9,
+        ).anchor
+        self.assertEqual(anchor.track_id, "track-1")
+        self.assertEqual(ParticipantAnchor.objects.filter(run=self.run).count(), 1)
 
     def test_processing_run_type_resolvers_cover_review_and_metadata_paths(self):
         from .type import ProcessingRunType
