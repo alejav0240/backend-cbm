@@ -56,7 +56,7 @@ RUN rm -f /wheels/opencv_python_headless*.whl \
     && mkdir -p /app/media /app/staticfiles \
     && chown -R nonroot:nonroot /app
 
-COPY --from=builder --chown=nonroot:nonroot /build /app
+COPY --from=builder /build /app
 
 # Application code is immutable at runtime; only runtime data directories stay writable.
 RUN find /app -type d -exec chmod 0555 {} + \
