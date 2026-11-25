@@ -261,13 +261,15 @@ jobs:
   docker:
     name: "Phase 6 - Build and scan Docker image"
     runs-on: ubuntu-24.04
-    needs: [fast-checks, dependency-security, tests, sast]
+    needs: [fast-checks, dependency-security, tests, sast, sonar]
     timeout-minutes: 40
     permissions:
       contents: read
+      packages: write
       security-events: write
     env:
       IMAGE: cbm-backend:${{ github.sha }}
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -282,7 +284,10 @@ jobs:
           file: ./Dockerfile
           load: true
           push: false
-          tags: ${{ env.IMAGE }}
+          tags: |
+            ${{ env.IMAGE }}
+            ${{ env.REGISTRY_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY_IMAGE }}:latest
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0.24.3
@@ -329,6 +334,21 @@ jobs:
             echo "Trivy found $findings HIGH/CRITICAL image findings."
             exit 1
           fi
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GitHub Container Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        run: |
+          set -euo pipefail
+          docker push "$REGISTRY_IMAGE:${GITHUB_SHA}"
+          docker push "$REGISTRY_IMAGE:latest"
 
       - name: Show image vulnerabilities in logs
         if: ${{ failure() }}
