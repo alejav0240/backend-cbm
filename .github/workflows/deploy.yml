@@ -261,13 +261,15 @@ jobs:
   docker:
     name: "Phase 6 - Build and scan Docker image"
     runs-on: ubuntu-24.04
-    needs: [fast-checks, dependency-security, tests, sast]
+    needs: [fast-checks, dependency-security, tests, sast, sonar]
     timeout-minutes: 40
     permissions:
       contents: read
+      packages: write
       security-events: write
     env:
       IMAGE: cbm-backend:${{ github.sha }}
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -282,7 +284,10 @@ jobs:
           file: ./Dockerfile
           load: true
           push: false
-          tags: ${{ env.IMAGE }}
+          tags: |
+            ${{ env.IMAGE }}
+            ${{ env.REGISTRY_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY_IMAGE }}:latest
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0.24.3
@@ -329,6 +334,21 @@ jobs:
             echo "Trivy found $findings HIGH/CRITICAL image findings."
             exit 1
           fi
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GitHub Container Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        run: |
+          set -euo pipefail
+          docker push "$REGISTRY_IMAGE:${GITHUB_SHA}"
+          docker push "$REGISTRY_IMAGE:latest"
 
       - name: Show image vulnerabilities in logs
         if: ${{ failure() }}
@@ -382,6 +402,11 @@ jobs:
     environment: production
     timeout-minutes: 20
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
       - name: Prepare SSH identity
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -395,6 +420,25 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
 
+      - name: Synchronize backend source
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='.venv' \
+            --exclude='venv' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='*.log' \
+            --exclude='.env' \
+            --exclude='media' \
+            -czf - . | ssh -i "$HOME/.ssh/deploy_key" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "$SSH_USER@$SSH_HOST" 'mkdir -p /opt/cbm/backend && tar -xzf - -C /opt/cbm/backend'
+
       - name: Verify SSH connection
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -404,24 +448,24 @@ jobs:
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" 'echo SSH connection OK'
 
-      - name: Deploy via SSH
+      - name: Deploy backend containers via SSH
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/cbm/deploy' }}
         run: |
           set -euo pipefail
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" bash -s <<'DEPLOY_EOF'
+            "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_PATH" <<'DEPLOY_EOF'
           set -euo pipefail
-          cd ~/cbm-backend
-          git fetch origin master
-          git reset --hard origin/master
-          source venv/bin/activate
-          pip install -r requirements.txt
-          python manage.py migrate --noinput
-          python manage.py collectstatic --noinput
-          pm2 restart cbm-backend
-          pm2 save
+          DEPLOY_PATH="$1"
+          cd "$DEPLOY_PATH"
+          test -f docker-compose.yml
+          test -f .env
+          docker compose config >/dev/null
+          docker compose up -d --build db backend worker orchestrator
+          docker compose exec -T backend python manage.py migrate --noinput
+          docker compose ps
           DEPLOY_EOF
 
       - name: Verify deployed health endpoint
