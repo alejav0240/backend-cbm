@@ -480,7 +480,9 @@ jobs:
           test -f .env
           docker compose config >/dev/null
           docker compose up -d --build db backend worker orchestrator
-          docker compose exec -T backend python manage.py migrate --noinput
+          # Reconcile legacy databases whose initial tables exist but whose
+          # initial migration is missing from django_migrations.
+          docker compose exec -T backend python manage.py migrate --fake-initial --noinput
           docker compose ps
           DEPLOY_EOF
 
